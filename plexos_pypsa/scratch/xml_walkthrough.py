@@ -2,8 +2,17 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
 # Create a database from an XML file
-file_xml = "path/to/your/xml/file.xml"  # Replace with your XML file path
+file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
 prog_db = PlexosDB.from_xml(file_xml)
+
+
+# print all generators in the model alphabetically in a nice format
+def print_objects_alphabetically(objects, object_type="object"):
+    objects.sort()
+    print(f"\n{object_type.capitalize()}s in prog_db:")
+    for obj in objects:
+        print(f"  - {obj}")
+
 
 # print classes
 prog_classes = prog_db.list_classes()
@@ -15,14 +24,6 @@ prog_classes.sort()
 print("\nAvailable classes in prog_db:")
 for cls in prog_classes:
     print(f"  - {cls}")
-
-
-# print all generators in the model alphabetically in a nice format
-def print_objects_alphabetically(objects, object_type="object"):
-    objects.sort()
-    print(f"\n{object_type.capitalize()}s in prog_db:")
-    for obj in objects:
-        print(f"  - {obj}")
 
 
 # list all generators in the model
@@ -40,6 +41,11 @@ prog_constraints = prog_db.list_objects_by_class(ClassEnum.Constraint)
 print(f"Found {len(prog_constraints)} constraints")
 print_objects_alphabetically(prog_constraints, object_type="constraint")
 
+# list all storage in the model
+prog_storage = prog_db.list_objects_by_class(ClassEnum.Storage)
+print(f"Found {len(prog_storage)} storage units")
+print_objects_alphabetically(prog_storage, object_type="storage")
+
 
 # function: given a generator, node, etc,
 # print all properties of the generator
@@ -55,6 +61,7 @@ def print_properties(db, class_enum, name):
 print_properties(prog_db, ClassEnum.Generator, "COOPGWF1")
 print_properties(prog_db, ClassEnum.Node, "CNSW")
 print_properties(prog_db, ClassEnum.Constraint, "CNSW-SNW North")
+print_properties(prog_db, ClassEnum.Storage, "Kidston Lower")
 
 # check valid properties for generators
 gen_props = prog_db.list_valid_properties(
@@ -110,6 +117,12 @@ mem_constraint = prog_db.get_memberships_system(
     "ResourceLimit_T3_Solar", object_class=ClassEnum.Constraint
 )
 print_memberships(mem_constraint)
+
+# check memberships of storage
+mem_storage = prog_db.get_memberships_system(
+    "Kidston Lower", object_class=ClassEnum.Storage
+)
+print_memberships(mem_storage)
 
 
 # non-comprehensive list of all classes
