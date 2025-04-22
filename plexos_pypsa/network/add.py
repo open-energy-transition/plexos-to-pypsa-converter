@@ -1,8 +1,13 @@
+import logging
+
 from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
 from plexos_pypsa.db.parse import find_bus_for_object
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def add_buses(network: Network, db: PlexosDB):
@@ -108,7 +113,84 @@ def add_generators(network: Network, db: PlexosDB):
             print(f"  - {g}")
 
 
-# --- Add Transmission Lines ---
+def add_storage(network: Network, db: PlexosDB) -> None:
+    """Adds storage units from PLEXOS input db to a PyPSA network."""
+
+    storage_units = db.list_objects_by_class(ClassEnum.Storage)
+    logger.info(f"Found {len(storage_units)} storage units in db")
+
+    skipped_units = []
+
+    for su in storage_units:
+        try:
+            props = db.get_object_properties(ClassEnum.Storage, su)
+
+            # Helper to look up a property by name
+            def get_prop(name):
+                for p in props:
+                    if p["property"] == name:
+                        return float(p["value"])
+                return None
+
+            # Infer the bus from memberships
+            memberships = db.get_memberships_system(su, object_class=ClassEnum.Storage)
+            bus = next(
+                (
+                    m["name"]
+                    for m in memberships
+                    if m["collection_name"]
+                    in {"Storage From", "Head Storage", "Tail Storage", "Storage To"}
+                ),
+                None,
+            )
+            if bus is None:
+                logger.warning(f"Skipping {su}: no connected bus found via memberships")
+                skipped_units.append(su)
+                continue
+
+            # Get properties from PLEXOS
+            max_volume = get_prop("Max Volume")  # in 1000 m³
+            min_volume = get_prop("Min Volume")  # in 1000 m³
+            initial_volume = get_prop("Initial Volume")  # in 1000 m³
+            natural_inflow = get_prop("Natural Inflow")  # in cumec
+
+            # Calculate energy capacity (e.g., using max_volume - min_volume)
+            if max_volume is not None and min_volume is not None:
+                energy_capacity = max_volume - min_volume  # in 1000 m³
+            else:
+                logger.warning(f"Skipping {su}: missing volume information")
+                skipped_units.append(su)
+                continue
+
+            # Assume power capacity is proportional to energy capacity if not provided
+            power_capacity = energy_capacity / 10  # Example: arbitrary ratio
+
+            # Default efficiencies if not provided
+            efficiency_store = 0.9  # 90% efficiency
+            efficiency_dispatch = 0.9  # 90% efficiency
+
+            # Add storage unit to the PyPSA network
+            network.storage_units.loc[su] = {
+                "bus": bus,
+                "p_nom": power_capacity,
+                "max_hours": energy_capacity / power_capacity,
+                "efficiency_store": efficiency_store,
+                "efficiency_dispatch": efficiency_dispatch,
+                "carrier": "hydro",  # Assuming hydro storage
+                "name": su,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to add storage unit {su}: {e}")
+            skipped_units.append(su)
+
+    logger.info(
+        f"Added {len(storage_units) - len(skipped_units)} storage units to network"
+    )
+    if skipped_units:
+        logger.info(f"Skipped {len(skipped_units)} storage units: {skipped_units}")
+
+
 def add_lines(network: Network, db: PlexosDB):
     """
     Adds transmission lines to the given network based on data from the database.
