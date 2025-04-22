@@ -1,4 +1,4 @@
-def find_bus_for_generator(db, object_name, object_class):
+def find_bus_for_object(db, object_name, object_class):
     """
     Finds the associated bus (Node) for a given object (e.g., Generator).
 

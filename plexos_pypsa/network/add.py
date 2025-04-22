@@ -2,7 +2,7 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import find_bus_for_generator
+from plexos_pypsa.db.parse import find_bus_for_object
 
 
 def add_buses(network: Network, db: PlexosDB):
@@ -94,7 +94,7 @@ def add_generators(network: Network, db: PlexosDB):
             p_max = 0.0  # Or continue if you want to skip those too
 
         # Find associated bus/node
-        bus = find_bus_for_generator(db, gen, ClassEnum.Generator)
+        bus = find_bus_for_object(db, gen, ClassEnum.Generator)
         if bus is None:
             print(f"Warning: No associated bus found for generator {gen}")
             bus = "default"
