@@ -60,7 +60,7 @@ def print_properties(db, class_enum, name):
 
 print_properties(prog_db, ClassEnum.Generator, "COOPGWF1")
 print_properties(prog_db, ClassEnum.Node, "CNSW")
-print_properties(prog_db, ClassEnum.Constraint, "CNSW-SNW North")
+print_properties(prog_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(prog_db, ClassEnum.Storage, "Kidston Lower")
 
 # check valid properties for generators
@@ -114,7 +114,7 @@ print_memberships(mem_node)
 
 # check memberships of constraint
 mem_constraint = prog_db.get_memberships_system(
-    "ResourceLimit_T3_Solar", object_class=ClassEnum.Constraint
+    "2050 Emissions Budget 4", object_class=ClassEnum.Constraint
 )
 print_memberships(mem_constraint)
 
@@ -134,3 +134,42 @@ prog_db.list_objects_by_class(ClassEnum.Line)
 prog_db.list_objects_by_class(ClassEnum.Constraint)
 prog_db.list_objects_by_class(ClassEnum.Transmission)
 prog_db.list_objects_by_class(ClassEnum.MLF)
+
+# for every constraint, list the properties and the memberships
+# write this into a txt file
+
+
+def write_constraints_to_file(db, filename):
+    with open(filename, "w") as f:
+        for constraint in db.list_objects_by_class(ClassEnum.Constraint):
+            f.write(f"Constraint: {constraint}\n")
+            properties = db.get_object_properties(ClassEnum.Constraint, constraint)
+            for prop in properties:
+                f.write(
+                    f"  - {prop['property']}: {prop['value']} {prop['unit'] or ''}\n"
+                )
+                if prop["scenario"]:
+                    f.write(f"    Scenario: {prop['scenario']}\n")
+            memberships = db.get_memberships_system(
+                constraint, object_class=ClassEnum.Constraint
+            )
+            f.write("Memberships:\n")
+            for membership in memberships:
+                f.write(
+                    f"  - Membership ID: {membership.get('membership_id', 'N/A')}\n"
+                )
+                f.write(f"    Name: {membership.get('name', 'Unknown')}\n")
+                f.write(
+                    f"    Child Class ID: {membership.get('child_class_id', 'N/A')}\n"
+                )
+                f.write(f"    Class Name: {membership.get('class', 'Unknown')}\n")
+                f.write(
+                    f"    Collection ID: {membership.get('collection_id', 'N/A')}\n"
+                )
+                f.write(
+                    f"    Collection Name: {membership.get('collection_name', 'Unknown')}\n"
+                )
+            f.write("\n")
+
+
+write_constraints_to_file(prog_db, "constraints.txt")
