@@ -425,6 +425,7 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
                     "type": "primary_energy",
                     "sense": "<=" if sense == -1 else ">=",
                     "constant": rhs,
+                    "carrier_attribute": "emissions",
                 }
                 logger.info(
                     f"Applied emissions budget of {rhs} to constraint {constraint}"
