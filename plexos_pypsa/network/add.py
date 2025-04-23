@@ -52,9 +52,7 @@ def add_generators(network: Network, db: PlexosDB):
 
     This function retrieves generator objects from the provided Plexos database,
     extracts their properties, and adds them to the PyPSA network. If a generator
-    lacks properties or an associated bus, it is either skipped or assigned default
-    values. If a generator has no properties at all, it is skipped and reported at
-    the end.
+    lacks properties or an associated bus, it is skipped and reported at the end.
 
     Parameters
     ----------
@@ -71,8 +69,7 @@ def add_generators(network: Network, db: PlexosDB):
     Notes
     -----
     - Generators without a "Max Capacity" property will have their `p_nom` set to 0.0.
-    - Generators without an associated bus will be assigned to a default bus named "default".
-    - A warning is printed for each generator missing required data.
+    - Generators without an associated bus will be skipped and reported.
     - A summary of skipped generators is printed at the end.
 
     Examples
@@ -82,6 +79,7 @@ def add_generators(network: Network, db: PlexosDB):
     >>> add_generators(network, db)
     """
     empty_generators = []
+    skipped_generators = []
     generators = db.list_objects_by_class(ClassEnum.Generator)
 
     for gen in generators:
@@ -97,20 +95,27 @@ def add_generators(network: Network, db: PlexosDB):
         )
         if p_max is None:
             print(f"Warning: 'Max Capacity' not found for {gen}")
-            p_max = 0.0  # Or continue if you want to skip those too
+            p_max = 0.0  # NOTE: or change to `continue` to skip this generator?
 
         # Find associated bus/node
         bus = find_bus_for_object(db, gen, ClassEnum.Generator)
         if bus is None:
             print(f"Warning: No associated bus found for generator {gen}")
-            bus = "default"
+            skipped_generators.append(gen)
+            continue
 
+        # Add generator to the network
         network.add("Generator", gen, bus=bus, p_nom=p_max)
 
     # Report skipped generators
     if empty_generators:
         print(f"\nSkipped {len(empty_generators)} generators with no properties:")
         for g in empty_generators:
+            print(f"  - {g}")
+
+    if skipped_generators:
+        print(f"\nSkipped {len(skipped_generators)} generators with no associated bus:")
+        for g in skipped_generators:
             print(f"  - {g}")
 
 
