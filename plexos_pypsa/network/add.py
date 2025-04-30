@@ -42,7 +42,7 @@ def add_buses(network: Network, db: PlexosDB):
         voltage = next(
             (float(p["value"]) for p in props if p["property"] == "Voltage"), 110
         )  # default: 110kV
-        network.add("Bus", name=node, v_nom=voltage)
+        network.add("Bus", name=node)
     print(f"Added {len(nodes)} buses")
 
 
@@ -169,11 +169,11 @@ def add_storage(network: Network, db: PlexosDB) -> None:
                 continue
 
             # Assume power capacity is proportional to energy capacity if not provided
-            power_capacity = energy_capacity / 10  # Example: arbitrary ratio
+            power_capacity = energy_capacity / 10  # NOTE: arbitrary
 
             # Default efficiencies if not provided
-            efficiency_store = 0.9  # 90% efficiency
-            efficiency_dispatch = 0.9  # 90% efficiency
+            efficiency_store = 0.9  # 90% efficiency # NOTE: arbitrary
+            efficiency_dispatch = 0.9  # 90% efficiency # NOTE: arbitrary
 
             # Add storage unit to the PyPSA network
             network.storage_units.loc[su] = {
@@ -259,16 +259,16 @@ def add_lines(network: Network, db: PlexosDB):
         )
         length = next(
             (float(p["value"]) for p in props if p["property"] == "Length"), 1
-        )
+        )  # NOTE: change?
         r = next(
             (float(p["value"]) for p in props if p["property"] == "Resistance"), 0.05
-        )
+        )  # NOTE: change?
         x = next(
             (float(p["value"]) for p in props if p["property"] == "Reactance"), 0.2
-        )
+        )  # NOTE: change?
         s_nom = next(
             (float(p["value"]) for p in props if p["property"] == "Thermal Rating"), 100
-        )
+        )  # NOTE: change to Max Flow? but there can be multiple min flows and max flows
 
         if node_from in network.buses and node_to in network.buses:
             network.add(
@@ -457,7 +457,7 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
                         membership["class"] == "Generator"
                         and membership["name"] in network.generators.index
                     ):
-                        network.generators.loc[membership["name"], "p_nom_max"] = rhs
+                        network.generators.loc[membership["name"], "p_nom"] = rhs
                 logger.info(
                     f"Applied generation limit of {rhs} to generator {membership['name']}"
                 )
