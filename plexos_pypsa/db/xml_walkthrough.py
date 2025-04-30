@@ -35,22 +35,30 @@ for cls in mod_classes:
 # mod_db.list_objects_by_class(ClassEnum.Scenario)
 
 # list and print objects for various classes
-mod_generators = list_and_print_objects(mod_db, ClassEnum.Generator, "generator")
 mod_nodes = list_and_print_objects(mod_db, ClassEnum.Node, "node")
-mod_constraints = list_and_print_objects(mod_db, ClassEnum.Constraint, "constraint")
+mod_generators = list_and_print_objects(mod_db, ClassEnum.Generator, "generator")
 mod_storage = list_and_print_objects(mod_db, ClassEnum.Storage, "storage")
-mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
+mod_lines = list_and_print_objects(mod_db, ClassEnum.Line, "line")
+mod_constraints = list_and_print_objects(mod_db, ClassEnum.Constraint, "constraint")
 mod_emissions = list_and_print_objects(mod_db, ClassEnum.Emission, "emission")
+mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
 
 # print properties for specific objects
+print_properties(mod_db, ClassEnum.Node, "CSA")
 print_properties(mod_db, ClassEnum.Generator, "WOOLGSF1")
 print_properties(mod_db, ClassEnum.Generator, "AGLHAL05")
-print_properties(mod_db, ClassEnum.Node, "CNSW")
-print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(mod_db, ClassEnum.Storage, "Kidston Lower")
+print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW")
+print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(mod_db, ClassEnum.Emission, "Comb Co2 NSW")
 print_properties(mod_db, ClassEnum.Fuel, "ROI Oil")
 print_properties(mod_db, ClassEnum.Scenario, "Three-State Start")
+
+
+print_properties(mod_db, ClassEnum.Constraint, "2030 Emissions Budget 1")
+print_properties(mod_db, ClassEnum.Constraint, "Snowy 2.0 - Gen_2")
+print_properties(mod_db, ClassEnum.Constraint, "REZLimit_N1_North West NSW")
+
 
 # Use the function for different collections and classes
 check_valid_properties(
@@ -60,6 +68,14 @@ check_valid_properties(
     ClassEnum.Generator,
     "generator",
 )
+check_valid_properties(
+    mod_db,
+    CollectionEnum.Nodes,
+    ClassEnum.System,
+    ClassEnum.Node,
+    "generator",
+)
+
 check_valid_properties(
     mod_db, CollectionEnum.Emissions, ClassEnum.System, ClassEnum.Emission, "emission"
 )
@@ -98,10 +114,15 @@ mem_constraint = mod_db.get_memberships_system(
 print_memberships(mem_constraint)
 
 # check memberships of storage
-mem_storage = mod_db.get_memberships_system(
-    "Kidston Lower", object_class=ClassEnum.Storage
-)
+mem_storage = mod_db.get_memberships_system("ARDNA", object_class=ClassEnum.Storage)
 print_memberships(mem_storage)
+
+# check membership of constraint CNSW-SNW North
+mem_constraint = mod_db.get_memberships_system(
+    "REZLimit_N1_North West NSW", object_class=ClassEnum.Constraint
+)
+print_memberships(mem_constraint)
+
 
 # check memberships of emission
 mem_emission = mod_db.get_memberships_system("CO2", object_class=ClassEnum.Emission)
@@ -110,3 +131,24 @@ print_memberships(mem_emission)
 # check memberships for all fuels
 mem_fuels = mod_db.get_memberships_system(mod_fuels, object_class=ClassEnum.Fuel)
 print_memberships(mem_fuels)
+
+# mod_db.to_csv("/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/csv/")
+
+# from coad.COAD import COAD
+# from coad.plexos_database import load
+
+# load(file_xml, "/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/aemo.sqlite")
+
+# coad = COAD(file_xml)
+# coad.list("Model")
+# coad.show("Progressive Change")
+# coad["Model"]["Progressive Change"].dump()
+# coad["Line"].get_property_names()
+
+# from coad.COAD import COAD
+# from coad.export_plexos_model import get_all_objects, write_object_report
+
+# all_objs = get_all_objects(coad["System"]["System"])
+# write_object_report(coad["System"]["System"], interesting_objects=all_objs)
+# print(coad.keys())
+# print(coad["System"].keys())  # Check available keys
