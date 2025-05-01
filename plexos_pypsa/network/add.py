@@ -41,7 +41,10 @@ def add_buses(network: Network, db: PlexosDB):
         props = db.get_object_properties(ClassEnum.Node, node)
         voltage = next(
             (float(p["value"]) for p in props if p["property"] == "Voltage"), 110
-        )  # default: 110kV
+        )  # default to 110 kV if voltage not found
+
+        # add bus to network
+        # NOTE: skipping adding v_nom because none of the AEMO nodes have voltage values
         network.add("Bus", name=node)
     print(f"Added {len(nodes)} buses")
 
@@ -68,7 +71,7 @@ def add_generators(network: Network, db: PlexosDB):
 
     Notes
     -----
-    - Generators without a "Max Capacity" property will have their `p_nom` set to 0.0.
+    - Generators without a "Max Capacity" property will not have `p_nom` specified.
     - Generators without an associated bus will be skipped and reported.
     - A summary of skipped generators is printed at the end.
 
@@ -94,8 +97,7 @@ def add_generators(network: Network, db: PlexosDB):
             (float(p["value"]) for p in props if p["property"] == "Max Capacity"), None
         )
         if p_max is None:
-            print(f"Warning: 'Max Capacity' not found for {gen}")
-            p_max = 0.0  # NOTE: or change to `continue` to skip this generator?
+            print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
 
         # Find associated bus/node
         bus = find_bus_for_object(db, gen, ClassEnum.Generator)
@@ -105,7 +107,10 @@ def add_generators(network: Network, db: PlexosDB):
             continue
 
         # Add generator to the network
-        network.add("Generator", gen, bus=bus, p_nom=p_max)
+        if p_max is not None:
+            network.add("Generator", gen, bus=bus, p_nom=p_max)
+        else:
+            network.add("Generator", gen, bus=bus)
 
     # Report skipped generators
     if empty_generators:
