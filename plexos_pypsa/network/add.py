@@ -109,8 +109,10 @@ def add_generators(network: Network, db: PlexosDB):
         # Add generator to the network
         if p_max is not None:
             network.add("Generator", gen, bus=bus, p_nom=p_max)
+            # print(f"- Added generator {gen} with p_nom={p_max} to bus {bus}")
         else:
             network.add("Generator", gen, bus=bus)
+            # print(f"- Added generator {gen} to bus {bus} without p_nom")
 
     # Report skipped generators
     if empty_generators:
@@ -162,32 +164,11 @@ def add_storage(network: Network, db: PlexosDB) -> None:
             # Get properties from PLEXOS
             max_volume = get_prop("Max Volume")  # in 1000 m³
             min_volume = get_prop("Min Volume")  # in 1000 m³
-            initial_volume = get_prop("Initial Volume")  # in 1000 m³
-            natural_inflow = get_prop("Natural Inflow")  # in cumec
-
-            # Calculate energy capacity (e.g., using max_volume - min_volume)
-            if max_volume is not None and min_volume is not None:
-                energy_capacity = max_volume - min_volume  # in 1000 m³
-            else:
-                logger.warning(f"Skipping {su}: missing volume information")
-                skipped_units.append(su)
-                continue
-
-            # Assume power capacity is proportional to energy capacity if not provided
-            power_capacity = energy_capacity / 10  # NOTE: arbitrary
-
-            # Default efficiencies if not provided
-            efficiency_store = 0.9  # 90% efficiency # NOTE: arbitrary
-            efficiency_dispatch = 0.9  # 90% efficiency # NOTE: arbitrary
 
             # Add storage unit to the PyPSA network
             network.storage_units.loc[su] = {
                 "bus": bus,
-                "p_nom": power_capacity,
-                "max_hours": energy_capacity / power_capacity,
-                "efficiency_store": efficiency_store,
-                "efficiency_dispatch": efficiency_dispatch,
-                "carrier": "hydro",  # Assuming hydro storage
+                "carrier": "hydro",  # NOTE: can't find non-hydro storage in AEMO?
                 "name": su,
             }
 
