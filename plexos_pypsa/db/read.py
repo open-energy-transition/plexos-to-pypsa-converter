@@ -53,15 +53,65 @@ def print_memberships(memberships):
     print("\nMemberships:")
     for membership in memberships:
         membership_id = membership.get("membership_id", "N/A")
-        child_class_id = membership.get("child_class_id", "N/A")
-        name = membership.get("name", "Unknown")
+        parent_class_id = membership.get("parent_class_id", "N/A")
+        parent_class_name = membership.get("parent_class_name", "Unknown")
+        parent_object_id = membership.get("parent_object_id", "N/A")
+        parent_object_name = membership.get("parent_object_name", "Unknown")
         collection_id = membership.get("collection_id", "N/A")
-        class_name = membership.get("class", "Unknown")
         collection_name = membership.get("collection_name", "Unknown")
+        child_class_id = membership.get("child_class_id", "N/A")
+        child_class_name = membership.get("child_class_name", "Unknown")
+        child_object_id = membership.get("child_object_id", "N/A")
+        child_object_name = membership.get("child_object_name", "Unknown")
+
         print(f"  - Membership ID: {membership_id}")
-        print(f"    Name: {name}")
-        print(f"    Child Class ID: {child_class_id}")
-        print(f"    Class Name: {class_name}")
+        print(f"    Parent Class ID: {parent_class_id}")
+        print(f"    Parent Class Name: {parent_class_name}")
+        print(f"    Parent Object ID: {parent_object_id}")
+        print(f"    Parent Object Name: {parent_object_name}")
         print(f"    Collection ID: {collection_id}")
         print(f"    Collection Name: {collection_name}")
+        print(f"    Child Class ID: {child_class_id}")
+        print(f"    Child Class Name: {child_class_name}")
+        print(f"    Child Object ID: {child_object_id}")
+        print(f"    Child Object Name: {child_object_name}")
+        print()
+
+
+def format_t_data_entries(entries):
+    """Format <t_data> entries neatly for printing or further processing."""
+    formatted_entries = []
+    for entry in entries:
+        formatted_entry = {
+            "data_id": entry[0],
+            "membership_id": entry[1],
+            "property_id": entry[2],
+            "value": entry[3],
+            "property_name": entry[4],
+            "collection_id": entry[5],
+            "collection_name": entry[6],
+            "property_group_id": entry[7],
+            "property_group_name": entry[8],
+        }
+        formatted_entries.append(formatted_entry)
+    return formatted_entries
+
+
+def print_membership_data_entries(entries):
+    """Print <t_data> entries in a more readable format."""
+
+    l_entries = format_t_data_entries(entries)
+
+    print("\n<t_data> Entries:")
+    for entry in l_entries:
+        print("  - Entry:")
+        print(f"    Data ID: {entry['data_id']}")
+        print(f"    Membership ID: {entry['membership_id']}")
+        print(f"    Property ID: {entry['property_id']}")
+        print(f"    Property Name: {entry['property_name']}")
+        print(f"    Collection ID: {entry['collection_id']}")
+        print(f"    Collection Name: {entry['collection_name']}")
+        print(f"    Property Group ID: {entry['property_group_id']}")
+        print(f"    Property Group Name: {entry['property_group_name']}")
+        print(f"    Value: {entry['value']}")
         print()
