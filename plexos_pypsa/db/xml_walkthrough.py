@@ -1,9 +1,10 @@
-from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
+from plexos_pypsa.db.plexosdb import PlexosDB  # type: ignore
 from plexos_pypsa.db.read import (
     check_valid_properties,
     list_and_print_objects,
+    print_membership_data_entries,
     print_memberships,
     print_properties,
 )
@@ -44,17 +45,15 @@ mod_emissions = list_and_print_objects(mod_db, ClassEnum.Emission, "emission")
 mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
 
 # print properties for specific objects
-print_properties(mod_db, ClassEnum.Node, "CSA")
+print_properties(mod_db, ClassEnum.Node, "GG")
 print_properties(mod_db, ClassEnum.Generator, "WOOLGSF1")
 print_properties(mod_db, ClassEnum.Generator, "AGLHAL05")
-print_properties(mod_db, ClassEnum.Storage, "Kidston Lower")
+print_properties(mod_db, ClassEnum.Storage, "Wivenhoe")
 print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW")
 print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(mod_db, ClassEnum.Emission, "Comb Co2 NSW")
 print_properties(mod_db, ClassEnum.Fuel, "ROI Oil")
 print_properties(mod_db, ClassEnum.Scenario, "Three-State Start")
-
-
 print_properties(mod_db, ClassEnum.Constraint, "2030 Emissions Budget 1")
 print_properties(mod_db, ClassEnum.Constraint, "Snowy 2.0 - Gen_2")
 print_properties(mod_db, ClassEnum.Constraint, "REZLimit_N1_North West NSW")
@@ -114,7 +113,9 @@ mem_constraint = mod_db.get_memberships_system(
 print_memberships(mem_constraint)
 
 # check memberships of storage
-mem_storage = mod_db.get_memberships_system("ARDNA", object_class=ClassEnum.Storage)
+mem_storage = mod_db.get_memberships_system(
+    "Tantangara", object_class=ClassEnum.Storage
+)
 print_memberships(mem_storage)
 
 # check membership of constraint CNSW-SNW North
@@ -131,6 +132,18 @@ print_memberships(mem_emission)
 # check memberships for all fuels
 mem_fuels = mod_db.get_memberships_system(mod_fuels, object_class=ClassEnum.Fuel)
 print_memberships(mem_fuels)
+
+# check memberships for a line
+mem_line = mod_db.get_memberships_system("CNSW-NNSW", object_class=ClassEnum.Line)
+print_memberships(mem_line)
+
+# print data entries for a specific membership
+mem_data = mod_db.search_membership_id(1255)
+print_membership_data_entries(mem_data)
+
+# check constraints related to "CNSW-NNSW"
+print_properties(mod_db, ClassEnum.Constraint, "CNSW-SNW North")
+
 
 # mod_db.to_csv("/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/csv/")
 
