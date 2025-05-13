@@ -4,6 +4,7 @@ from plexosdb import PlexosDB  # type: ignore
 from plexos_pypsa.network.add import (
     add_buses,
     add_constraints,
+    add_generator_profiles,
     add_generators,
     add_links,
     add_loads,
@@ -17,6 +18,7 @@ file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openen
 # file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/sem/2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
 
 # specify demand data path
+path_aemo = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change"
 path_demand = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/Traces/demand"
 
 # load PlexosDB from XML file
@@ -32,6 +34,7 @@ add_storage(network, plexos_db)
 add_links(network, plexos_db)
 add_snapshot(network, path_demand)
 add_loads(network, path_demand)
+add_generator_profiles(network, plexos_db, path_aemo)
 
 # TODO: fix
 add_constraints(network, plexos_db)
