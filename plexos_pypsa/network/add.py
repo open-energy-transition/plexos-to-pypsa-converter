@@ -455,6 +455,7 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
                         membership["class"] == "Generator"
                         and membership["name"] in network.generators.index
                     ):
+                        # TODO: should this be something else?
                         network.generators.loc[membership["name"], "p_nom"] = rhs
                 logger.info(
                     f"Applied generation limit of {rhs} to generator {membership['name']}"
@@ -647,229 +648,104 @@ def add_loads(network: Network, path: str):
         print(f"-- Added load time series for {load_name}")
 
 
-# def add_emissions(network: Network, db: PlexosDB) -> None:
-#     """
-#     Maps emissions data from the PLEXOS database to the PyPSA network.
+def add_generator_profiles(network: Network, db: PlexosDB, path: str):
+    """
+    Adds time series profiles for solar and wind generators to the PyPSA network.
 
-#     Parameters
-#     ----------
-#     network : pypsa.Network
-#         The PyPSA network to which emissions data will be added.
-#     db : PlexosDB
-#         The PLEXOS database containing emissions data.
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network object.
+    db : PlexosDB
+        The Plexos database containing generator data.
+    path : str
+        Path to the folder containing generation profile files.
+    """
+    for gen in network.generators.index:
+        # Retrieve generator properties from the database
+        props = db.get_object_properties(ClassEnum.Generator, gen)
 
-#     Notes
-#     -----
-#     - Emission coefficients are applied to generators in the PyPSA network.
-#     - Emission budgets are added as global constraints in the PyPSA network.
-#     """
-#     logger.info("Mapping emissions data from PLEXOS to PyPSA network.")
+        # Check if the generator has a solar or wind profile
+        filename = next(
+            (
+                p["texts"]
+                for p in props
+                if "Traces\\solar\\" in p["texts"] or "Traces\\wind\\" in p["texts"]
+            ),
+            None,
+        )
 
-#     # Retrieve all emissions from the PLEXOS database
-#     emissions = db.list_objects_by_class(ClassEnum.Emission)
-#     logger.info(f"Found {len(emissions)} emissions in db")
+        if filename:
+            profile_type = "solar" if "Traces\\solar\\" in filename else "wind"
+            file_path = os.path.join(path, filename.replace("\\", os.sep))
 
-#     for emission in emissions:
-#         try:
-#             # Get emission properties
-#             props = db.get_object_properties(ClassEnum.Emission, emission)
-#             logger.debug(f"Emission: {emission}, Properties: {props}")
+            try:
+                # Read the profile file
+                df = pd.read_csv(file_path)
+                df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+                # df.set_index("datetime", inplace=True)
 
-#             # Extract relevant properties
-#             emission_coefficient = next(
-#                 (float(p["value"]) for p in props if p["property"] == "Emission Rate"),
-#                 None,
-#             )
-#             if emission_coefficient is None:
-#                 logger.warning(f"No 'Emission Rate' found for emission {emission}")
+                # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
+                df.columns = pd.Index(
+                    [
+                        str(int(col))
+                        if col.strip().isdigit()
+                        and col not in {"Year", "Month", "Day", "datetime"}
+                        else col
+                        for col in df.columns
+                    ]
+                )
 
-#             emission_budget = next(
-#                 (
-#                     float(p["value"])
-#                     for p in props
-#                     if p["property"] == "Emission Budget"
-#                 ),
-#                 None,
-#             )
+                # Determine the resolution based on the number of columns
+                non_date_columns = [
+                    col
+                    for col in df.columns
+                    if col not in {"Year", "Month", "Day", "datetime"}
+                ]
+                if len(non_date_columns) == 24:
+                    resolution = 60  # hourly
+                elif len(non_date_columns) == 48:
+                    resolution = 30  # 30 minutes
+                else:
+                    raise ValueError(f"Unsupported resolution in file: {filename}")
 
-#             # Map emission coefficients to generators
-#             memberships = db.get_memberships_system(
-#                 emission, object_class=ClassEnum.Emission
-#             )
-#             logger.debug(f"Emission: {emission}, Memberships: {memberships}")
+                # Convert to long format and create a unified time series
+                df_long = df.melt(
+                    id_vars=["datetime"],
+                    value_vars=non_date_columns,
+                    var_name="time",
+                    value_name="generation",
+                )
+                if resolution == 60:
+                    df_long["time"] = pd.to_timedelta(
+                        (df_long["time"].astype(int) - 1) * 60, unit="m"
+                    )
+                elif resolution == 30:
+                    df_long["time"] = pd.to_timedelta(
+                        (df_long["time"].astype(int) - 1) * 30, unit="m"
+                    )
+                df_long["series"] = df_long["datetime"].dt.floor("D") + df_long["time"]
+                df_long.set_index("series", inplace=True)
+                df_long.drop(columns=["datetime", "time"], inplace=True)
 
-#             for membership in memberships:
-#                 if (
-#                     membership["class"] == "Generator"
-#                     and membership["name"] in network.generators.index
-#                 ):
-#                     network.generators.loc[membership["name"], "emission_factor"] = (
-#                         emission_coefficient
-#                     )
-#                     logger.info(
-#                         f"Applied emission factor of {emission_coefficient} to generator {membership['name']}"
-#                     )
+                # Normalize the generation values to the generator's p_nom
+                p_nom = network.generators.loc[gen, "p_nom"]
+                if p_nom and p_nom > 0:
+                    normalized_series = (
+                        df_long["generation"].squeeze() / p_nom
+                    )  # Ensure df_long is a Series
+                else:
+                    raise ValueError(f"Generator {gen} has invalid p_nom: {p_nom}")
 
-#             # Add emission budgets as global constraints
-#             if emission_budget is not None:
-#                 network.global_constraints.loc[emission] = {
-#                     "type": "primary_energy",
-#                     "sense": "<=",
-#                     "constant": emission_budget,
-#                     "carrier_attribute": "emissions",
-#                 }
-#                 logger.info(
-#                     f"Added emission budget of {emission_budget} for emission {emission}"
-#                 )
+                # Set the normalized time series as p_max_pu for the generator
+                network.generators_t.p_max_pu.loc[:, gen] = normalized_series
 
-#         except Exception as e:
-#             logger.error(f"Failed to map emission {emission}: {e}")
+                print(
+                    f"Added {profile_type} profile for generator {gen} from {filename}"
+                )
 
-
-# def add_emissions(network: Network, db: PlexosDB) -> None:
-#     """
-#     Maps emissions data from the PLEXOS database to the PyPSA network.
-
-#     Parameters
-#     ----------
-#     network : pypsa.Network
-#         The PyPSA network to which emissions data will be added.
-#     db : PlexosDB
-#         The PLEXOS database containing emissions data.
-
-#     Notes
-#     -----
-#     - Emission coefficients are applied to generators in the PyPSA network.
-#     - Emission budgets are added as global constraints in the PyPSA network.
-#     """
-#     logger.info("Mapping emissions data from PLEXOS to PyPSA network.")
-
-#     # Retrieve all emissions from the PLEXOS database
-#     emissions = db.list_objects_by_class(ClassEnum.Emission)
-#     logger.info(f"Found {len(emissions)} emissions in db")
-
-#     for emission in emissions:
-#         try:
-#             # Get emission properties
-#             props = db.get_object_properties(ClassEnum.Emission, emission)
-#             logger.debug(f"Emission: {emission}, Properties: {props}")
-
-#             # Extract relevant properties
-#             emission_factor = next(
-#                 (float(p["value"]) for p in props if p["property"] == "Emission Rate"),
-#                 None,
-#             )
-#             if emission_factor is None:
-#                 logger.warning(f"No 'Emission Rate' found for emission {emission}")
-
-#             emission_budget = next(
-#                 (
-#                     float(p["value"])
-#                     for p in props
-#                     if p["property"] == "Emission Budget"
-#                 ),
-#                 None,
-#             )
-
-#             # Map emission factors to generators
-#             memberships = db.get_memberships_system(
-#                 emission, object_class=ClassEnum.Emission
-#             )
-#             logger.debug(f"Emission: {emission}, Memberships: {memberships}")
-
-#             for membership in memberships:
-#                 if (
-#                     membership["class"] == "Generator"
-#                     and membership["name"] in network.generators.index
-#                 ):
-#                     network.generators.loc[membership["name"], "emission_factor"] = (
-#                         emission_factor
-#                     )
-#                     logger.info(
-#                         f"Applied emission factor of {emission_factor} to generator {membership['name']}"
-#                     )
-
-#             # Add emission budgets as global constraints
-#             if emission_budget is not None:
-#                 network.global_constraints.loc[emission] = {
-#                     "type": "primary_energy",
-#                     "sense": "<=",
-#                     "constant": emission_budget,
-#                     "carrier_attribute": "emissions",
-#                 }
-#                 logger.info(
-#                     f"Added emission budget of {emission_budget} for emission {emission}"
-#                 )
-
-#         except Exception as e:
-#             logger.error(f"Failed to map emission {emission}: {e}")
-
-
-# def add_emissions(network: Network, db: PlexosDB):
-#     """
-#     Adds emission data from PlexosDB to the PyPSA network.
-
-#     Parameters:
-#         db: PlexosDB instance
-#         network: PyPSA Network instance
-#     """
-#     emissions: dict[str, list[dict[str, str | float | None]]] = {}
-
-#     # Step 1: Get all Emission objects
-#     emission_objects = db.list_objects_by_class(ClassEnum.Emission)
-
-#     for emission in emission_objects:
-#         emission_name = emission["name"]
-#         print(f"Processing emission: {emission_name}")
-
-#         # Step 2: Get memberships for this emission (which generators have this emission)
-#         memberships = db.get_memberships_system(
-#             emission_name, object_class=ClassEnum.Emission
-#         )
-
-#         # Get the emission properties: Price and Shadow Price
-#         try:
-#             emission_properties = db.get_object_properties(
-#                 ClassEnum.Emission, emission_name
-#             )
-#         except Exception as e:
-#             print(f"Error retrieving properties for emission {emission_name}: {e}")
-#             continue
-
-#         # Extract Price and Shadow Price if they exist
-#         price = None
-#         shadow_price = None
-#         for prop in emission_properties:
-#             if prop["property"] == "Price":
-#                 price = prop["value"]
-#             if prop["property"] == "Shadow Price":
-#                 shadow_price = prop["value"]
-
-#         # Step 3: For each membership, link emission to a generator in PyPSA
-#         for membership in memberships:
-#             if membership["class"] == "Generator":
-#                 generator_name = membership["name"]
-
-#                 if generator_name in network.generators.index:
-#                     # If the generator exists in the PyPSA network, add the emission information
-#                     if generator_name not in emissions:
-#                         emissions[generator_name] = []
-
-#                     emissions[generator_name].append(
-#                         {
-#                             "emission_name": emission_name,
-#                             "price": price,
-#                             "shadow_price": shadow_price,
-#                         }
-#                     )
-#                 else:
-#                     print(f"Generator {generator_name} not found in PyPSA network.")
-
-#     # Step 4: Add emissions to PyPSA network's generator attributes
-#     for generator_name, emission_data in emissions.items():
-#         # Ensure the network has a column for emissions if it doesn't exist yet
-#         if "emissions" not in network.generators.columns:
-#             network.generators["emissions"] = None
-
-#         network.generators.loc[generator_name, "emissions"] = emission_data
-#         print(f"Added emissions for {generator_name}: {emission_data}")
+            except Exception as e:
+                print(f"Failed to process profile for generator {gen}: {e}")
+        # else:
+        #     # If the generator does not have a solar or wind profile, skip it
+        #     print(f"Generator {gen} does not have a solar or wind profile. Skipping.")
