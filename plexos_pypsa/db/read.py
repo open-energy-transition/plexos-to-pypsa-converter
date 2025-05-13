@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def print_objects_alphabetically(objects, object_type="object"):
     objects.sort()
     print(f"\n{object_type.capitalize()}s in mod_db:")
@@ -17,17 +20,64 @@ def print_properties(db, class_enum, name):
     print(f"Properties of {name} ({class_enum.name}):")
     for prop in properties:
         print(f"  - {prop['property']}: {prop['value']} {prop['unit'] or ''}")
-        if prop["scenario"]:
-            print(f"    Scenario: {prop['scenario']}")
-        if "bands" in prop and prop["bands"]:
-            print("    Bands:")
-            if isinstance(prop["bands"], str):
-                print(f"      - Band: {prop['bands']}")
-            else:
-                for band in prop["bands"]:
-                    print(
-                        f"      - {band['name']}: {band['value']} {band['unit'] or ''}"
-                    )
+        print(f"    Scenario: {prop['scenario']}")
+        print(f"    Scenario Category: {prop['scenario_category']}")
+        print(f"    Texts: {prop['texts']}")
+        print(f"    Tags: {prop['tags']}")
+        print(f"    Data ID: {prop['data_id']}")
+        print(f"    Parent Object ID: {prop['parent_object_id']}")
+        print(f"    Property ID: {prop['property_id']}")
+        print(f"    Membership ID: {prop['membership_id']}")
+        print(f"    Child Object ID: {prop['child_object_id']}")
+        print("    Bands:")
+        if isinstance(prop["bands"], str):
+            print(f"        Band: {prop['bands']}")
+        else:
+            for band in prop["bands"]:
+                print(f"        {band['name']}: {band['value']} {band['unit'] or ''}")
+
+
+def save_properties(db, class_enum, name, file_path):
+    properties = db.get_object_properties(class_enum, name)
+    if not properties:
+        print(f"No properties found for {name} ({class_enum.name}).")
+        return
+
+    # Prepare data for DataFrame
+    data = []
+    for prop in properties:
+        data.append(
+            {
+                "property": prop["property"],
+                "value": prop["value"],
+                "unit": prop["unit"] or "",
+                "scenario": prop["scenario"],
+                "scenario_category": prop["scenario_category"],
+                "texts": prop["texts"],
+                "tags": prop["tags"],
+                "data_id": prop["data_id"],
+                "parent_object_id": prop["parent_object_id"],
+                "property_id": prop["property_id"],
+                "membership_id": prop["membership_id"],
+                "child_object_id": prop["child_object_id"],
+                "bands": prop["bands"]
+                if isinstance(prop["bands"], str)
+                else "; ".join(
+                    [
+                        f"{band['name']}: {band['value']} {band['unit'] or ''}"
+                        for band in prop["bands"]
+                    ]
+                ),
+            }
+        )
+
+    # Create DataFrame
+    df = pd.DataFrame(data)
+
+    # Save to CSV
+    df.to_csv(file_path, index=False, encoding="utf-8")
+
+    print(f"Properties of {name} ({class_enum.name}) saved to {file_path}.")
 
 
 def check_valid_properties(
