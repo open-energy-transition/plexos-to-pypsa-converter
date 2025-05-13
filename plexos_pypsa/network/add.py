@@ -161,10 +161,6 @@ def add_storage(network: Network, db: PlexosDB) -> None:
                 skipped_units.append(su)
                 continue
 
-            # Get properties from PLEXOS
-            max_volume = get_prop("Max Volume")  # in 1000 m³
-            min_volume = get_prop("Min Volume")  # in 1000 m³
-
             # Add storage unit to the PyPSA network
             network.storage_units.loc[su] = {
                 "bus": bus,
@@ -183,46 +179,35 @@ def add_storage(network: Network, db: PlexosDB) -> None:
         logger.info(f"Skipped {len(skipped_units)} storage units: {skipped_units}")
 
 
-def add_lines(network: Network, db: PlexosDB):
+def add_links(network: Network, db: PlexosDB):
     """
-    Adds transmission lines to the given network based on data from the database.
+    Adds transmission links to the given network based on data from the database.
 
     This function retrieves line objects from the database, extracts their properties,
-    and adds them to the network as transmission lines. It ensures that the lines
-    connect valid buses in the network.
+    and adds them to the network as links. It ensures that the links connect valid buses
+    in the network and sets specific attributes like `p_nom`, `p_max_pu`, and `p_min_pu`.
 
     Parameters
     ----------
     network : pypsa.Network
-        The network object to which the transmission lines will be added.
+        The network object to which the links will be added.
     db : Database
         The database object containing line data and their properties.
 
     Notes
     -----
     - The function retrieves the "From Nodes" and "To Nodes" for each line to determine
-      the buses the line connects.
-    - Default values are used for `length`, `resistance (r)`, `reactance (x)`, and
-      `thermal rating (s_nom)` if these properties are not found in the database.
-
-    Default Values
-    --------------
-    - Length: 1
-    - Resistance (r): 0.05
-    - Reactance (x): 0.2
-    - Thermal Rating (s_nom): 100
-
-    Prints
-    ------
-    str
-        A message indicating the number of transmission lines added to the network.
+      the buses the link connects.
+    - The largest positive "Max Flow" property is used to set `p_nom`.
+    - The largest negative "Min Flow" property is normalized to `p_nom` and used to set `p_min_pu`.
+    - `p_max_pu` is set to 1.0.
 
     Examples
     --------
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
-    >>> add_lines(network, db)
-    Added 10 transmission lines
+    >>> add_links(network, db)
+    Added 10 transmission links
     """
     lines = db.list_objects_by_class(ClassEnum.Line)
     for line in lines:
@@ -231,7 +216,7 @@ def add_lines(network: Network, db: PlexosDB):
             (
                 m["name"]
                 for m in db.get_memberships_system(line, object_class=ClassEnum.Line)
-                if m["collection_name"] == "From Nodes"
+                if m["collection_name"] == "Node From"
             ),
             None,
         )
@@ -239,35 +224,60 @@ def add_lines(network: Network, db: PlexosDB):
             (
                 m["name"]
                 for m in db.get_memberships_system(line, object_class=ClassEnum.Line)
-                if m["collection_name"] == "To Nodes"
+                if m["collection_name"] == "Node To"
             ),
             None,
         )
-        length = next(
-            (float(p["value"]) for p in props if p["property"] == "Length"), 1
-        )  # NOTE: change?
-        r = next(
-            (float(p["value"]) for p in props if p["property"] == "Resistance"), 0.05
-        )  # NOTE: change?
-        x = next(
-            (float(p["value"]) for p in props if p["property"] == "Reactance"), 0.2
-        )  # NOTE: change?
-        s_nom = next(
-            (float(p["value"]) for p in props if p["property"] == "Thermal Rating"), 100
-        )  # NOTE: change to Max Flow? but there can be multiple min flows and max flows
 
-        if node_from in network.buses and node_to in network.buses:
+        # Determine p_nom (largest positive "Max Flow")
+        p_nom = max(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Max Flow" and float(p["value"]) > 0
+            ),
+            default=None,
+        )
+
+        if p_nom is None:
+            continue  # Skip if no valid "Max Flow" is found
+
+        # Determine p_min_pu (largest negative "Min Flow" normalized to p_nom)
+        min_flow = max(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Min Flow" and float(p["value"]) < 0
+            ),
+            default=0,
+        )
+        p_min_pu = min_flow / p_nom if p_nom != 0 else None
+
+        # Add link to the network
+        # If p_nom is None, only add bus0 and bus1
+        if p_nom is not None:
             network.add(
-                "Line",
+                "Link",
                 name=line,
                 bus0=node_from,
                 bus1=node_to,
-                length=length,
-                r=r,
-                x=x,
-                s_nom=s_nom,
+                p_nom=p_nom,
+                p_max_pu=1.0,
+                p_min_pu=p_min_pu,
             )
-    print(f"Added {len(lines)} transmission lines")
+            print(
+                f"- Added link {line} with p_nom={p_nom} to buses {node_from} and {node_to}"
+            )
+        else:
+            # If p_nom is None, add the link without p_nom
+            network.add(
+                "Link",
+                name=line,
+                bus0=node_from,
+                bus1=node_to,
+            )
+            print(f"- Added link {line} to buses {node_from} and {node_to}")
+    print(f"Added {len(lines)} links")
 
 
 def add_constraints(network: Network, db: PlexosDB) -> None:
