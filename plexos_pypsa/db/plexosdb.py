@@ -2278,69 +2278,7 @@ class PlexosDB:
         category: str | None = None,
         chunk_size: int = 1000,
     ) -> list[dict]:
-        """Retrieve properties for a specific object with efficient memory handling.
-
-        Gets properties for the specified object, with support for chunked processing
-        to prevent memory issues when dealing with large datasets.
-
-        Parameters
-        ----------
-        class_enum : ClassEnum
-            Class enumeration of the object
-        name : str
-            Name of the object to retrieve properties for
-        property_names : str | Iterable[str] | None, optional
-            Names of specific properties to retrieve. If None, gets all properties, by default None
-        parent_class_enum : ClassEnum | None, optional
-            Parent class enumeration for filtering properties, by default None
-            (defaults to ClassEnum.System if not specified)
-        collection_enum : CollectionEnum | None, optional
-            Collection enumeration to filter properties by, by default None
-            (if not specified, the default collection for the class is used)
-        category : str | None, optional
-            Category to filter by, by default None
-        chunk_size : int, optional
-            Number of data IDs to process in each chunk, by default 1000
-
-        Returns
-        -------
-        list[dict]
-            List of dictionaries containing property information with keys:
-            - name: Object name
-            - property: Property name
-            - value: Property value
-            - unit: Unit of measurement
-            - texts: Associated text data
-            - tags: Associated tags
-            - bands: Associated bands
-            - scenario: Associated scenario name
-            - scenario_category: Category of the associated scenario
-
-        Raises
-        ------
-        NameError
-            If the specified property does not exist for the collection
-        KeyError
-            If the specified category does not exist
-
-        See Also
-        --------
-        get_data_ids : Get data IDs for an object
-        check_property_exists : Check if properties exist for a collection
-        list_valid_properties : List valid property names for a collection
-
-        Examples
-        --------
-        >>> db = PlexosDB()
-        >>> db.create_schema()
-        >>> db.add_object(ClassEnum.Generator, "Generator1")
-        >>> db.add_property(ClassEnum.Generator, "Generator1", "Max Capacity", 100.0)
-        >>> properties = db.get_object_properties(ClassEnum.Generator, "Generator1")
-        >>> properties[0]["property"]
-        'Max Capacity'
-        >>> properties[0]["value"]
-        100.0
-        """
+        """Retrieve properties for a specific object with additional details."""
         parent_class_enum = parent_class_enum or ClassEnum.System
 
         if not self.has_properties(
@@ -2355,7 +2293,11 @@ class PlexosDB:
             o.name AS name,
             p.name AS property,
             d.value AS property_value,
-            u.value AS unit
+            u.value AS unit,
+            m.parent_object_id AS parent_object_id,
+            d.property_id AS property_id,
+            m.membership_id AS membership_id,
+            m.child_object_id AS child_object_id
         FROM t_data d
         JOIN t_property p ON d.property_id = p.property_id
         JOIN t_membership m ON d.membership_id = m.membership_id
@@ -2381,10 +2323,15 @@ class PlexosDB:
 
             base_data = {
                 row[0]: {
+                    "data_id": row[0],  # Include data_id in the result
                     "name": row[1],
                     "property": row[2],
                     "value": row[3],
                     "unit": row[4],
+                    "parent_object_id": row[5],
+                    "property_id": row[6],
+                    "membership_id": row[7],
+                    "child_object_id": row[8],
                     "texts": "",
                     "tags": "",
                     "bands": "",
@@ -2393,6 +2340,10 @@ class PlexosDB:
                 }
                 for row in self.query(base_query, chunk_data_ids)
             }
+
+            # Print data_id for debugging
+            for data_id in base_data.keys():
+                print(f"Processing data_id: {data_id}")
 
             # Get text values for this chunk
             text_query = f"""
@@ -3389,3 +3340,36 @@ class PlexosDB:
     def validate_database(self, /, *, fix_issues: bool = False) -> dict[str, list[str]]:
         """Validate database integrity and consistency."""
         raise NotImplementedError
+
+    def search_child_object_id(self, child_object_id):
+        """Retrieve memberships and related information for a specific child_object_id."""
+        query = """
+        SELECT
+            mem.membership_id,
+            mem.parent_class_id,
+            mem.child_class_id,
+            mem.parent_object_id,
+            mem.child_object_id,
+            mem.collection_id,
+            parent_class.name AS parent_class_name,
+            child_class.name AS child_class_name,
+            parent_object.name AS parent_object_name,
+            child_object.name AS child_object_name,
+            collection.name AS collection_name
+        FROM
+            t_membership AS mem
+        LEFT JOIN
+            t_class AS parent_class ON mem.parent_class_id = parent_class.class_id
+        LEFT JOIN
+            t_class AS child_class ON mem.child_class_id = child_class.class_id
+        LEFT JOIN
+            t_object AS parent_object ON mem.parent_object_id = parent_object.object_id
+        LEFT JOIN
+            t_object AS child_object ON mem.child_object_id = child_object.object_id
+        LEFT JOIN
+            t_collection AS collection ON mem.collection_id = collection.collection_id
+        WHERE
+            mem.child_object_id = ?
+        """
+        results = self._db.fetchall_dict(query, (child_object_id,))
+        return results
