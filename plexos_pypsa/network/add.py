@@ -579,7 +579,6 @@ def add_loads(network: Network, path: str):
             ),
             None,
         )
-        print(f"File name: {file_name}")
         if file_name is None:
             print(f"Warning: No load file found for bus {bus}")
             continue
@@ -641,11 +640,10 @@ def add_loads(network: Network, path: str):
         # Add the load to the network
         load_name = f"Load_{bus}"
         network.add("Load", name=load_name, bus=bus)
-        print(f"- Added load {load_name} to bus {bus}")
 
         # Add the load time series
         network.loads_t.p_set.loc[:, load_name] = df_long
-        print(f"-- Added load time series for {load_name}")
+        print(f"- Added load time series for {load_name}")
 
 
 def add_generator_profiles(network: Network, db: PlexosDB, path: str):
@@ -683,7 +681,6 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
                 # Read the profile file
                 df = pd.read_csv(file_path)
                 df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
-                # df.set_index("datetime", inplace=True)
 
                 # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
                 df.columns = pd.Index(
