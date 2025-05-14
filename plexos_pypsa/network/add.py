@@ -749,3 +749,78 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
         # else:
         #     # If the generator does not have a solar or wind profile, skip it
         #     print(f"Generator {gen} does not have a solar or wind profile. Skipping.")
+
+
+def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
+    """
+    Adds inflow time series for hydro storage units to the PyPSA network.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network object.
+    db : PlexosDB
+        The Plexos database containing storage unit data.
+    path : str
+        Path to the folder containing inflow profile files.
+    """
+    for storage_unit in network.storage_units.index:
+        # Retrieve storage unit properties from the database
+        props = db.get_object_properties(ClassEnum.Storage, storage_unit)
+
+        # Check if the storage unit has a hydro inflow profile
+        filename = next(
+            (
+                p["texts"]
+                for p in props
+                if "Traces\\hydro\\MonthlyNaturalInflow" in p["texts"]
+            ),
+            None,
+        )
+
+        if filename:
+            file_path = os.path.join(path, filename.replace("\\", os.sep))
+
+            try:
+                # Read the inflow profile file
+                df = pd.read_csv(file_path)
+
+                # Create a date column using Year, Month, and Day
+                df["date"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+
+                # Set the date column as the index and drop unnecessary columns
+                daily_inflows = df.set_index("date")["Inflows"]
+
+                # Get the network's snapshots
+                snapshots = network.snapshots
+
+                # Resample daily inflows to match the network's snapshots
+                inflows_resampled = daily_inflows.reindex(snapshots, method="ffill")
+
+                # Detect the number of time instances per day
+                time_instances_per_day = (
+                    snapshots.to_series()
+                    .groupby(snapshots.to_series().dt.date)
+                    .size()
+                    .iloc[0]
+                )
+
+                # Evenly divide daily inflows across the time instances per day
+                inflows_scaled = inflows_resampled / time_instances_per_day
+
+                # Add the inflows as a time series to the storage unit
+                network.storage_units_t.inflow[storage_unit] = inflows_scaled
+
+                print(
+                    f"Added hydro inflow profile for storage unit {storage_unit} from {filename}"
+                )
+
+            except Exception as e:
+                print(
+                    f"Failed to process inflow profile for storage unit {storage_unit}: {e}"
+                )
+        else:
+            # If the storage unit does not have a hydro inflow profile, skip it
+            print(
+                f"Storage unit {storage_unit} does not have a hydro inflow profile. Skipping."
+            )
