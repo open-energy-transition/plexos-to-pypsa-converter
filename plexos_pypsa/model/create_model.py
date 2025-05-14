@@ -6,6 +6,7 @@ from plexos_pypsa.network.add import (
     add_constraints,
     add_generator_profiles,
     add_generators,
+    add_hydro_inflows,
     add_links,
     add_loads,
     add_snapshot,
@@ -35,6 +36,8 @@ add_links(network, plexos_db)
 add_snapshot(network, path_demand)
 add_loads(network, path_demand)
 add_generator_profiles(network, plexos_db, path_aemo)
+add_hydro_inflows(network, plexos_db, path_aemo)
+
 
 # TODO: fix
 add_constraints(network, plexos_db)
