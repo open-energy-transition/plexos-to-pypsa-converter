@@ -2342,8 +2342,8 @@ class PlexosDB:
             }
 
             # Print data_id for debugging
-            for data_id in base_data.keys():
-                print(f"Processing data_id: {data_id}")
+            # for data_id in base_data.keys():
+            #     print(f"Processing data_id: {data_id}")
 
             # Get text values for this chunk
             text_query = f"""
