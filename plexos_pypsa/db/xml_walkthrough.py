@@ -7,6 +7,7 @@ from plexos_pypsa.db.read import (
     print_membership_data_entries,
     print_memberships,
     print_properties,
+    save_properties,
 )
 
 # list XML file
@@ -38,6 +39,7 @@ for cls in mod_classes:
 # list and print objects for various classes
 mod_nodes = list_and_print_objects(mod_db, ClassEnum.Node, "node")
 mod_generators = list_and_print_objects(mod_db, ClassEnum.Generator, "generator")
+
 mod_storage = list_and_print_objects(mod_db, ClassEnum.Storage, "storage")
 mod_lines = list_and_print_objects(mod_db, ClassEnum.Line, "line")
 mod_constraints = list_and_print_objects(mod_db, ClassEnum.Constraint, "constraint")
@@ -45,11 +47,22 @@ mod_emissions = list_and_print_objects(mod_db, ClassEnum.Emission, "emission")
 mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
 
 # print properties for specific objects
-print_properties(mod_db, ClassEnum.Node, "GG")
-print_properties(mod_db, ClassEnum.Generator, "WOOLGSF1")
-print_properties(mod_db, ClassEnum.Generator, "AGLHAL05")
-print_properties(mod_db, ClassEnum.Storage, "Wivenhoe")
+print_properties(mod_db, ClassEnum.Node, "CNSW")
+print_properties(mod_db, ClassEnum.Generator, "Aramara Solar Farm")
+print_properties(mod_db, ClassEnum.Generator, "ADPPV1", detailed=True)
+print_properties(mod_db, ClassEnum.Generator, "AGLHAL01", detailed=False)
+
+print_properties(mod_db, ClassEnum.Storage, "Kidston Lower", detailed=False)
 print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW")
+save_properties(
+    mod_db,
+    ClassEnum.Line,
+    "CNSW-NNSW",
+    "plexos_pypsa/data/scratch/properties_line_CNSW-NNSW.csv",
+)
+
+mod_db.get_object_properties(ClassEnum.Storage, "Anthony Pieman")
+
 print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(mod_db, ClassEnum.Emission, "Comb Co2 NSW")
 print_properties(mod_db, ClassEnum.Fuel, "ROI Oil")
@@ -87,7 +100,9 @@ check_valid_properties(
 
 
 # check memberships of one generator
-mem_gen = mod_db.get_memberships_system("AGLHAL05", object_class=ClassEnum.Generator)
+mem_gen = mod_db.get_memberships_system(
+    "Aramara Solar Farm", object_class=ClassEnum.Generator
+)
 print_memberships(mem_gen)
 
 # check memberships of all generators
@@ -95,6 +110,13 @@ mem_gen_all = mod_db.get_memberships_system(
     mod_generators, object_class=ClassEnum.Generator
 )
 print_memberships(mem_gen_all)
+
+
+# check memberships for generator "Frasers Solar Farm"
+mem_gen = mod_db.get_memberships_system(
+    "Frasers Solar Farm", object_class=ClassEnum.Generator
+)
+print_memberships(mem_gen)
 
 # check memberships of fuel Hallett
 print_memberships(mod_db.get_memberships_system("Hallett", object_class=ClassEnum.Fuel))
@@ -144,6 +166,10 @@ print_membership_data_entries(mem_data)
 # check constraints related to "CNSW-NNSW"
 print_properties(mod_db, ClassEnum.Constraint, "CNSW-SNW North")
 
+
+# check all memberships associated with child_object_id
+obj_mem = mod_db.search_child_object_id(1340)
+print_memberships(obj_mem)
 
 # mod_db.to_csv("/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/csv/")
 
