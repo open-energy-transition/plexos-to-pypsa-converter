@@ -176,7 +176,7 @@ cython_debug/
 .pypirc
 
 # data/scratch
-plexos_pypsa/data/scratch/
+# plexos_pypsa/data/scratch/
 
 # scratch
 # plexos_pypsa/scratch/
