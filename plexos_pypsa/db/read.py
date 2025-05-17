@@ -15,26 +15,34 @@ def list_and_print_objects(db, class_enum, object_type):
     return objects
 
 
-def print_properties(db, class_enum, name):
+def print_properties(db, class_enum, name, detailed=True):
     properties = db.get_object_properties(class_enum, name)
     print(f"Properties of {name} ({class_enum.name}):")
     for prop in properties:
         print(f"  - {prop['property']}: {prop['value']} {prop['unit'] or ''}")
-        print(f"    Scenario: {prop['scenario']}")
-        print(f"    Scenario Category: {prop['scenario_category']}")
-        print(f"    Texts: {prop['texts']}")
-        print(f"    Tags: {prop['tags']}")
-        print(f"    Data ID: {prop['data_id']}")
-        print(f"    Parent Object ID: {prop['parent_object_id']}")
-        print(f"    Property ID: {prop['property_id']}")
-        print(f"    Membership ID: {prop['membership_id']}")
-        print(f"    Child Object ID: {prop['child_object_id']}")
-        print("    Bands:")
-        if isinstance(prop["bands"], str):
-            print(f"        Band: {prop['bands']}")
-        else:
-            for band in prop["bands"]:
-                print(f"        {band['name']}: {band['value']} {band['unit'] or ''}")
+        if detailed:
+            print(f"    Data ID: {prop['data_id']}")
+            print(f"    Parent Object ID: {prop['parent_object_id']}")
+            print(f"    Property ID: {prop['property_id']}")
+            print(f"    Membership ID: {prop['membership_id']}")
+            print(f"    Child Object ID: {prop['child_object_id']}")
+            if prop["scenario"]:
+                print(f"    Scenario: {prop['scenario']}")
+            if prop["scenario_category"]:
+                print(f"    Scenario Category: {prop['scenario_category']}")
+            if prop["texts"]:
+                print(f"    Texts: {prop['texts']}")
+            if prop["tags"]:
+                print(f"    Tags: {prop['tags']}")
+            if prop["bands"]:
+                print("    Bands:")
+                if isinstance(prop["bands"], str):
+                    print(f"        Band: {prop['bands']}")
+                else:
+                    for band in prop["bands"]:
+                        print(
+                            f"        {band['name']}: {band['value']} {band['unit'] or ''}"
+                        )
 
 
 def save_properties(db, class_enum, name, file_path):
