@@ -674,6 +674,7 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
         )
 
         if filename:
+            print(f"Found profile for generator {gen}: {filename}")
             profile_type = "solar" if "Traces\\solar\\" in filename else "wind"
             file_path = os.path.join(path, filename.replace("\\", os.sep))
 
@@ -738,7 +739,7 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
                 network.generators_t.p_max_pu.loc[:, gen] = normalized_series
 
                 print(
-                    f"Added {profile_type} profile for generator {gen} from {filename}"
+                    f" - Added {profile_type} profile for generator {gen} from {filename}"
                 )
 
             except Exception as e:
