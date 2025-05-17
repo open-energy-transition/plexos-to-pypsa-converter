@@ -179,4 +179,4 @@ cython_debug/
 plexos_pypsa/data/scratch/
 
 # scratch
-plexos_pypsa/scratch/
+# plexos_pypsa/scratch/
