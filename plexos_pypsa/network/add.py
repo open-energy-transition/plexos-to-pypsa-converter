@@ -2,12 +2,13 @@ import logging
 import os
 from statistics import mean
 
-import pandas as pd
+import pandas as pd  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
 from plexos_pypsa.db.parse import find_bus_for_object
+from plexos_pypsa.db.rating import parse_generator_ratings
 
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
@@ -126,6 +127,50 @@ def add_generators(network: Network, db: PlexosDB):
         print(f"\nSkipped {len(skipped_generators)} generators with no associated bus:")
         for g in skipped_generators:
             print(f"  - {g}")
+
+
+def set_capacity_ratings(network: Network, db: PlexosDB):
+    """
+    Sets the capacity ratings for generators in the PyPSA network based on the Plexos database.
+
+    This function retrieves generator ratings from the Plexos database and sets the
+    `p_max_pu` attribute for relevant generators in the PyPSA network.
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to which the capacity ratings will be applied.
+    db : PlexosDB
+        The Plexos database containing generator data.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> set_capacity_ratings(network, db)
+    """
+    # Get the generator ratings from the database
+    generator_ratings = parse_generator_ratings(db, network)
+
+    # For each generator in the network:
+    # - Get the p_nom (max capacity)
+    # - Normalize the generating_ratings for the generator by p_nom
+    # - Set the p_max_pu time series for the generator
+    for gen in network.generators.index:
+        # Check if the generator is in the generator_ratings DataFrame
+        if gen in generator_ratings.columns:
+            # Get the p_nom (max capacity) for the generator
+            p_nom = network.generators.loc[gen, "p_nom"]
+
+            # Normalize the generating_ratings for the generator by p_nom
+            generator_ratings[gen] = generator_ratings[gen] / p_nom
+
+            # Set the p_max_pu time series for the generator
+            network.generators_t.p_max_pu.loc[:, gen] = generator_ratings[gen]
+
+        else:
+            print(f"Warning: Generator {gen} not found in ratings DataFrame.")
+            continue
 
 
 def add_storage(network: Network, db: PlexosDB) -> None:
@@ -809,7 +854,7 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
                     f"Failed to process inflow profile for storage unit {storage_unit}: {e}"
                 )
         else:
-            # If the storage unit does not have a hydro inflow profile, skip it
+            # If the storage unit does not have a hydro inflow profile,      it
             print(
                 f"Storage unit {storage_unit} does not have a hydro inflow profile. Skipping."
             )
