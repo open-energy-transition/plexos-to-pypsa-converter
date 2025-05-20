@@ -114,6 +114,7 @@ def add_generators(network: Network, db: PlexosDB):
             "Max Ramp Down": "ramp_limit_down",
             "Ramp Up Rate": "ramp_limit_start_up",
             "Ramp Down Rate": "ramp_limit_start_down",
+            "Technical Life": "lifetime",
         }
         gen_attrs = {}
         for prop, attr in prop_map.items():
