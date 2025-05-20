@@ -102,6 +102,20 @@ def add_generators(network: Network, db: PlexosDB):
         if p_max is None:
             print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
 
+        # If there is a Min Capacity, set p_nom_min
+        p_min = next(
+            (float(p["value"]) for p in props if p["property"] == "Min Capacity"),
+            None,
+        )
+        if p_min is not None:
+            # Set p_nom_min if p_max is not None
+            if p_max is not None:
+                network.generators.loc[gen, "p_nom_min"] = p_min
+            else:
+                print(
+                    f"Warning: 'Min Capacity' found for {gen} but 'Max Capacity' is not set."
+                )
+
         # Find associated bus/node
         bus = find_bus_for_object(db, gen, ClassEnum.Generator)
         if bus is None:
