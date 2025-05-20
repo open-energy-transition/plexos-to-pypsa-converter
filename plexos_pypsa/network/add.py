@@ -319,7 +319,7 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
 
     Parameters
     ----------
-    network : pypsa.Network
+    network : pysa.Network
         The PyPSA network to which constraints will be added.
     db : PlexosDB
         The PLEXOS database containing constraint data.
@@ -646,7 +646,7 @@ def add_loads(network: Network, path: str):
         print(f"- Added load time series for {load_name}")
 
 
-def add_generator_profiles(network: Network, db: PlexosDB, path: str):
+def add_vre_profiles(network: Network, db: PlexosDB, path: str):
     """
     Adds time series profiles for solar and wind generators to the PyPSA network.
 
@@ -660,6 +660,11 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
         Path to the folder containing generation profile files.
     """
     for gen in network.generators.index:
+        # Skip Adelaide_Desal_FFP
+        if gen == "Adelaide_Desal_FFP":
+            print(f"Skipping generator {gen}")
+            continue
+
         # Retrieve generator properties from the database
         props = db.get_object_properties(ClassEnum.Generator, gen)
 
@@ -679,11 +684,8 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
             file_path = os.path.join(path, filename.replace("\\", os.sep))
 
             try:
-                # Read the profile file
                 df = pd.read_csv(file_path)
                 df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
-
-                # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
                 df.columns = pd.Index(
                     [
                         str(int(col))
@@ -693,26 +695,23 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
                         for col in df.columns
                     ]
                 )
-
-                # Determine the resolution based on the number of columns
                 non_date_columns = [
                     col
                     for col in df.columns
                     if col not in {"Year", "Month", "Day", "datetime"}
                 ]
                 if len(non_date_columns) == 24:
-                    resolution = 60  # hourly
+                    resolution = 60
                 elif len(non_date_columns) == 48:
-                    resolution = 30  # 30 minutes
+                    resolution = 30
                 else:
                     raise ValueError(f"Unsupported resolution in file: {filename}")
 
-                # Convert to long format and create a unified time series
                 df_long = df.melt(
                     id_vars=["datetime"],
                     value_vars=non_date_columns,
                     var_name="time",
-                    value_name="generation",
+                    value_name="cf",
                 )
                 if resolution == 60:
                     df_long["time"] = pd.to_timedelta(
@@ -726,17 +725,9 @@ def add_generator_profiles(network: Network, db: PlexosDB, path: str):
                 df_long.set_index("series", inplace=True)
                 df_long.drop(columns=["datetime", "time"], inplace=True)
 
-                # Normalize the generation values to the generator's p_nom
-                p_nom = network.generators.loc[gen, "p_nom"]
-                if p_nom and p_nom > 0:
-                    normalized_series = (
-                        df_long["generation"].squeeze() / p_nom
-                    )  # Ensure df_long is a Series
-                else:
-                    raise ValueError(f"Generator {gen} has invalid p_nom: {p_nom}")
-
-                # Set the normalized time series as p_max_pu for the generator
-                network.generators_t.p_max_pu.loc[:, gen] = normalized_series
+                # Set the capacity factor time series as both p_max_pu and p_min_pu
+                network.generators_t.p_max_pu.loc[:, gen] = df_long["cf"]
+                network.generators_t.p_min_pu.loc[:, gen] = df_long["cf"]
 
                 print(
                     f" - Added {profile_type} profile for generator {gen} from {filename}"
