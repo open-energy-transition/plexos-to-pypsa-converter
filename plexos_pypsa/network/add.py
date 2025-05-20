@@ -346,6 +346,24 @@ def add_links(network: Network, db: PlexosDB):
         p_min_pu = min_flow / p_nom if p_nom != 0 else None
         p_max_pu = max_flow / p_nom if p_nom != 0 else None
 
+        # Search for Max Ramp Up and Max Ramp Down, which are used for ramp_limit_up and ramp_limit_down
+        ramp_limit_up = next(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Max Ramp Up" and float(p["value"]) > 0
+            ),
+            None,
+        )
+        ramp_limit_down = next(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Max Ramp Down" and float(p["value"]) > 0
+            ),
+            None,
+        )
+
         # Add link to the network
         # If p_nom is None, only add bus0 and bus1
         if p_nom is not None:
@@ -370,6 +388,11 @@ def add_links(network: Network, db: PlexosDB):
                 bus1=node_to,
             )
             print(f"- Added link {line} to buses {node_from} and {node_to}")
+        # If ramp_limit_up and ramp_limit_down are found, set them
+        if ramp_limit_up is not None:
+            network.links.loc[line, "ramp_limit_up"] = ramp_limit_up
+        if ramp_limit_down is not None:
+            network.links.loc[line, "ramp_limit_down"] = ramp_limit_down
     print(f"Added {len(lines)} links")
 
 
