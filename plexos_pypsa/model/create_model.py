@@ -10,9 +10,9 @@ from plexos_pypsa.network.add import (
     add_loads,
     add_snapshot,
     add_storage,
-    add_vre_profiles,
     set_capacity_ratings,
     set_generator_efficiencies,
+    set_vre_profiles,
 )
 from plexos_pypsa.network.summarize import check_constraints
 
@@ -30,19 +30,29 @@ plexos_db = PlexosDB.from_xml(file_xml)
 # initialize PyPSA network
 network = pypsa.Network()
 
-# add to PyPSA network
+# add buses
 add_buses(network, plexos_db)
+
+# add snapshots
 add_snapshot(network, path_demand)
+
+# add generators
 add_generators(network, plexos_db)
 set_generator_efficiencies(network, plexos_db)
 set_capacity_ratings(network, plexos_db)
-add_storage(network, plexos_db)
+set_vre_profiles(network, plexos_db, path_aemo)
+
+# add links
 add_links(network, plexos_db)
+
+# add demand/loads
 add_loads(network, path_demand)
-add_vre_profiles(network, plexos_db, path_aemo)
+
+# add storage (TODO: fix)
+add_storage(network, plexos_db)
 add_hydro_inflows(network, plexos_db, path_aemo)
 
-# TODO: fix
+# add constraints (TODO: fix)
 add_constraints(network, plexos_db)
 check_constraints(network)
 
