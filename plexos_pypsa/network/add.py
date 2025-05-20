@@ -803,9 +803,15 @@ def add_vre_profiles(network: Network, db: PlexosDB, path: str):
                 df_long.set_index("series", inplace=True)
                 df_long.drop(columns=["datetime", "time"], inplace=True)
 
-                # Set the capacity factor time series as both p_max_pu and p_min_pu
-                network.generators_t.p_max_pu.loc[:, gen] = df_long["cf"]
-                network.generators_t.p_min_pu.loc[:, gen] = df_long["cf"]
+                # Get original p_max_pu for the generator
+                p_max_pu = network.generators_t.p_max_pu[gen].copy()
+
+                # Align index
+                dispatch = df_long["cf"].reindex(p_max_pu.index).fillna(0) * p_max_pu
+
+                # Set both p_min_pu and p_max_pu to the dispatch timeseries
+                network.generators_t.p_max_pu.loc[:, gen] = dispatch
+                network.generators_t.p_min_pu.loc[:, gen] = dispatch
 
                 print(
                     f" - Added {profile_type} profile for generator {gen} from {filename}"
