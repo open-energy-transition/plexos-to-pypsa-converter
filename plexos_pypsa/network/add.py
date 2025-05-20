@@ -296,18 +296,18 @@ def add_links(network: Network, db: PlexosDB):
             None,
         )
 
-        # Determine p_nom (largest positive "Max Flow")
-        p_nom = max(
+        # Get Max Flow (largest positive "Max Flow")
+        max_flow = max(
             (
                 float(p["value"])
                 for p in props
                 if p["property"] == "Max Flow" and float(p["value"]) > 0
             ),
-            default=None,
+            default=0,
         )
 
-        if p_nom is None:
-            continue  # Skip if no valid "Max Flow" is found
+        # Set p_nom as Max Flow
+        p_nom = max_flow
 
         # Determine p_min_pu (largest negative "Min Flow" normalized to p_nom)
         min_flow = max(
@@ -318,7 +318,33 @@ def add_links(network: Network, db: PlexosDB):
             ),
             default=0,
         )
+        # Find Min Rating and Max Rating properties
+        # if they exist, replace min_flow and max_flow with them
+        min_rating = next(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Min Rating" and float(p["value"]) < 0
+            ),
+            None,
+        )
+        max_rating = next(
+            (
+                float(p["value"])
+                for p in props
+                if p["property"] == "Max Rating" and float(p["value"]) > 0
+            ),
+            None,
+        )
+
+        if min_rating is not None:
+            min_flow = min_rating
+        if max_rating is not None:
+            max_flow = max_rating
+
+        # Calculate p_min_pu and p_max_pu
         p_min_pu = min_flow / p_nom if p_nom != 0 else None
+        p_max_pu = max_flow / p_nom if p_nom != 0 else None
 
         # Add link to the network
         # If p_nom is None, only add bus0 and bus1
@@ -329,8 +355,8 @@ def add_links(network: Network, db: PlexosDB):
                 bus0=node_from,
                 bus1=node_to,
                 p_nom=p_nom,
-                p_max_pu=1.0,
-                p_min_pu=p_min_pu,
+                p_min_pu=p_min_pu if p_min_pu is not None else 0,
+                p_max_pu=p_max_pu if p_max_pu is not None else 1,
             )
             print(
                 f"- Added link {line} with p_nom={p_nom} to buses {node_from} and {node_to}"
