@@ -69,8 +69,8 @@ def parse_generator_ratings(db: PlexosDB, network):
         merged, gen_df, left_on="child_object_id", right_on="object_id", how="inner"
     )
 
-    # 5. Create DataFrame with index=snapshots, columns=generator names
-    result = pd.DataFrame(index=snapshots)
+    # 5. Collect generator Series in a dictionary for efficient concatenation
+    gen_series = {}
 
     for gen in gen_df["generator"]:
         props = merged[merged["generator"] == gen]
@@ -100,7 +100,7 @@ def parse_generator_ratings(db: PlexosDB, network):
             maxcap = (
                 float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
             )
-            result[gen] = pd.Series(maxcap, index=snapshots)
+            gen_series[gen] = pd.Series(maxcap, index=snapshots)
             continue
 
         # Sort by from date
@@ -122,6 +122,10 @@ def parse_generator_ratings(db: PlexosDB, network):
                 float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
             )
             ts = ts.fillna(maxcap)
-        result[gen] = ts
+        gen_series[gen] = ts
+
+    # Concatenate all generator Series into a single DataFrame
+    result = pd.concat(gen_series, axis=1)
+    result.index = snapshots
 
     return result

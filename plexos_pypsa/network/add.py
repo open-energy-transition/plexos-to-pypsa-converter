@@ -177,21 +177,28 @@ def set_capacity_ratings(network: Network, db: PlexosDB):
     # - Get the p_nom (max capacity)
     # - Normalize the generating_ratings for the generator by p_nom
     # - Set the p_max_pu time series for the generator
-    for gen in network.generators.index:
-        # Check if the generator is in the generator_ratings DataFrame
-        if gen in generator_ratings.columns:
-            # Get the p_nom (max capacity) for the generator
-            p_nom = network.generators.loc[gen, "p_nom"]
 
-            # Normalize the generating_ratings for the generator by p_nom
-            generator_ratings[gen] = generator_ratings[gen] / p_nom
+    # Only keep generators present in both network and generator_ratings
+    valid_gens = [
+        gen for gen in network.generators.index if gen in generator_ratings.columns
+    ]
+    missing_gens = [
+        gen for gen in network.generators.index if gen not in generator_ratings.columns
+    ]
 
-            # Set the p_max_pu time series for the generator
-            network.generators_t.p_max_pu.loc[:, gen] = generator_ratings[gen]
+    # Normalize ratings by p_nom for valid generators
+    for gen in valid_gens:
+        p_nom = network.generators.loc[gen, "p_nom"]
+        generator_ratings[gen] = generator_ratings[gen] / p_nom
 
-        else:
-            print(f"Warning: Generator {gen} not found in ratings DataFrame.")
-            continue
+    # Assign all columns at once to avoid fragmentation
+    network.generators_t.p_max_pu.loc[:, valid_gens] = generator_ratings[
+        valid_gens
+    ].copy()
+
+    # Warn about missing generators
+    for gen in missing_gens:
+        print(f"Warning: Generator {gen} not found in ratings DataFrame.")
 
 
 def add_storage(network: Network, db: PlexosDB) -> None:
