@@ -102,19 +102,26 @@ def add_generators(network: Network, db: PlexosDB):
         if p_max is None:
             print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
 
-        # If there is a Min Capacity, set p_nom_min
-        p_min = next(
-            (float(p["value"]) for p in props if p["property"] == "Min Capacity"),
-            None,
-        )
-        if p_min is not None:
-            # Set p_nom_min if p_max is not None
-            if p_max is not None:
-                network.generators.loc[gen, "p_nom_min"] = p_min
-            else:
-                print(
-                    f"Warning: 'Min Capacity' found for {gen} but 'Max Capacity' is not set."
-                )
+        # Extract generator properties
+        prop_map = {
+            "Min Capacity": "p_nom_min",
+            "VO&M Charge": "marginal_cost",
+            "Start Cost": "start_up_cost",
+            "Shutdown Cost": "shut_down_cost",
+            "Min Up Time": "min_up_time",
+            "Min Down Time": "min_down_time",
+            "Max Ramp Up": "ramp_limit_up",
+            "Max Ramp Down": "ramp_limit_down",
+            "Ramp Up Rate": "ramp_limit_start_up",
+            "Ramp Down Rate": "ramp_limit_start_down",
+        }
+        gen_attrs = {}
+        for prop, attr in prop_map.items():
+            val = next(
+                (float(p["value"]) for p in props if p["property"] == prop), None
+            )
+            if val is not None:
+                gen_attrs[attr] = val
 
         # Find associated bus/node
         bus = find_bus_for_object(db, gen, ClassEnum.Generator)
@@ -126,11 +133,10 @@ def add_generators(network: Network, db: PlexosDB):
         # Add generator to the network
         if p_max is not None:
             network.add("Generator", gen, bus=bus, p_nom=p_max)
-            # print(f"- Added generator {gen} with p_nom={p_max} to bus {bus}")
+            for attr, val in gen_attrs.items():
+                network.generators.loc[gen, attr] = val
         else:
             network.add("Generator", gen, bus=bus)
-            # print(f"- Added generator {gen} to bus {bus} without p_nom")
-
     # Report skipped generators
     if empty_generators:
         print(f"\nSkipped {len(empty_generators)} generators with no properties:")
