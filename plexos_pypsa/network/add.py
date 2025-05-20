@@ -745,6 +745,7 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
     path : str
         Path to the folder containing generation profile files.
     """
+    dispatch_dict = {}
     for gen in network.generators.index:
         # Skip Adelaide_Desal_FFP
         if gen == "Adelaide_Desal_FFP":
@@ -817,9 +818,8 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
                 # Align index
                 dispatch = df_long["cf"].reindex(p_max_pu.index).fillna(0) * p_max_pu
 
-                # Set both p_min_pu and p_max_pu to the dispatch timeseries
-                network.generators_t.p_max_pu.loc[:, gen] = dispatch
-                network.generators_t.p_min_pu.loc[:, gen] = dispatch
+                # Collect dispatch series for batch assignment
+                dispatch_dict[gen] = dispatch
 
                 print(
                     f" - Added {profile_type} profile for generator {gen} from {filename}"
@@ -830,6 +830,14 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         # else:
         #     # If the generator does not have a solar or wind profile, skip it
         #     print(f"Generator {gen} does not have a solar or wind profile. Skipping.")
+
+    # Assign all dispatch columns at once to avoid fragmentation
+    if dispatch_dict:
+        dispatch_df = pd.DataFrame(
+            dispatch_dict, index=network.generators_t.p_max_pu.index
+        )
+        network.generators_t.p_max_pu.loc[:, dispatch_df.columns] = dispatch_df
+        network.generators_t.p_min_pu.loc[:, dispatch_df.columns] = dispatch_df
 
 
 def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
