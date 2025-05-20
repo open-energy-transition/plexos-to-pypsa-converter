@@ -725,7 +725,7 @@ def add_loads(network: Network, path: str):
         print(f"- Added load time series for {load_name}")
 
 
-def add_vre_profiles(network: Network, db: PlexosDB, path: str):
+def set_vre_profiles(network: Network, db: PlexosDB, path: str):
     """
     Adds time series profiles for solar and wind generators to the PyPSA network.
 
