@@ -279,93 +279,55 @@ def add_links(network: Network, db: PlexosDB):
     lines = db.list_objects_by_class(ClassEnum.Line)
     for line in lines:
         props = db.get_object_properties(ClassEnum.Line, line)
+        # Find connected nodes
+        memberships = db.get_memberships_system(line, object_class=ClassEnum.Line)
         node_from = next(
-            (
-                m["name"]
-                for m in db.get_memberships_system(line, object_class=ClassEnum.Line)
-                if m["collection_name"] == "Node From"
-            ),
+            (m["name"] for m in memberships if m["collection_name"] == "Node From"),
             None,
         )
         node_to = next(
-            (
-                m["name"]
-                for m in db.get_memberships_system(line, object_class=ClassEnum.Line)
-                if m["collection_name"] == "Node To"
-            ),
-            None,
+            (m["name"] for m in memberships if m["collection_name"] == "Node To"), None
         )
 
-        # Get Max Flow (largest positive "Max Flow")
-        max_flow = max(
-            (
+        # Helper to extract the greatest property value
+        def get_prop(prop, cond=lambda v: True):
+            vals = [
                 float(p["value"])
                 for p in props
-                if p["property"] == "Max Flow" and float(p["value"]) > 0
-            ),
-            default=0,
+                if p["property"] == prop and cond(float(p["value"]))
+            ]
+            return max(vals) if vals else None
+
+        # Get flows and ratings
+        max_flow = get_prop("Max Flow", lambda v: v > 0)
+        min_flow = get_prop("Min Flow", lambda v: v < 0)
+        max_rating = get_prop("Max Rating", lambda v: v > 0)
+        min_rating = get_prop("Min Rating", lambda v: v < 0)
+
+        # Set p_nom as max_flow
+        p_nom = max_flow if max_flow is not None else None
+
+        # Prefer ratings if available
+        max_val = (
+            max_rating
+            if max_rating is not None
+            else (max_flow if max_flow is not None else 0)
+        )
+        min_val = (
+            min_rating
+            if min_rating is not None
+            else (min_flow if min_flow is not None else 0)
         )
 
-        # Set p_nom as Max Flow
-        p_nom = max_flow
+        # Calculate pu values
+        p_min_pu = min_val / p_nom if p_nom else 0
+        p_max_pu = max_val / p_nom if p_nom else 1
 
-        # Determine p_min_pu (largest negative "Min Flow" normalized to p_nom)
-        min_flow = max(
-            (
-                float(p["value"])
-                for p in props
-                if p["property"] == "Min Flow" and float(p["value"]) < 0
-            ),
-            default=0,
-        )
-        # Find Min Rating and Max Rating properties
-        # if they exist, replace min_flow and max_flow with them
-        min_rating = next(
-            (
-                float(p["value"])
-                for p in props
-                if p["property"] == "Min Rating" and float(p["value"]) < 0
-            ),
-            None,
-        )
-        max_rating = next(
-            (
-                float(p["value"])
-                for p in props
-                if p["property"] == "Max Rating" and float(p["value"]) > 0
-            ),
-            None,
-        )
+        # Ramp limits
+        ramp_limit_up = get_prop("Max Ramp Up", lambda v: v > 0)
+        ramp_limit_down = get_prop("Max Ramp Down", lambda v: v > 0)
 
-        if min_rating is not None:
-            min_flow = min_rating
-        if max_rating is not None:
-            max_flow = max_rating
-
-        # Calculate p_min_pu and p_max_pu
-        p_min_pu = min_flow / p_nom if p_nom != 0 else None
-        p_max_pu = max_flow / p_nom if p_nom != 0 else None
-
-        # Search for Max Ramp Up and Max Ramp Down, which are used for ramp_limit_up and ramp_limit_down
-        ramp_limit_up = next(
-            (
-                float(p["value"])
-                for p in props
-                if p["property"] == "Max Ramp Up" and float(p["value"]) > 0
-            ),
-            None,
-        )
-        ramp_limit_down = next(
-            (
-                float(p["value"])
-                for p in props
-                if p["property"] == "Max Ramp Down" and float(p["value"]) > 0
-            ),
-            None,
-        )
-
-        # Add link to the network
-        # If p_nom is None, only add bus0 and bus1
+        # Add link
         if p_nom is not None:
             network.add(
                 "Link",
@@ -373,22 +335,24 @@ def add_links(network: Network, db: PlexosDB):
                 bus0=node_from,
                 bus1=node_to,
                 p_nom=p_nom,
-                p_min_pu=p_min_pu if p_min_pu is not None else 0,
-                p_max_pu=p_max_pu if p_max_pu is not None else 1,
+                p_min_pu=p_min_pu,
+                p_max_pu=p_max_pu,
             )
             print(
                 f"- Added link {line} with p_nom={p_nom} to buses {node_from} and {node_to}"
             )
         else:
-            # If p_nom is None, add the link without p_nom
             network.add(
                 "Link",
                 name=line,
                 bus0=node_from,
                 bus1=node_to,
             )
-            print(f"- Added link {line} to buses {node_from} and {node_to}")
-        # If ramp_limit_up and ramp_limit_down are found, set them
+            print(
+                f"- Added link {line} without p_nom to buses {node_from} and {node_to}"
+            )
+
+        # Set ramp limits if available
         if ramp_limit_up is not None:
             network.links.loc[line, "ramp_limit_up"] = ramp_limit_up
         if ramp_limit_down is not None:
