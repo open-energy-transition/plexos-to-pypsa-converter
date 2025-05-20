@@ -12,6 +12,7 @@ from plexos_pypsa.network.add import (
     add_storage,
     add_vre_profiles,
     set_capacity_ratings,
+    set_generator_efficiencies,
 )
 from plexos_pypsa.network.summarize import check_constraints
 
@@ -33,6 +34,7 @@ network = pypsa.Network()
 add_buses(network, plexos_db)
 add_snapshot(network, path_demand)
 add_generators(network, plexos_db)
+set_generator_efficiencies(network, plexos_db)
 set_capacity_ratings(network, plexos_db)
 add_storage(network, plexos_db)
 add_links(network, plexos_db)
@@ -47,5 +49,3 @@ check_constraints(network)
 # save to file
 network.export_to_netcdf("converted_network.nc")
 print("Network exported to converted_network.nc")
-
-network.generators_t.p_max_pu["ADPPV1"]
