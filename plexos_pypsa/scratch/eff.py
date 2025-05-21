@@ -1,12 +1,8 @@
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.add import (
-    add_buses,
-    add_generators,
-    add_snapshot,
-    set_generator_efficiencies,
-)
+from plexos_pypsa.network.core import add_buses, add_snapshot
+from plexos_pypsa.network.generators import add_generators, set_generator_efficiencies
 
 # list XML file
 file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"

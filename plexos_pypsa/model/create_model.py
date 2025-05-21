@@ -1,19 +1,15 @@
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.add import (
-    add_buses,
-    add_constraints,
+from plexos_pypsa.network.constraints import add_constraints
+from plexos_pypsa.network.core import add_buses, add_links, add_loads, add_snapshot
+from plexos_pypsa.network.generators import (
     add_generators,
-    add_hydro_inflows,
-    add_links,
-    add_loads,
-    add_snapshot,
-    add_storage,
     set_capacity_ratings,
     set_generator_efficiencies,
     set_vre_profiles,
 )
+from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
 from plexos_pypsa.network.summarize import check_constraints
 
 # list XML file
