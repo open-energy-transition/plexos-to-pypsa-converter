@@ -38,7 +38,7 @@ add_snapshot(network, path_demand)
 
 # add generators
 add_generators(network, plexos_db)
-set_generator_efficiencies(network, plexos_db)
+set_generator_efficiencies(network, plexos_db, use_incr=True)
 set_capacity_ratings(network, plexos_db)
 set_vre_profiles(network, plexos_db, path_aemo)
 
@@ -47,6 +47,9 @@ add_links(network, plexos_db)
 
 # add demand/loads
 add_loads(network, path_demand)
+
+# solve network
+network.optimize(solver_name="highs")
 
 # add storage (TODO: fix)
 add_storage(network, plexos_db)
