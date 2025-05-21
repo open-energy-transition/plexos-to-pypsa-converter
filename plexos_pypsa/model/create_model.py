@@ -2,7 +2,7 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.network.constraints import add_constraints
-from plexos_pypsa.network.core import add_buses, add_links, add_loads, add_snapshot
+from plexos_pypsa.network.core import add_buses, add_links, add_loads, add_snapshots
 from plexos_pypsa.network.generators import (
     add_generators,
     set_capacity_ratings,
@@ -30,7 +30,7 @@ network = pypsa.Network()
 add_buses(network, plexos_db)
 
 # add snapshots
-add_snapshot(network, path_demand)
+add_snapshots(network, path_demand)
 
 # add generators
 add_generators(network, plexos_db)

@@ -162,7 +162,7 @@ def add_links(network: Network, db: PlexosDB):
     print(f"Added {len(lines)} links")
 
 
-def add_snapshot(network: Network, path: str):
+def add_snapshots(network: Network, path: str):
     """
     Reads all {bus}...csv files in the specified path, determines the resolution,
     and creates a unified time series to set as the network snapshots.
