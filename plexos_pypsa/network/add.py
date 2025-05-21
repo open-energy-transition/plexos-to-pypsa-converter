@@ -915,16 +915,19 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
             )
 
 
-def set_generator_efficiencies(network: Network, db: PlexosDB):
+def set_generator_efficiencies(network: Network, db: PlexosDB, use_incr: bool = True):
     """
     Sets the efficiency for each generator in the PyPSA network based on
     'Heat Rate Base' and 'Heat Rate Incr*' properties from the PlexosDB.
 
     The efficiency is calculated as:
-        efficiency = (p_nom / fuel) * (1 / 0.293)
+        efficiency = (p_nom / fuel) * 3.6
     where:
         fuel = hr_base + (hr_inc * p_nom)
     If multiple hr_inc are present, p_nom is divided into equal segments.
+
+    If use_incr is False, only Heat Rate Base is used. If Heat Rate Incr is found,
+    a warning is printed.
 
     The result is stored in network.generators['efficiency'].
     """
@@ -942,8 +945,6 @@ def set_generator_efficiencies(network: Network, db: PlexosDB):
             efficiencies.append(np.nan)
             print(f"Warning: 'p_nom' not found for {gen}. No efficiency set.")
             continue
-
-        # Extract Heat Rate Base and all Heat Rate Incr*
         hr_base = next(
             (float(p["value"]) for p in props if p["property"] == "Heat Rate Base"),
             None,
@@ -953,21 +954,25 @@ def set_generator_efficiencies(network: Network, db: PlexosDB):
             for p in props
             if p["property"].lower().startswith("heat rate incr")
         ]
-
-        if hr_base is None or not hr_incs:
-            # NOTE: setting efficiency to 1 if no hr_base or hr_incs are found
+        if hr_base is None:
             efficiencies.append(1)
             continue
-
-        if len(hr_incs) == 1:
-            fuel = hr_base + (hr_incs[0] * p_nom)
+        if not use_incr or not hr_incs:
+            if not use_incr and hr_incs:
+                print(
+                    f"Heat Rate Incr found for {gen}. Only Heat Rate Base will be used."
+                )
+            fuel = hr_base
+        elif len(hr_incs) == 1:
+            fuel = hr_base + hr_incs[0] * p_nom
         else:
             n = len(hr_incs)
             p_seg = p_nom / n
-            fuel = hr_base + sum(hr_incs[i] * p_seg for i in range(n))
-
-        # NOTE: setting efficiency to 1 if fuel is 0
-        efficiency = (p_nom / fuel) * (1 / 0.293) if fuel != 0 else 1
+            fuel = hr_base + sum(hr * p_seg for hr in hr_incs)
+        efficiency = (p_nom / fuel) * 3.6 if fuel else 1
+        if efficiency > 1:
+            print(
+                f"   - Warning: Calculated efficiency > 1 for {gen} (efficiency={efficiency:.3f})"
+            )
         efficiencies.append(efficiency)
-
     network.generators["efficiency"] = efficiencies
