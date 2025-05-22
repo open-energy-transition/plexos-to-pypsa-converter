@@ -335,7 +335,7 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
 def set_capital_costs(network: Network, db: PlexosDB):
     """
     Sets the capital_cost for each generator in the PyPSA network based on
-    'Build Cost', 'WACC', 'Technical Life', and 'FO&M Charge' properties from the PlexosDB.
+    'Build Cost', 'WACC', 'Economic Life' (preferred), 'Technical Life', and 'FO&M Charge' properties from the PlexosDB.
 
     The capital_cost is calculated as:
         annuity_factor = wacc / (1 - (1 + wacc) ** -lifetime)
@@ -363,10 +363,15 @@ def set_capital_costs(network: Network, db: PlexosDB):
             (float(p["value"]) for p in props if p["property"] == "Build Cost"), None
         )
         wacc = next((float(p["value"]) for p in props if p["property"] == "WACC"), None)
-        lifetime = next(
+        # Prefer Economic Life, fallback to Technical Life
+        economic_life = next(
+            (float(p["value"]) for p in props if p["property"] == "Economic Life"), None
+        )
+        technical_life = next(
             (float(p["value"]) for p in props if p["property"] == "Technical Life"),
             None,
         )
+        lifetime = economic_life if economic_life is not None else technical_life
         fo_m_charge = next(
             (float(p["value"]) for p in props if p["property"] == "FO&M Charge"), None
         )
@@ -378,9 +383,6 @@ def set_capital_costs(network: Network, db: PlexosDB):
         if build_cost_MW is None or wacc is None or lifetime is None or lifetime <= 0:
             if fo_m_charge_MW is not None:
                 capital_costs.append(fo_m_charge_MW)
-                # print(
-                #     f"Info: Only FO&M Charge available for {gen}. Setting capital_cost to FO&M Charge ({fo_m_charge_MW} $/MW/yr)."
-                # )
             else:
                 capital_costs.append(np.nan)
                 print(
