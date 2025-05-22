@@ -359,9 +359,10 @@ def set_capital_costs(network: Network, db: PlexosDB):
     for gen in network.generators.index:
         props = db.get_object_properties(ClassEnum.Generator, gen)
         # Extract properties
-        build_cost = next(
-            (float(p["value"]) for p in props if p["property"] == "Build Cost"), None
-        )
+        build_costs = [
+            float(p["value"]) for p in props if p["property"] == "Build Cost"
+        ]
+        build_cost = sum(build_costs) / len(build_costs) if build_costs else None
         wacc = next((float(p["value"]) for p in props if p["property"] == "WACC"), None)
         # Prefer Economic Life, fallback to Technical Life
         economic_life = next(
