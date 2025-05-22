@@ -6,6 +6,7 @@ from plexos_pypsa.network.core import add_buses, add_links, add_loads, add_snaps
 from plexos_pypsa.network.generators import (
     add_generators,
     set_capacity_ratings,
+    set_capital_costs,
     set_generator_efficiencies,
     set_vre_profiles,
 )
@@ -35,6 +36,7 @@ add_snapshots(network, path_demand)
 # add generators
 add_generators(network, plexos_db)
 set_generator_efficiencies(network, plexos_db, use_incr=True)
+set_capital_costs(network, plexos_db)
 set_capacity_ratings(network, plexos_db)
 set_vre_profiles(network, plexos_db, path_aemo)
 
