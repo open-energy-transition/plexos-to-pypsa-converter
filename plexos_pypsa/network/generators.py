@@ -330,3 +330,74 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         )
         network.generators_t.p_max_pu.loc[:, dispatch_df.columns] = dispatch_df
         network.generators_t.p_min_pu.loc[:, dispatch_df.columns] = dispatch_df
+
+
+def set_capital_costs(network: Network, db: PlexosDB):
+    """
+    Sets the capital_cost for each generator in the PyPSA network based on
+    'Build Cost', 'WACC', 'Technical Life', and 'FO&M Charge' properties from the PlexosDB.
+
+    The capital_cost is calculated as:
+        annuity_factor = wacc / (1 - (1 + wacc) ** -lifetime)
+        annualized_capex = build_cost * annuity_factor
+        capital_cost = annualized_capex + fo_m_charge
+
+    All costs are converted to $/MW (PyPSA convention).
+
+    - Build Cost is given in $/kW, so multiply by 1000 to get $/MW.
+    - FO&M Charge is given in $/kW/yr, so multiply by 1000 to get $/MW/yr.
+    - capital_cost is stored in $/MW/yr.
+
+    If build_cost, wacc, or lifetime are missing, but FO&M Charge is present,
+    capital_cost is set to FO&M Charge only (converted to $/MW/yr).
+
+    The result is stored in network.generators['capital_cost'].
+    """
+    import numpy as np
+
+    capital_costs = []
+    for gen in network.generators.index:
+        props = db.get_object_properties(ClassEnum.Generator, gen)
+        # Extract properties
+        build_cost = next(
+            (float(p["value"]) for p in props if p["property"] == "Build Cost"), None
+        )
+        wacc = next((float(p["value"]) for p in props if p["property"] == "WACC"), None)
+        lifetime = next(
+            (float(p["value"]) for p in props if p["property"] == "Technical Life"),
+            None,
+        )
+        fo_m_charge = next(
+            (float(p["value"]) for p in props if p["property"] == "FO&M Charge"), None
+        )
+
+        # Convert units: $/kW -> $/MW
+        build_cost_MW = build_cost * 1000 if build_cost is not None else None
+        fo_m_charge_MW = fo_m_charge * 1000 if fo_m_charge is not None else None
+
+        if build_cost_MW is None or wacc is None or lifetime is None or lifetime <= 0:
+            if fo_m_charge_MW is not None:
+                capital_costs.append(fo_m_charge_MW)
+                # print(
+                #     f"Info: Only FO&M Charge available for {gen}. Setting capital_cost to FO&M Charge ({fo_m_charge_MW} $/MW/yr)."
+                # )
+            else:
+                capital_costs.append(np.nan)
+                print(
+                    f"Warning: Missing or invalid capital cost data for {gen}. No capital_cost set."
+                )
+            continue
+
+        # Calculate annuity factor
+        try:
+            annuity_factor = wacc / (1 - (1 + wacc) ** (-lifetime))
+        except ZeroDivisionError:
+            annuity_factor = 1.0
+
+        annualized_capex = build_cost_MW * annuity_factor
+        capital_cost = annualized_capex + (
+            fo_m_charge_MW if fo_m_charge_MW is not None else 0.0
+        )
+        capital_costs.append(capital_cost)
+
+    network.generators["capital_cost"] = capital_costs
