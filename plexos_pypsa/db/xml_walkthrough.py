@@ -12,7 +12,8 @@ from plexos_pypsa.db.read import (
 
 # list XML file
 file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
-# file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/sem/2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
+# file_xml = "/Users/meas/Desktop/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
+# file_xml = "/Users/meas/Dropbox/downloads/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -35,6 +36,7 @@ for cls in mod_classes:
 # mod_db.list_objects_by_class(ClassEnum.Emission)
 # mod_db.list_objects_by_class(ClassEnum.Fuel)
 # mod_db.list_objects_by_class(ClassEnum.Scenario)
+# mod_db.list_objects_by_class(ClassEnum.Load)
 
 # list and print objects for various classes
 mod_nodes = list_and_print_objects(mod_db, ClassEnum.Node, "node")
@@ -48,12 +50,12 @@ mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
 
 # print properties for specific objects
 print_properties(mod_db, ClassEnum.Node, "CNSW")
-print_properties(mod_db, ClassEnum.Generator, "Aramara Solar Farm")
+print_properties(mod_db, ClassEnum.Generator, "Wind_SA_LS", detailed=False)
 print_properties(mod_db, ClassEnum.Generator, "ADPPV1", detailed=True)
-print_properties(mod_db, ClassEnum.Generator, "AGLHAL01", detailed=False)
+print_properties(mod_db, ClassEnum.Generator, "YSWF1", detailed=False)
 
 print_properties(mod_db, ClassEnum.Storage, "Kidston Lower", detailed=False)
-print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW")
+print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW", detailed=False)
 save_properties(
     mod_db,
     ClassEnum.Line,
@@ -64,6 +66,8 @@ save_properties(
 mod_db.get_object_properties(ClassEnum.Storage, "Anthony Pieman")
 
 print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
+print_properties(mod_db, ClassEnum.Storage, "Anthony Pieman")
+print_properties(mod_db, ClassEnum.Generator, "SESA Biomass", detailed=False)
 print_properties(mod_db, ClassEnum.Emission, "Comb Co2 NSW")
 print_properties(mod_db, ClassEnum.Fuel, "ROI Oil")
 print_properties(mod_db, ClassEnum.Scenario, "Three-State Start")
@@ -112,10 +116,8 @@ mem_gen_all = mod_db.get_memberships_system(
 print_memberships(mem_gen_all)
 
 
-# check memberships for generator "Frasers Solar Farm"
-mem_gen = mod_db.get_memberships_system(
-    "Frasers Solar Farm", object_class=ClassEnum.Generator
-)
+# check memberships for generator "CQ CCGT"
+mem_gen = mod_db.get_memberships_system("CQ CCGT", object_class=ClassEnum.Generator)
 print_memberships(mem_gen)
 
 # check memberships of fuel Hallett
@@ -163,6 +165,14 @@ print_memberships(mem_line)
 mem_data = mod_db.search_membership_id(1255)
 print_membership_data_entries(mem_data)
 
+# check memberships of storage unit "Anthony Pieman"
+print_memberships(
+    mod_db.get_memberships_system("Anthony Pieman", object_class=ClassEnum.Storage)
+)
+
+# get properties of generator BASTYAN
+print_properties(mod_db, ClassEnum.Generator, "BASTYAN", detailed=False)
+
 # check constraints related to "CNSW-NNSW"
 print_properties(mod_db, ClassEnum.Constraint, "CNSW-SNW North")
 
@@ -172,11 +182,6 @@ obj_mem = mod_db.search_child_object_id(1340)
 print_memberships(obj_mem)
 
 # mod_db.to_csv("/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/csv/")
-
-# from coad.COAD import COAD
-# from coad.plexos_database import load
-
-# load(file_xml, "/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/aemo.sqlite")
 
 # coad = COAD(file_xml)
 # coad.list("Model")
