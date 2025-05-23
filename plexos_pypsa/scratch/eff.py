@@ -1,7 +1,7 @@
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.core import add_buses, add_snapshot
+from plexos_pypsa.network.core import add_buses, add_snapshots
 from plexos_pypsa.network.generators import add_generators, set_generator_efficiencies
 
 # list XML file
@@ -22,7 +22,7 @@ network = pypsa.Network()
 add_buses(network, plexos_db)
 
 # add snapshots
-add_snapshot(network, path_demand)
+add_snapshots(network, path_demand)
 
 # add generators
 add_generators(network, plexos_db)
