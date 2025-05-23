@@ -2,7 +2,7 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.network.constraints import add_constraints
-from plexos_pypsa.network.core import add_buses, add_links, add_loads, add_snapshots
+from plexos_pypsa.network.core import add_buses, add_loads, add_snapshots
 from plexos_pypsa.network.generators import (
     add_generators,
     set_capacity_ratings,
@@ -10,6 +10,7 @@ from plexos_pypsa.network.generators import (
     set_generator_efficiencies,
     set_vre_profiles,
 )
+from plexos_pypsa.network.links import add_links
 from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
 from plexos_pypsa.network.summarize import check_constraints
 
@@ -47,7 +48,7 @@ add_links(network, plexos_db)
 add_loads(network, path_demand)
 
 # solve network
-network.optimize(solver_name="highs")
+# network.optimize(solver_name="highs")
 
 # add storage (TODO: fix)
 add_storage(network, plexos_db)
