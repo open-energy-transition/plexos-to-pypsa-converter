@@ -289,3 +289,49 @@ def parse_lines_flow(db: PlexosDB, network):
     max_flow_df = pd.DataFrame(max_flow_series, index=snapshots)
 
     return min_flow_df, max_flow_df
+
+
+def set_link_flows(network: Network, db: PlexosDB):
+    """
+    Set the flow limits for links in the network based on data from the database.
+
+    This function retrieves the Min/Max Flow and Min/Max Rating for each link from the
+    database and sets the corresponding attributes in the network.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The network object to which the links belong.
+    db : Database
+        The database object containing line data and their properties.
+
+    Notes
+    -----
+    - The function uses the `parse_lines_flow` function to retrieve flow data.
+    - It sets `p_min_pu` and `p_max_pu` for each link based on the retrieved data.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> set_link_flows(network, db)
+    Set flow limits for 10 links
+    """
+    min_flow_df, max_flow_df = parse_lines_flow(db, network)
+
+    # Set p_nom based on the maximum value in the DataFrame
+    network.links["p_nom"] = max_flow_df.max(axis=0).reindex(network.links.index)
+
+    for line in network.links.index:
+        p_nom = network.links.loc[line, "p_nom"]
+        # Avoid division by zero
+        if not p_nom or p_nom == 0:
+            logger.warning(
+                f"Link {line} has p_nom of zero, cannot set p_min_pu and p_max_pu."
+            )
+
+    # Assign p_min_pu and p_max_pu to network.links_t.p_min_pu and network.links_t.p_min_pu
+    network.links_t.p_min_pu = min_flow_df.divide(network.links["p_nom"], axis=1)
+    network.links_t.p_min_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
+
+    print(f"Set flow limits for {len(network.links)} links")
