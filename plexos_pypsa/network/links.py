@@ -1,5 +1,6 @@
 import logging
 
+import pandas as pd  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
@@ -119,3 +120,172 @@ def add_links(network: Network, db: PlexosDB):
         if ramp_limit_down is not None:
             network.links.loc[line, "ramp_limit_down"] = ramp_limit_down
     print(f"Added {len(lines)} links")
+
+
+def parse_lines_flow(db: PlexosDB, network):
+    """
+    Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return two DataFrames:
+    - min_flow: index=network.snapshots, columns=line names
+    - max_flow: index=network.snapshots, columns=line names
+
+    Uses time-specified values if available; otherwise, defaults to non-time-specified values.
+    If no non-time-specified value exists, uses the first value in the properties (even if time-specified).
+    If a Rating exists, it replaces the Flow value.
+    """
+
+    snapshots = network.snapshots
+    lines = network.links.index
+
+    # 1. Get line object_id and name
+    line_query = """
+        SELECT o.object_id, o.name
+        FROM t_object o
+        JOIN t_class c ON o.class_id = c.class_id
+        WHERE c.name = 'Line'
+    """
+    line_rows = db.query(line_query)
+    line_df = pd.DataFrame(line_rows, columns=["object_id", "line"])
+
+    # 2. Get data_id for each line (child_object_id) from t_membership
+    membership_query = """
+        SELECT m.parent_object_id AS parent_object_id, m.child_object_id AS child_object_id, m.membership_id AS membership_id
+        FROM t_membership m
+        JOIN t_object p ON m.parent_object_id = p.object_id
+        JOIN t_class pc ON p.class_id = pc.class_id
+        JOIN t_object c ON m.child_object_id = c.object_id
+        JOIN t_class cc ON c.class_id = cc.class_id
+    """
+    membership_rows = db.query(membership_query)
+    membership_df = pd.DataFrame(
+        membership_rows,
+        columns=["parent_object_id", "child_object_id", "membership_id"],
+    )
+
+    # 3. Get property values for each data_id (Min/Max Flow, Min/Max Rating), with t_date_from/to
+    prop_query = """
+        SELECT
+            d.data_id,
+            d.membership_id,
+            p.name as property,
+            d.value,
+            df.date as t_date_from,
+            dt.date as t_date_to
+        FROM t_data d
+        JOIN t_property p ON d.property_id = p.property_id
+        LEFT JOIN t_date_from df ON d.data_id = df.data_id
+        LEFT JOIN t_date_to dt ON d.data_id = dt.data_id
+        WHERE p.name IN ('Min Flow', 'Max Flow', 'Min Rating', 'Max Rating')
+    """
+    prop_rows = db.query(prop_query)
+    prop_df = pd.DataFrame(
+        prop_rows,
+        columns=[
+            "data_id",
+            "membership_id",
+            "property",
+            "value",
+            "t_date_from",
+            "t_date_to",
+        ],
+    )
+
+    # 4. Merge: line object_id -> data_id -> property info
+    merged = pd.merge(prop_df, membership_df, on="membership_id", how="inner")
+    merged = pd.merge(
+        merged,
+        line_df,
+        left_on="child_object_id",
+        right_on="object_id",
+        how="inner",
+    )
+
+    # 5. Collect line Series in dictionaries for efficient concatenation
+    min_flow_series = {}
+    max_flow_series = {}
+
+    def extract_time_series(props, flow_name, rating_name):
+        ts = pd.Series(index=snapshots, dtype=float)
+        # Prefer rating if available, otherwise flow
+        # 1. Try time-specified rating
+        time_rating = props[
+            (props["property"] == rating_name) & props["t_date_from"].notnull()
+        ]
+        # 2. Try time-specified flow
+        time_flow = props[
+            (props["property"] == flow_name) & props["t_date_from"].notnull()
+        ]
+        # 3. Try non-time-specified rating
+        non_time_rating = props[
+            (props["property"] == rating_name) & props["t_date_from"].isnull()
+        ]
+        # 4. Try non-time-specified flow
+        non_time_flow = props[
+            (props["property"] == flow_name) & props["t_date_from"].isnull()
+        ]
+        # 5. All rating
+        all_rating = props[props["property"] == rating_name]
+        # 6. All flow
+        all_flow = props[props["property"] == flow_name]
+
+        # Fill time-specified rating
+        for _, p in time_rating.iterrows():
+            t_from = (
+                pd.to_datetime(p["t_date_from"])
+                if pd.notnull(p["t_date_from"])
+                else None
+            )
+            t_to = (
+                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
+            )
+            if t_from is None:
+                continue
+            if t_to:
+                mask = (snapshots >= t_from) & (snapshots <= t_to)
+            else:
+                mask = snapshots == t_from
+            ts.loc[mask] = float(p["value"])
+        # Fill time-specified flow only where ts is still nan
+        for _, p in time_flow.iterrows():
+            t_from = (
+                pd.to_datetime(p["t_date_from"])
+                if pd.notnull(p["t_date_from"])
+                else None
+            )
+            t_to = (
+                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
+            )
+            if t_from is None:
+                continue
+            if t_to:
+                mask = (snapshots >= t_from) & (snapshots <= t_to)
+            else:
+                mask = snapshots == t_from
+            ts.loc[mask & ts.isnull()] = float(p["value"])
+        # Fill with non-time-specified rating if any
+        if ts.isnull().any() and not non_time_rating.empty:
+            default_val = float(non_time_rating.iloc[0]["value"])
+            ts = ts.fillna(default_val)
+        # Fill with non-time-specified flow if any
+        if ts.isnull().any() and not non_time_flow.empty:
+            default_val = float(non_time_flow.iloc[0]["value"])
+            ts = ts.fillna(default_val)
+        # Fallback: any rating
+        if ts.isnull().any() and not all_rating.empty:
+            fallback_val = float(all_rating.iloc[0]["value"])
+            ts = ts.fillna(fallback_val)
+        # Fallback: any flow
+        if ts.isnull().any() and not all_flow.empty:
+            fallback_val = float(all_flow.iloc[0]["value"])
+            ts = ts.fillna(fallback_val)
+        # If still nan, fill with nan
+        return ts
+
+    for line in lines:
+        props = merged[merged["line"] == line]
+        min_flow_series[line] = extract_time_series(props, "Min Flow", "Min Rating")
+        max_flow_series[line] = extract_time_series(props, "Max Flow", "Max Rating")
+
+    min_flow_df = pd.DataFrame(min_flow_series, index=snapshots)
+    max_flow_df = pd.DataFrame(max_flow_series, index=snapshots)
+
+    return min_flow_df, max_flow_df
