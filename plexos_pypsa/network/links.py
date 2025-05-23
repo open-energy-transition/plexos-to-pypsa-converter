@@ -13,8 +13,7 @@ def add_links(network: Network, db: PlexosDB):
     Adds transmission links to the given network based on data from the database.
 
     This function retrieves line objects from the database, extracts their properties,
-    and adds them to the network as links. It ensures that the links connect valid buses
-    in the network and sets specific attributes like `p_nom`, `p_max_pu`, and `p_min_pu`.
+    and adds them to the network as links. It ensures that the links connect valid buses.
 
     Parameters
     ----------
@@ -27,9 +26,6 @@ def add_links(network: Network, db: PlexosDB):
     -----
     - The function retrieves the "From Nodes" and "To Nodes" for each line to determine
       the buses the link connects.
-    - The largest positive "Max Flow" property is used to set `p_nom`.
-    - The largest negative "Min Flow" property is normalized to `p_nom` and used to set `p_min_pu`.
-    - `p_max_pu` is set to 1.0.
 
     Examples
     --------
@@ -51,7 +47,7 @@ def add_links(network: Network, db: PlexosDB):
             (m["name"] for m in memberships if m["collection_name"] == "Node To"), None
         )
 
-        # Helper to extract the greatest property value
+        # Ramp limits
         def get_prop(prop, cond=lambda v: True):
             vals = [
                 float(p["value"])
@@ -60,59 +56,17 @@ def add_links(network: Network, db: PlexosDB):
             ]
             return max(vals) if vals else None
 
-        # Get flows and ratings
-        max_flow = get_prop("Max Flow", lambda v: v > 0)
-        min_flow = get_prop("Min Flow", lambda v: v < 0)
-        max_rating = get_prop("Max Rating", lambda v: v > 0)
-        min_rating = get_prop("Min Rating", lambda v: v < 0)
-
-        # Set p_nom as max_flow
-        p_nom = max_flow if max_flow is not None else None
-
-        # Prefer ratings if available
-        max_val = (
-            max_rating
-            if max_rating is not None
-            else (max_flow if max_flow is not None else 0)
-        )
-        min_val = (
-            min_rating
-            if min_rating is not None
-            else (min_flow if min_flow is not None else 0)
-        )
-
-        # Calculate pu values
-        p_min_pu = min_val / p_nom if p_nom else 0
-        p_max_pu = max_val / p_nom if p_nom else 1
-
-        # Ramp limits
         ramp_limit_up = get_prop("Max Ramp Up", lambda v: v > 0)
         ramp_limit_down = get_prop("Max Ramp Down", lambda v: v > 0)
 
-        # Add link
-        if p_nom is not None:
-            network.add(
-                "Link",
-                name=line,
-                bus0=node_from,
-                bus1=node_to,
-                p_nom=p_nom,
-                p_min_pu=p_min_pu,
-                p_max_pu=p_max_pu,
-            )
-            print(
-                f"- Added link {line} with p_nom={p_nom} to buses {node_from} and {node_to}"
-            )
-        else:
-            network.add(
-                "Link",
-                name=line,
-                bus0=node_from,
-                bus1=node_to,
-            )
-            print(
-                f"- Added link {line} without p_nom to buses {node_from} and {node_to}"
-            )
+        # Add link (do not set p_nom, p_min_pu, p_max_pu here)
+        network.add(
+            "Link",
+            name=line,
+            bus0=node_from,
+            bus1=node_to,
+        )
+        print(f"- Added link {line} to buses {node_from} and {node_to}")
 
         # Set ramp limits if available
         if ramp_limit_up is not None:
@@ -124,9 +78,10 @@ def add_links(network: Network, db: PlexosDB):
 
 def parse_lines_flow(db: PlexosDB, network):
     """
-    Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return two DataFrames:
+    Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return:
     - min_flow: index=network.snapshots, columns=line names
     - max_flow: index=network.snapshots, columns=line names
+    - fallback_val: dict mapping line name to fallback value used for p_nom
 
     Uses time-specified values if available; otherwise, defaults to non-time-specified values.
     If no non-time-specified value exists, uses the first value in the properties (even if time-specified).
@@ -202,6 +157,7 @@ def parse_lines_flow(db: PlexosDB, network):
     # 5. Collect line Series in dictionaries for efficient concatenation
     min_flow_series = {}
     max_flow_series = {}
+    fallback_val_dict = {}
 
     def extract_time_series(props, flow_name, rating_name):
         ts = pd.Series(index=snapshots, dtype=float)
@@ -226,6 +182,8 @@ def parse_lines_flow(db: PlexosDB, network):
         all_rating = props[props["property"] == rating_name]
         # 6. All flow
         all_flow = props[props["property"] == flow_name]
+
+        fallback_val = None
 
         # Fill time-specified rating
         for _, p in time_rating.iterrows():
@@ -265,10 +223,12 @@ def parse_lines_flow(db: PlexosDB, network):
         if ts.isnull().any() and not non_time_rating.empty:
             default_val = float(non_time_rating.iloc[0]["value"])
             ts = ts.fillna(default_val)
+            fallback_val = default_val
         # Fill with non-time-specified flow if any
         if ts.isnull().any() and not non_time_flow.empty:
             default_val = float(non_time_flow.iloc[0]["value"])
             ts = ts.fillna(default_val)
+            fallback_val = default_val
         # Fallback: any rating
         if ts.isnull().any() and not all_rating.empty:
             fallback_val = float(all_rating.iloc[0]["value"])
@@ -278,17 +238,21 @@ def parse_lines_flow(db: PlexosDB, network):
             fallback_val = float(all_flow.iloc[0]["value"])
             ts = ts.fillna(fallback_val)
         # If still nan, fill with nan
-        return ts
+        return ts, fallback_val
 
     for line in lines:
         props = merged[merged["line"] == line]
-        min_flow_series[line] = extract_time_series(props, "Min Flow", "Min Rating")
-        max_flow_series[line] = extract_time_series(props, "Max Flow", "Max Rating")
+        min_ts, min_fallback = extract_time_series(props, "Min Flow", "Min Rating")
+        max_ts, max_fallback = extract_time_series(props, "Max Flow", "Max Rating")
+        min_flow_series[line] = min_ts
+        max_flow_series[line] = max_ts
+        # Use max_fallback for p_nom
+        fallback_val_dict[line] = max_fallback
 
     min_flow_df = pd.DataFrame(min_flow_series, index=snapshots)
     max_flow_df = pd.DataFrame(max_flow_series, index=snapshots)
 
-    return min_flow_df, max_flow_df
+    return min_flow_df, max_flow_df, fallback_val_dict
 
 
 def set_link_flows(network: Network, db: PlexosDB):
@@ -317,21 +281,21 @@ def set_link_flows(network: Network, db: PlexosDB):
     >>> set_link_flows(network, db)
     Set flow limits for 10 links
     """
-    min_flow_df, max_flow_df = parse_lines_flow(db, network)
+    min_flow_df, max_flow_df, fallback_val_dict = parse_lines_flow(db, network)
 
-    # Set p_nom based on the maximum value in the DataFrame
-    network.links["p_nom"] = max_flow_df.max(axis=0).reindex(network.links.index)
-
+    # Set p_nom based on fallback_val_dict
     for line in network.links.index:
-        p_nom = network.links.loc[line, "p_nom"]
-        # Avoid division by zero
-        if not p_nom or p_nom == 0:
+        fallback_val = fallback_val_dict.get(line, None)
+        if fallback_val is not None:
+            network.links.loc[line, "p_nom"] = fallback_val
+            print(f"Set p_nom for link {line} to {fallback_val}.")
+        else:
             logger.warning(
-                f"Link {line} has p_nom of zero, cannot set p_min_pu and p_max_pu."
+                f"Link {line} has no fallback value for p_nom, cannot set p_min_pu and p_max_pu."
             )
 
-    # Assign p_min_pu and p_max_pu to network.links_t.p_min_pu and network.links_t.p_min_pu
+    # Assign p_min_pu and p_max_pu to network.links_t
     network.links_t.p_min_pu = min_flow_df.divide(network.links["p_nom"], axis=1)
-    network.links_t.p_min_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
+    network.links_t.p_max_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
 
     print(f"Set flow limits for {len(network.links)} links")
