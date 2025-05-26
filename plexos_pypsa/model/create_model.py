@@ -1,7 +1,6 @@
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.constraints import add_constraints
 from plexos_pypsa.network.core import add_buses, add_loads, add_snapshots
 from plexos_pypsa.network.generators import (
     add_generators,
@@ -12,7 +11,6 @@ from plexos_pypsa.network.generators import (
 )
 from plexos_pypsa.network.links import add_links, set_link_flows
 from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
-from plexos_pypsa.network.summarize import check_constraints
 
 # list XML file
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
@@ -52,10 +50,6 @@ add_loads(network, path_demand)
 # add storage (TODO: fix)
 add_storage(network, plexos_db)
 add_hydro_inflows(network, plexos_db, path_ren)
-
-# add constraints (TODO: fix)
-add_constraints(network, plexos_db)
-check_constraints(network)
 
 # save to file
 network.export_to_netcdf("converted_network.nc")
