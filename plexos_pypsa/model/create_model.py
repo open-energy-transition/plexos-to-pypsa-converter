@@ -15,12 +15,13 @@ from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
 from plexos_pypsa.network.summarize import check_constraints
 
 # list XML file
-file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
+file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
 # file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/sem/2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
 
 # specify renewables profiles and demand paths
-path_ren = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change"
-path_demand = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/Traces/demand"
+path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
+path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
 
 # load PlexosDB from XML file
 plexos_db = PlexosDB.from_xml(file_xml)
@@ -48,9 +49,6 @@ set_link_flows(network, plexos_db)
 # add demand/loads
 add_loads(network, path_demand)
 
-# solve network
-# network.optimize(solver_name="highs")
-
 # add storage (TODO: fix)
 add_storage(network, plexos_db)
 add_hydro_inflows(network, plexos_db, path_ren)
@@ -62,3 +60,6 @@ check_constraints(network)
 # save to file
 network.export_to_netcdf("converted_network.nc")
 print("Network exported to converted_network.nc")
+
+# solve network
+# network.optimize(solver_name="highs")
