@@ -113,6 +113,11 @@ def parse_generator_ratings(db: PlexosDB, network):
     """
     Parse generator ratings from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=generator names.
     Applies rating values according to these rules:
+    - If "Rating" is present (possibly time-dependent), use it as p_max_pu (normalized by Max Capacity).
+    - Otherwise, if "Rating Factor" is present (possibly time-dependent), use it as p_max_pu (Rating Factor is a percentage of Max Capacity).
+    - If neither, fallback to "Max Capacity".
+
+    This is how the time-dependent ratings are handled:
     - "t_date_from" Only: Value is effective from this date onward, until superseded.
     - "t_date_to" Only: Value applies up to and including this date, starting from simulation start or last defined "Date From".
     - Both: Value applies within the defined date range.
@@ -145,7 +150,7 @@ def parse_generator_ratings(db: PlexosDB, network):
         columns=["parent_object_id", "child_object_id", "membership_id"],
     )
 
-    # 3. Get property values for each data_id (Rating or Max Capacity), with t_date_from/to
+    # 3. Get property values for each data_id (Rating, Rating Factor, or Max Capacity), with t_date_from/to
     prop_query = """
         SELECT
             d.data_id,
@@ -158,7 +163,7 @@ def parse_generator_ratings(db: PlexosDB, network):
         JOIN t_property p ON d.property_id = p.property_id
         LEFT JOIN t_date_from df ON d.data_id = df.data_id
         LEFT JOIN t_date_to dt ON d.data_id = dt.data_id
-        WHERE p.name = 'Rating' OR p.name = 'Max Capacity'
+        WHERE p.name = 'Rating' OR p.name = 'Max Capacity' OR p.name = 'Rating Factor'
     """
     prop_rows = db.query(prop_query)
     prop_df = pd.DataFrame(
@@ -185,7 +190,7 @@ def parse_generator_ratings(db: PlexosDB, network):
     for gen in gen_df["generator"]:
         props = merged[merged["generator"] == gen]
 
-        # Get all ratings
+        # Get all Rating entries (time-dependent)
         ratings = []
         for _, p in props[props["property"] == "Rating"].iterrows():
             t_from = (
@@ -204,53 +209,108 @@ def parse_generator_ratings(db: PlexosDB, network):
                 }
             )
 
-        # If no ratings, fallback to Max Capacity
-        if not ratings:
-            maxcap_row = props[props["property"] == "Max Capacity"]
-            maxcap = (
-                float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
+        # Get all Rating Factor entries (time-dependent)
+        rating_factors = []
+        for _, p in props[props["property"] == "Rating Factor"].iterrows():
+            t_from = (
+                pd.to_datetime(p["t_date_from"])
+                if pd.notnull(p["t_date_from"])
+                else None
             )
-            gen_series[gen] = pd.Series(maxcap, index=snapshots)
-            continue
+            t_to = (
+                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
+            )
+            rating_factors.append(
+                {
+                    "value": float(p["value"]),
+                    "from": t_from,
+                    "to": t_to,
+                }
+            )
 
-        # Sort by from date (None first, then earliest)
-        ratings = sorted(
-            ratings,
-            key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
+        # Get Max Capacity (for fallback and for scaling)
+        maxcap_row = props[props["property"] == "Max Capacity"]
+        maxcap = float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
+
+        # Get p_nom from network if available
+        p_nom = (
+            network.generators.loc[gen, "p_nom"]
+            if gen in network.generators.index and "p_nom" in network.generators.columns
+            else maxcap
         )
 
-        ts = pd.Series(index=snapshots, dtype=float)
-        last_from = None
-
-        for r in ratings:
-            # Case 1: Both t_date_from and t_date_to
-            if r["from"] is not None and r["to"] is not None:
-                mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
-                ts.loc[mask] = r["value"]
-                last_from = r["from"]
-            # Case 2: Only t_date_from
-            elif r["from"] is not None and r["to"] is None:
-                mask = snapshots >= r["from"]
-                ts.loc[mask] = r["value"]
-                last_from = r["from"]
-            # Case 3: Only t_date_to
-            elif r["from"] is None and r["to"] is not None:
-                # If there was a previous t_date_from, start from there, else from beginning
-                if last_from is not None:
-                    mask = (snapshots >= last_from) & (snapshots <= r["to"])
-                else:
-                    mask = snapshots <= r["to"]
-                ts.loc[mask] = r["value"]
-            # If neither, skip
-
-        # Fill any NaN with Max Capacity
-        if ts.isnull().any():
-            maxcap_row = props[props["property"] == "Max Capacity"]
-            maxcap = (
-                float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
+        # If there are any Rating entries, use them (as p_max_pu = Rating / p_nom)
+        if ratings:
+            # Sort by from date (None first, then earliest)
+            ratings = sorted(
+                ratings,
+                key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
             )
+            ts = pd.Series(index=snapshots, dtype=float)
+            last_from = None
+            for r in ratings:
+                val = r["value"]
+                # Case 1: Both t_date_from and t_date_to
+                if r["from"] is not None and r["to"] is not None:
+                    mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
+                    ts.loc[mask] = val
+                    last_from = r["from"]
+                # Case 2: Only t_date_from
+                elif r["from"] is not None and r["to"] is None:
+                    mask = snapshots >= r["from"]
+                    ts.loc[mask] = val
+                    last_from = r["from"]
+                # Case 3: Only t_date_to
+                elif r["from"] is None and r["to"] is not None:
+                    if last_from is not None:
+                        mask = (snapshots >= last_from) & (snapshots <= r["to"])
+                    else:
+                        mask = snapshots <= r["to"]
+                    ts.loc[mask] = val
+                # If neither, skip
+            # Fill any NaN with Max Capacity
             ts = ts.fillna(maxcap)
-        gen_series[gen] = ts
+            # Normalize by p_nom to get p_max_pu
+            ts = ts / p_nom if p_nom else ts
+            gen_series[gen] = ts
+            continue
+
+        # If no Rating, use Rating Factor (as p_max_pu = Rating Factor / 100)
+        if rating_factors:
+            # Sort by from date (None first, then earliest)
+            rating_factors = sorted(
+                rating_factors,
+                key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
+            )
+            ts = pd.Series(index=snapshots, dtype=float)
+            last_from = None
+            for r in rating_factors:
+                val = r["value"] / 100.0  # Rating Factor is percent of Max Capacity
+                # Case 1: Both t_date_from and t_date_to
+                if r["from"] is not None and r["to"] is not None:
+                    mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
+                    ts.loc[mask] = val
+                    last_from = r["from"]
+                # Case 2: Only t_date_from
+                elif r["from"] is not None and r["to"] is None:
+                    mask = snapshots >= r["from"]
+                    ts.loc[mask] = val
+                    last_from = r["from"]
+                # Case 3: Only t_date_to
+                elif r["from"] is None and r["to"] is not None:
+                    if last_from is not None:
+                        mask = (snapshots >= last_from) & (snapshots <= r["to"])
+                    else:
+                        mask = snapshots <= r["to"]
+                    ts.loc[mask] = val
+                # If neither, skip
+            # Fill any NaN with 1.0 (100% of Max Capacity)
+            ts = ts.fillna(1.0)
+            gen_series[gen] = ts
+            continue
+
+        # If neither, fallback to Max Capacity (p_max_pu = 1.0)
+        gen_series[gen] = pd.Series(1.0, index=snapshots)
 
     # Concatenate all generator Series into a single DataFrame
     result = pd.concat(gen_series, axis=1)
@@ -279,13 +339,8 @@ def set_capacity_ratings(network: Network, db: PlexosDB):
     >>> db = PlexosDB("path/to/file.xml")
     >>> set_capacity_ratings(network, db)
     """
-    # Get the generator ratings from the database
+    # Get the generator ratings from the database (already p_max_pu)
     generator_ratings = parse_generator_ratings(db, network)
-
-    # For each generator in the network:
-    # - Get the p_nom (max capacity)
-    # - Normalize the generating_ratings for the generator by p_nom
-    # - Set the p_max_pu time series for the generator
 
     # Only keep generators present in both network and generator_ratings
     valid_gens = [
@@ -294,11 +349,6 @@ def set_capacity_ratings(network: Network, db: PlexosDB):
     missing_gens = [
         gen for gen in network.generators.index if gen not in generator_ratings.columns
     ]
-
-    # Normalize ratings by p_nom for valid generators
-    for gen in valid_gens:
-        p_nom = network.generators.loc[gen, "p_nom"]
-        generator_ratings[gen] = generator_ratings[gen] / p_nom
 
     # Assign all columns at once to avoid fragmentation
     network.generators_t.p_max_pu.loc[:, valid_gens] = generator_ratings[
