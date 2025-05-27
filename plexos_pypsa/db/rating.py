@@ -5,7 +5,10 @@ from plexosdb import PlexosDB  # type: ignore
 def parse_generator_ratings(db: PlexosDB, network):
     """
     Parse generator ratings from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=generator names.
-    If no t_date_to is given, the rating only lasts for the snapshot at t_date_from.
+    Applies rating values according to these rules:
+    - "t_date_from" Only: Value is effective from this date onward, until superseded.
+    - "t_date_to" Only: Value applies up to and including this date, starting from simulation start or last defined "Date From".
+    - Both: Value applies within the defined date range.
     All snapshots with no rating are filled with Max Capacity.
     """
     snapshots = network.snapshots
@@ -103,18 +106,36 @@ def parse_generator_ratings(db: PlexosDB, network):
             gen_series[gen] = pd.Series(maxcap, index=snapshots)
             continue
 
-        # Sort by from date
-        ratings = sorted(ratings, key=lambda x: x["from"] or pd.Timestamp.min)
+        # Sort by from date (None first, then earliest)
+        ratings = sorted(
+            ratings,
+            key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
+        )
+
         ts = pd.Series(index=snapshots, dtype=float)
+        last_from = None
+
         for r in ratings:
-            if r["from"] is None:
-                continue
-            if r["to"]:
+            # Case 1: Both t_date_from and t_date_to
+            if r["from"] is not None and r["to"] is not None:
                 mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
-            else:
-                # Only set the snapshot that matches t_date_from
-                mask = snapshots == r["from"]
-            ts.loc[mask] = r["value"]
+                ts.loc[mask] = r["value"]
+                last_from = r["from"]
+            # Case 2: Only t_date_from
+            elif r["from"] is not None and r["to"] is None:
+                mask = snapshots >= r["from"]
+                ts.loc[mask] = r["value"]
+                last_from = r["from"]
+            # Case 3: Only t_date_to
+            elif r["from"] is None and r["to"] is not None:
+                # If there was a previous t_date_from, start from there, else from beginning
+                if last_from is not None:
+                    mask = (snapshots >= last_from) & (snapshots <= r["to"])
+                else:
+                    mask = snapshots <= r["to"]
+                ts.loc[mask] = r["value"]
+            # If neither, skip
+
         # Fill any NaN with Max Capacity
         if ts.isnull().any():
             maxcap_row = props[props["property"] == "Max Capacity"]
