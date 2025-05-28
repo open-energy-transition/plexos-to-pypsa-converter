@@ -42,9 +42,9 @@ def add_buses(network: Network, db: PlexosDB):
             (float(p["value"]) for p in props if p["property"] == "Voltage"), 110
         )  # default to 110 kV if voltage not found
 
-        # add bus to network
+        # add bus to network, set carrier as "AC"
         # NOTE: skipping adding v_nom because none of the AEMO nodes have voltage values
-        network.add("Bus", name=node)
+        network.add("Bus", name=node, carrier="AC")
     print(f"Added {len(nodes)} buses")
 
 
