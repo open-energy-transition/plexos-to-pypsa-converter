@@ -198,3 +198,28 @@ def add_loads(network: Network, path: str):
         # Add the load time series
         network.loads_t.p_set.loc[:, load_name] = df_long
         print(f"- Added load time series for {load_name}")
+
+
+def add_carriers(network: Network, db: PlexosDB):
+    """
+    Adds carriers to the PyPSA network.
+    - Always adds 'AC' as a carrier.
+    - Adds all fuels from the PlexosDB as carriers.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network object.
+    db : PlexosDB
+        A PlexosDB object containing the database connection.
+    """
+    # Add 'AC' carrier
+    if "AC" not in network.carriers.index:
+        network.add("Carrier", name="AC")
+
+    # Add all fuels as carriers
+    fuels = db.list_objects_by_class(ClassEnum.Fuel)
+    for fuel in fuels:
+        if fuel not in network.carriers.index:
+            network.add("Carrier", name=fuel)
+    print(f"Added carriers: ['AC'] + {fuels}")
