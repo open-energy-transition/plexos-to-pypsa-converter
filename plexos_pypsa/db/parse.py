@@ -75,6 +75,32 @@ def get_emission_rates(db, generator_name):
     return emission_props
 
 
+def find_fuel_for_generator(db, generator_name):
+    """
+    Finds the associated fuel for a given generator by searching its memberships.
+
+    Parameters:
+        db: PlexosDB instance
+        generator_name: Name of the generator (str)
+
+    Returns:
+        The name of the associated Fuel, or None if not found.
+    """
+    try:
+        memberships = db.get_memberships_system(
+            generator_name, object_class=ClassEnum.Generator
+        )
+    except Exception as e:
+        print(f"Error finding memberships for {generator_name}: {e}")
+        return None
+
+    for m in memberships:
+        if m.get("class") == "Fuel":
+            return m.get("name")
+    # print(f"No associated fuel found for {generator_name}")
+    return None
+
+
 # gen_name = "MURRAY10"
 # emissions = get_emission_rates(prog_db, gen_name)
 # print(f"Emission rates for {gen_name}:")
