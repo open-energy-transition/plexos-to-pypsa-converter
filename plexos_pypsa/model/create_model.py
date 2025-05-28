@@ -54,10 +54,6 @@ add_loads(n, path_demand)
 add_storage(n, plexos_db)
 add_hydro_inflows(n, plexos_db, path_ren)
 
-# save to file
-n.export_to_netcdf("converted_network.nc")
-print("Network exported to converted_network.nc")
-
 # run consistency check on network
 n.consistency_check()
 
@@ -66,3 +62,7 @@ subset = n.snapshots[:10]  # the first 10 snapshots
 
 # S the network
 n.optimize(solver_name="highs", snapshots=subset)
+
+# save to file
+# n.export_to_netcdf("converted_network.nc")
+# print("Network exported to converted_network.nc")
