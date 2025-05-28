@@ -285,25 +285,30 @@ def parse_generator_ratings(db: PlexosDB, network):
             ts = pd.Series(index=snapshots, dtype=float)
             last_from = None
             for r in rating_factors:
-                val = r["value"] / 100.0  # Rating Factor is percent of Max Capacity
-                # Case 1: Both t_date_from and t_date_to
-                if r["from"] is not None and r["to"] is not None:
-                    mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
-                    ts.loc[mask] = val
-                    last_from = r["from"]
-                # Case 2: Only t_date_from
-                elif r["from"] is not None and r["to"] is None:
-                    mask = snapshots >= r["from"]
-                    ts.loc[mask] = val
-                    last_from = r["from"]
-                # Case 3: Only t_date_to
-                elif r["from"] is None and r["to"] is not None:
-                    if last_from is not None:
-                        mask = (snapshots >= last_from) & (snapshots <= r["to"])
-                    else:
-                        mask = snapshots <= r["to"]
-                    ts.loc[mask] = val
-                # If neither, skip
+                if r["value"] is not None:
+                    val = r["value"] / 100.0  # Rating Factor is percent of Max Capacity
+                    # Case 1: Both t_date_from and t_date_to
+                    if r["from"] is not None and r["to"] is not None:
+                        mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
+                        ts.loc[mask] = val
+                        last_from = r["from"]
+                    # Case 2: Only t_date_from
+                    elif r["from"] is not None and r["to"] is None:
+                        mask = snapshots >= r["from"]
+                        ts.loc[mask] = val
+                        last_from = r["from"]
+                    # Case 3: Only t_date_to
+                    elif r["from"] is None and r["to"] is not None:
+                        if last_from is not None:
+                            mask = (snapshots >= last_from) & (snapshots <= r["to"])
+                        else:
+                            mask = snapshots <= r["to"]
+                        ts.loc[mask] = val
+                    # If neither, skip
+                else:
+                    print(
+                        f"Warning: Rating Factor value is None for generator {gen}, skipping this entry."
+                    )
             # Fill any NaN with 1.0 (100% of Max Capacity)
             ts = ts.fillna(1.0)
             gen_series[gen] = ts
