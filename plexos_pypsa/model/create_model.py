@@ -1,7 +1,7 @@
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.core import add_buses, add_loads, add_snapshots
+from plexos_pypsa.network.core import add_buses, add_carriers, add_loads, add_snapshots
 from plexos_pypsa.network.generators import (
     add_generators,
     set_capacity_ratings,
@@ -25,35 +25,44 @@ path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/dem
 plexos_db = PlexosDB.from_xml(file_xml)
 
 # initialize PyPSA network
-network = pypsa.Network()
+n = pypsa.Network()
 
 # add buses
-add_buses(network, plexos_db)
+add_buses(n, plexos_db)
 
 # add snapshots
-add_snapshots(network, path_demand)
+add_snapshots(n, path_demand)
+
+# add carriers
+add_carriers(n, plexos_db)
 
 # add generators
-add_generators(network, plexos_db)
-set_generator_efficiencies(network, plexos_db, use_incr=True)
-set_capital_costs(network, plexos_db)
-set_capacity_ratings(network, plexos_db)
-set_vre_profiles(network, plexos_db, path_ren)
+add_generators(n, plexos_db)
+set_generator_efficiencies(n, plexos_db, use_incr=True)
+set_capital_costs(n, plexos_db)
+set_capacity_ratings(n, plexos_db)
+set_vre_profiles(n, plexos_db, path_ren)
 
 # add links
-add_links(network, plexos_db)
-set_link_flows(network, plexos_db)
+add_links(n, plexos_db)
+set_link_flows(n, plexos_db)
 
 # add demand/loads
-add_loads(network, path_demand)
+add_loads(n, path_demand)
 
 # add storage (TODO: fix)
-add_storage(network, plexos_db)
-add_hydro_inflows(network, plexos_db, path_ren)
+add_storage(n, plexos_db)
+add_hydro_inflows(n, plexos_db, path_ren)
 
 # save to file
-network.export_to_netcdf("converted_network.nc")
+n.export_to_netcdf("converted_network.nc")
 print("Network exported to converted_network.nc")
 
-# solve network
-# network.optimize(solver_name="highs")
+# run consistency check on network
+n.consistency_check()
+
+# select a subset of snapshots
+subset = n.snapshots[:10]  # the first 10 snapshots
+
+# S the network
+n.optimize(solver_name="highs", snapshots=subset)
