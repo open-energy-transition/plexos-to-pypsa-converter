@@ -569,9 +569,10 @@ def set_capital_costs(network: Network, db: PlexosDB):
     If build_cost, wacc, or lifetime are missing, but FO&M Charge is present,
     capital_cost is set to FO&M Charge only (converted to $/MW/yr).
 
+    If no cost can be calculated or found, capital_cost is set to 0.
+
     The result is stored in network.generators['capital_cost'].
     """
-    import numpy as np
 
     capital_costs = []
     for gen in network.generators.index:
@@ -603,9 +604,9 @@ def set_capital_costs(network: Network, db: PlexosDB):
             if fo_m_charge_MW is not None:
                 capital_costs.append(fo_m_charge_MW)
             else:
-                capital_costs.append(np.nan)
+                capital_costs.append(0.0)
                 print(
-                    f"Warning: Missing or invalid capital cost data for {gen}. No capital_cost set."
+                    f"Warning: Missing or invalid capital cost data for {gen}. Setting capital_cost to 0."
                 )
             continue
 
