@@ -440,6 +440,7 @@ def set_generator_efficiencies(network: Network, db: PlexosDB, use_incr: bool = 
 def set_vre_profiles(network: Network, db: PlexosDB, path: str):
     """
     Adds time series profiles for solar and wind generators to the PyPSA network.
+    Also sets the generator's carrier to "Solar" or "Wind" if a profile is found.
 
     Parameters
     ----------
@@ -471,9 +472,13 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         )
 
         if filename:
-            print(f"Found profile for generator {gen}: {filename}")
+            # print(f"Found profile for generator {gen}: {filename}")
             profile_type = "solar" if "Traces\\solar\\" in filename else "wind"
             file_path = os.path.join(path, filename.replace("\\", os.sep))
+
+            # Set carrier to "Solar" or "Wind"
+            carrier_value = "Solar" if profile_type == "solar" else "Wind"
+            network.generators.at[gen, "carrier"] = carrier_value
 
             try:
                 df = pd.read_csv(file_path)
