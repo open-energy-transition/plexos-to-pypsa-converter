@@ -6,7 +6,7 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import find_bus_for_object
+from plexos_pypsa.db.parse import find_bus_for_object, find_fuel_for_generator
 
 logger = logging.getLogger(__name__)
 
@@ -90,13 +90,22 @@ def add_generators(network: Network, db: PlexosDB):
             skipped_generators.append(gen)
             continue
 
+        # Find associated fuel/carrier
+        carrier = find_fuel_for_generator(db, gen)
+
         # Add generator to the network
         if p_max is not None:
-            network.add("Generator", gen, bus=bus, p_nom=p_max)
+            if carrier is not None:
+                network.add("Generator", gen, bus=bus, p_nom=p_max, carrier=carrier)
+            else:
+                network.add("Generator", gen, bus=bus, p_nom=p_max)
             for attr, val in gen_attrs.items():
                 network.generators.loc[gen, attr] = val
         else:
-            network.add("Generator", gen, bus=bus)
+            if carrier is not None:
+                network.add("Generator", gen, bus=bus, carrier=carrier)
+            else:
+                network.add("Generator", gen, bus=bus)
     # Report skipped generators
     if empty_generators:
         print(f"\nSkipped {len(empty_generators)} generators with no properties:")
