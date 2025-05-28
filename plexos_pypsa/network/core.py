@@ -217,9 +217,16 @@ def add_carriers(network: Network, db: PlexosDB):
     if "AC" not in network.carriers.index:
         network.add("Carrier", name="AC")
 
+    # Add "Solar" and "Wind" carriers
+    if "Solar" not in network.carriers.index:
+        network.add("Carrier", name="Solar")
+    if "Wind" not in network.carriers.index:
+        network.add("Carrier", name="Wind")
+
     # Add all fuels as carriers
     fuels = db.list_objects_by_class(ClassEnum.Fuel)
     for fuel in fuels:
         if fuel not in network.carriers.index:
             network.add("Carrier", name=fuel)
-    print(f"Added carriers: ['AC'] + {fuels}")
+
+    print(f"Added carriers: ['AC', 'Solar', 'Wind'] + {fuels}")
