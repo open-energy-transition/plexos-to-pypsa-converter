@@ -109,7 +109,7 @@ def add_snapshots(network: Network, path: str):
     )
 
     # Set the unified time series as the network snapshots
-    network.set_snapshots(unified_times)
+    network.set_snapshots(unified_times.tolist())
 
 
 def add_loads(network: Network, path: str):
