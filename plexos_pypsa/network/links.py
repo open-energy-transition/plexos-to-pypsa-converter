@@ -294,8 +294,15 @@ def set_link_flows(network: Network, db: PlexosDB):
                 f"Link {line} has no fallback value for p_nom, cannot set p_min_pu and p_max_pu."
             )
 
-    # Assign p_min_pu and p_max_pu to network.links_t
-    network.links_t.p_min_pu = min_flow_df.divide(network.links["p_nom"], axis=1)
-    network.links_t.p_max_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
+    # Assign p_min_pu and p_max_pu to network.links_t, filling NaNs and infs with safe defaults
+    p_min_pu = min_flow_df.divide(network.links["p_nom"], axis=1)
+    p_max_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
+
+    # Replace inf/-inf with 0 for p_min_pu and 1 for p_max_pu
+    p_min_pu = p_min_pu.replace([float("inf"), float("-inf")], 0).fillna(0)
+    p_max_pu = p_max_pu.replace([float("inf"), float("-inf")], 1).fillna(1)
+
+    network.links_t.p_min_pu = p_min_pu
+    network.links_t.p_max_pu = p_max_pu
 
     print(f"Set flow limits for {len(network.links)} links")
