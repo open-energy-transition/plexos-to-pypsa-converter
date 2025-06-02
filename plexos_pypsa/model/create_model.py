@@ -58,10 +58,10 @@ add_hydro_inflows(n, plexos_db, path_ren)
 n.consistency_check()
 
 # select a subset of snapshots
-subset = n.snapshots[:10]  # the first 10 snapshots
+subset = n.snapshots[:50]  # the first 10 snapshots
 
 # S the network
-n.optimize(solver_name="highs", snapshots=subset)
+n.optimize(solver_name="highs", snapshots=subset)  # type: ignore
 
 # save to file
 # n.export_to_netcdf("converted_network.nc")
