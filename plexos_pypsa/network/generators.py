@@ -6,7 +6,12 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import find_bus_for_object, find_fuel_for_generator
+from plexos_pypsa.db.parse import (
+    find_bus_for_object,
+    find_fuel_for_generator,
+    get_dataid_timeslice_map,
+    read_timeslice_activity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,10 +123,11 @@ def add_generators(network: Network, db: PlexosDB):
             print(f"  - {g}")
 
 
-def parse_generator_ratings(db: PlexosDB, network):
+def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
     """
     Parse generator ratings from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=generator names.
     Applies rating values according to these rules:
+    - If a property is linked to a timeslice, use the timeslice activity to set the property for the relevant snapshots (takes precedence over t_date_from/t_date_to).
     - If "Rating" is present (possibly time-dependent), use it as p_max_pu (normalized by Max Capacity).
     - Otherwise, if "Rating Factor" is present (possibly time-dependent), use it as p_max_pu (Rating Factor is a percentage of Max Capacity).
     - If neither, fallback to "Max Capacity".
@@ -133,6 +139,12 @@ def parse_generator_ratings(db: PlexosDB, network):
     All snapshots with no rating are filled with Max Capacity.
     """
     snapshots = network.snapshots
+    timeslice_activity = None
+    if timeslice_csv is not None:
+        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshots)
+    dataid_to_timeslice = (
+        get_dataid_timeslice_map(db) if timeslice_csv is not None else {}
+    )
 
     # 1. Get generator object_id and name
     gen_query = """
@@ -198,131 +210,104 @@ def parse_generator_ratings(db: PlexosDB, network):
 
     for gen in gen_df["generator"]:
         props = merged[merged["generator"] == gen]
-
-        # Get all Rating entries (time-dependent)
-        ratings = []
-        for _, p in props[props["property"] == "Rating"].iterrows():
-            t_from = (
-                pd.to_datetime(p["t_date_from"])
+        # Get all property entries (time-dependent, timeslice-dependent, or static)
+        property_entries = []
+        for _, p in props.iterrows():
+            entry = {
+                "property": p["property"],
+                "value": float(p["value"]),
+                "from": pd.to_datetime(p["t_date_from"])
                 if pd.notnull(p["t_date_from"])
-                else None
-            )
-            t_to = (
-                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
-            )
-            ratings.append(
-                {
-                    "value": float(p["value"]),
-                    "from": t_from,
-                    "to": t_to,
-                }
-            )
+                else None,
+                "to": pd.to_datetime(p["t_date_to"])
+                if pd.notnull(p["t_date_to"])
+                else None,
+                "data_id": p["data_id"],
+            }
+            # Attach timeslice info if available
+            if p["data_id"] in dataid_to_timeslice:
+                # Ensure timeslices are always a list of full names
+                entry["timeslices"] = dataid_to_timeslice[p["data_id"]]
+            property_entries.append(entry)
 
-        # Get all Rating Factor entries (time-dependent)
-        rating_factors = []
-        for _, p in props[props["property"] == "Rating Factor"].iterrows():
-            t_from = (
-                pd.to_datetime(p["t_date_from"])
-                if pd.notnull(p["t_date_from"])
-                else None
-            )
-            t_to = (
-                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
-            )
-            rating_factors.append(
-                {
-                    "value": float(p["value"]),
-                    "from": t_from,
-                    "to": t_to,
-                }
-            )
+        # Build a DataFrame for all property entries
+        prop_df_entries = pd.DataFrame(property_entries)
+
+        # For each property type (Rating, Rating Factor, Max Capacity), build a time series
+        def build_ts(prop_name, fallback=None):
+            ts = pd.Series(index=snapshots, dtype=float)
+            # 1. Timeslice-based entries (take precedence)
+            if timeslice_activity is not None:
+                for _, row in prop_df_entries[
+                    prop_df_entries["property"] == prop_name
+                ].iterrows():
+                    for tslice in row["timeslices"]:
+                        # Use the full timeslice name as key, warn if not found
+                        if tslice in timeslice_activity.columns:
+                            mask = timeslice_activity[tslice]
+                            ts.loc[mask] = row["value"]
+                        else:
+                            print(
+                                f"Warning: Timeslice '{tslice}' not found in timeslice_activity columns: {list(timeslice_activity.columns)}"
+                            )
+                        ts.loc[mask] = row["value"]
+            # 2. t_date_from/t_date_to entries (only if not already set by timeslice)
+            for _, row in prop_df_entries[
+                prop_df_entries["property"] == prop_name
+            ].iterrows():
+                if ("timeslices" in row and row["timeslices"]) or (
+                    row["from"] is None and row["to"] is None
+                ):
+                    continue  # skip if timeslice already handled or static
+                if row["from"] is not None and row["to"] is not None:
+                    mask = (snapshots >= row["from"]) & (snapshots <= row["to"])
+                    ts.loc[mask & ts.isnull()] = row["value"]
+                elif row["from"] is not None:
+                    mask = snapshots >= row["from"]
+                    ts.loc[mask & ts.isnull()] = row["value"]
+                elif row["to"] is not None:
+                    mask = snapshots <= row["to"]
+                    ts.loc[mask & ts.isnull()] = row["value"]
+            # 3. Static entries (only if not already set)
+            for _, row in prop_df_entries[
+                prop_df_entries["property"] == prop_name
+            ].iterrows():
+                if ("timeslices" in row and row["timeslices"]) or (
+                    row["from"] is not None or row["to"] is not None
+                ):
+                    continue
+                ts.loc[ts.isnull()] = row["value"]
+            # 4. Fallback
+            if fallback is not None:
+                ts = ts.fillna(fallback)
+            return ts
 
         # Get Max Capacity (for fallback and for scaling)
-        maxcap_row = props[props["property"] == "Max Capacity"]
-        maxcap = float(maxcap_row["value"].iloc[0]) if not maxcap_row.empty else None
+        maxcap = None
+        maxcap_entries = prop_df_entries[prop_df_entries["property"] == "Max Capacity"]
+        if not maxcap_entries.empty:
+            maxcap = maxcap_entries.iloc[0]["value"]
 
-        # Get p_nom from network if available
-        p_nom = (
-            network.generators.loc[gen, "p_nom"]
-            if gen in network.generators.index and "p_nom" in network.generators.columns
-            else maxcap
-        )
-
+        # Build time series for Rating and Rating Factor
+        rating_ts = build_ts("Rating")
+        rating_factor_ts = build_ts("Rating Factor")
         # If there are any Rating entries, use them (as p_max_pu = Rating / p_nom)
-        if ratings:
-            # Sort by from date (None first, then earliest)
-            ratings = sorted(
-                ratings,
-                key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
+        if rating_ts.notnull().any():
+            p_nom = (
+                network.generators.loc[gen, "p_nom"]
+                if gen in network.generators.index
+                and "p_nom" in network.generators.columns
+                else maxcap
             )
-            ts = pd.Series(index=snapshots, dtype=float)
-            last_from = None
-            for r in ratings:
-                val = r["value"]
-                # Case 1: Both t_date_from and t_date_to
-                if r["from"] is not None and r["to"] is not None:
-                    mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
-                    ts.loc[mask] = val
-                    last_from = r["from"]
-                # Case 2: Only t_date_from
-                elif r["from"] is not None and r["to"] is None:
-                    mask = snapshots >= r["from"]
-                    ts.loc[mask] = val
-                    last_from = r["from"]
-                # Case 3: Only t_date_to
-                elif r["from"] is None and r["to"] is not None:
-                    if last_from is not None:
-                        mask = (snapshots >= last_from) & (snapshots <= r["to"])
-                    else:
-                        mask = snapshots <= r["to"]
-                    ts.loc[mask] = val
-                # If neither, skip
-            # Fill any NaN with Max Capacity
-            ts = ts.fillna(maxcap)
-            # Normalize by p_nom to get p_max_pu
+            ts = rating_ts.fillna(maxcap)
             ts = ts / p_nom if p_nom else ts
             gen_series[gen] = ts
             continue
-
         # If no Rating, use Rating Factor (as p_max_pu = Rating Factor / 100)
-        if rating_factors:
-            # Sort by from date (None first, then earliest)
-            rating_factors = sorted(
-                rating_factors,
-                key=lambda x: (x["from"] is not None, x["from"] or pd.Timestamp.min),
-            )
-            ts = pd.Series(index=snapshots, dtype=float)
-            last_from = None
-            for r in rating_factors:
-                if r["value"] is not None:
-                    val = r["value"] / 100.0  # Rating Factor is percent of Max Capacity
-                    # Case 1: Both t_date_from and t_date_to
-                    if r["from"] is not None and r["to"] is not None:
-                        mask = (snapshots >= r["from"]) & (snapshots <= r["to"])
-                        ts.loc[mask] = val
-                        last_from = r["from"]
-                    # Case 2: Only t_date_from
-                    elif r["from"] is not None and r["to"] is None:
-                        mask = snapshots >= r["from"]
-                        ts.loc[mask] = val
-                        last_from = r["from"]
-                    # Case 3: Only t_date_to
-                    elif r["from"] is None and r["to"] is not None:
-                        if last_from is not None:
-                            mask = (snapshots >= last_from) & (snapshots <= r["to"])
-                        else:
-                            mask = snapshots <= r["to"]
-                        ts.loc[mask] = val
-                    # If neither, skip
-                else:
-                    print(
-                        f"Warning: Rating Factor value is None for generator {gen}, skipping this entry."
-                    )
-            # Fill any NaN with 1.0 (100% of Max Capacity)
-            ts = ts.fillna(1.0)
+        if rating_factor_ts.notnull().any():
+            ts = rating_factor_ts.fillna(1.0)
             gen_series[gen] = ts
             continue
-
         # If neither, fallback to Max Capacity (p_max_pu = 1.0)
         gen_series[gen] = pd.Series(1.0, index=snapshots)
 
@@ -333,7 +318,7 @@ def parse_generator_ratings(db: PlexosDB, network):
     return result
 
 
-def set_capacity_ratings(network: Network, db: PlexosDB):
+def set_capacity_ratings(network: Network, db: PlexosDB, timeslice_csv=None):
     """
     Sets the capacity ratings for generators in the PyPSA network based on the Plexos database.
 
@@ -346,15 +331,17 @@ def set_capacity_ratings(network: Network, db: PlexosDB):
         The PyPSA network to which the capacity ratings will be applied.
     db : PlexosDB
         The Plexos database containing generator data.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent ratings.
 
     Examples
     --------
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
-    >>> set_capacity_ratings(network, db)
+    >>> set_capacity_ratings(network, db, "path/to/timeslice.csv")
     """
     # Get the generator ratings from the database (already p_max_pu)
-    generator_ratings = parse_generator_ratings(db, network)
+    generator_ratings = parse_generator_ratings(db, network, timeslice_csv)
 
     # Only keep generators present in both network and generator_ratings
     valid_gens = [

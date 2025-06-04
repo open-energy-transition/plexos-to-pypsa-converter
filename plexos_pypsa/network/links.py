@@ -5,6 +5,8 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
+from plexos_pypsa.db.parse import get_dataid_timeslice_map, read_timeslice_activity
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,7 +78,7 @@ def add_links(network: Network, db: PlexosDB):
     print(f"Added {len(lines)} links")
 
 
-def parse_lines_flow(db: PlexosDB, network):
+def parse_lines_flow(db: PlexosDB, network, timeslice_csv=None):
     """
     Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return:
     - min_flow: index=network.snapshots, columns=line names
@@ -84,12 +86,16 @@ def parse_lines_flow(db: PlexosDB, network):
     - fallback_val: dict mapping line name to fallback value used for p_nom
 
     Uses time-specified values if available; otherwise, defaults to non-time-specified values.
-    If no non-time-specified value exists, uses the first value in the properties (even if time-specified).
-    If a Rating exists, it replaces the Flow value.
+    If a property is linked to a timeslice, use the timeslice activity to set the property for the relevant snapshots (takes precedence over t_date_from/t_date_to).
     """
-
     snapshots = network.snapshots
     lines = network.links.index
+    timeslice_activity = None
+    if timeslice_csv is not None:
+        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshots)
+    dataid_to_timeslice = (
+        get_dataid_timeslice_map(db) if timeslice_csv is not None else {}
+    )
 
     # 1. Get line object_id and name
     line_query = """
@@ -159,94 +165,67 @@ def parse_lines_flow(db: PlexosDB, network):
     max_flow_series = {}
     fallback_val_dict = {}
 
-    def extract_time_series(props, flow_name, rating_name):
+    def build_ts(props, prop_name, fallback=None):
         ts = pd.Series(index=snapshots, dtype=float)
-        # Prefer rating if available, otherwise flow
-        # 1. Try time-specified rating
-        time_rating = props[
-            (props["property"] == rating_name) & props["t_date_from"].notnull()
-        ]
-        # 2. Try time-specified flow
-        time_flow = props[
-            (props["property"] == flow_name) & props["t_date_from"].notnull()
-        ]
-        # 3. Try non-time-specified rating
-        non_time_rating = props[
-            (props["property"] == rating_name) & props["t_date_from"].isnull()
-        ]
-        # 4. Try non-time-specified flow
-        non_time_flow = props[
-            (props["property"] == flow_name) & props["t_date_from"].isnull()
-        ]
-        # 5. All rating
-        all_rating = props[props["property"] == rating_name]
-        # 6. All flow
-        all_flow = props[props["property"] == flow_name]
-
-        fallback_val = None
-
-        # Fill time-specified rating
-        for _, p in time_rating.iterrows():
-            t_from = (
-                pd.to_datetime(p["t_date_from"])
-                if pd.notnull(p["t_date_from"])
+        # 1. Timeslice-based entries (take precedence)
+        if timeslice_activity is not None:
+            for _, row in props[props["property"] == prop_name].iterrows():
+                if row["data_id"] in dataid_to_timeslice:
+                    for tslice in dataid_to_timeslice[row["data_id"]]:
+                        mask = timeslice_activity[tslice]
+                        ts.loc[mask] = float(row["value"])
+        # 2. t_date_from/t_date_to entries (only if not already set by timeslice)
+        for _, row in props[props["property"] == prop_name].iterrows():
+            if (row["data_id"] in dataid_to_timeslice) or (
+                pd.isnull(row["t_date_from"]) and pd.isnull(row["t_date_to"])
+            ):
+                continue  # skip if timeslice already handled or static
+            from_ = (
+                pd.to_datetime(row["t_date_from"])
+                if pd.notnull(row["t_date_from"])
                 else None
             )
-            t_to = (
-                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
-            )
-            if t_from is None:
-                continue
-            if t_to:
-                mask = (snapshots >= t_from) & (snapshots <= t_to)
-            else:
-                mask = snapshots == t_from
-            ts.loc[mask] = float(p["value"])
-        # Fill time-specified flow only where ts is still nan
-        for _, p in time_flow.iterrows():
-            t_from = (
-                pd.to_datetime(p["t_date_from"])
-                if pd.notnull(p["t_date_from"])
+            to_ = (
+                pd.to_datetime(row["t_date_to"])
+                if pd.notnull(row["t_date_to"])
                 else None
             )
-            t_to = (
-                pd.to_datetime(p["t_date_to"]) if pd.notnull(p["t_date_to"]) else None
-            )
-            if t_from is None:
+            if from_ is not None and to_ is not None:
+                mask = (snapshots >= from_) & (snapshots <= to_)
+                ts.loc[mask & ts.isnull()] = float(row["value"])
+            elif from_ is not None:
+                mask = snapshots >= from_
+                ts.loc[mask & ts.isnull()] = float(row["value"])
+            elif to_ is not None:
+                mask = snapshots <= to_
+                ts.loc[mask & ts.isnull()] = float(row["value"])
+        # 3. Static entries (only if not already set)
+        for _, row in props[props["property"] == prop_name].iterrows():
+            if (row["data_id"] in dataid_to_timeslice) or (
+                pd.notnull(row["t_date_from"]) or pd.notnull(row["t_date_to"])
+            ):
                 continue
-            if t_to:
-                mask = (snapshots >= t_from) & (snapshots <= t_to)
-            else:
-                mask = snapshots == t_from
-            ts.loc[mask & ts.isnull()] = float(p["value"])
-        # Fill with non-time-specified rating if any
-        if ts.isnull().any() and not non_time_rating.empty:
-            default_val = float(non_time_rating.iloc[0]["value"])
-            ts = ts.fillna(default_val)
-            fallback_val = default_val
-        # Fill with non-time-specified flow if any
-        if ts.isnull().any() and not non_time_flow.empty:
-            default_val = float(non_time_flow.iloc[0]["value"])
-            ts = ts.fillna(default_val)
-            fallback_val = default_val
-        # Fallback: any rating
-        if ts.isnull().any() and not all_rating.empty:
-            fallback_val = float(all_rating.iloc[0]["value"])
-            ts = ts.fillna(fallback_val)
-        # Fallback: any flow
-        if ts.isnull().any() and not all_flow.empty:
-            fallback_val = float(all_flow.iloc[0]["value"])
-            ts = ts.fillna(fallback_val)
-        # If still nan, fill with nan
-        return ts, fallback_val
+            ts.loc[ts.isnull()] = float(row["value"])
+        # 4. Fallback
+        if fallback is not None:
+            ts = ts.fillna(fallback)
+        return ts
 
     for line in lines:
         props = merged[merged["line"] == line]
-        min_ts, min_fallback = extract_time_series(props, "Min Flow", "Min Rating")
-        max_ts, max_fallback = extract_time_series(props, "Max Flow", "Max Rating")
-        min_flow_series[line] = min_ts
-        max_flow_series[line] = max_ts
-        # Use max_fallback for p_nom
+        min_ts = build_ts(props, "Min Flow")
+        min_rating_ts = build_ts(props, "Min Rating")
+        max_ts = build_ts(props, "Max Flow")
+        max_rating_ts = build_ts(props, "Max Rating")
+        # Prefer rating if available, otherwise flow
+        min_final = min_rating_ts.combine_first(min_ts)
+        max_final = max_rating_ts.combine_first(max_ts)
+        # Fallback: use first available value
+        max_fallback = (
+            max_final.dropna().iloc[0] if not max_final.dropna().empty else None
+        )
+        min_flow_series[line] = min_final
+        max_flow_series[line] = max_final
         fallback_val_dict[line] = max_fallback
 
     min_flow_df = pd.DataFrame(min_flow_series, index=snapshots)
@@ -255,7 +234,7 @@ def parse_lines_flow(db: PlexosDB, network):
     return min_flow_df, max_flow_df, fallback_val_dict
 
 
-def set_link_flows(network: Network, db: PlexosDB):
+def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
     """
     Set the flow limits for links in the network based on data from the database.
 
@@ -268,6 +247,8 @@ def set_link_flows(network: Network, db: PlexosDB):
         The network object to which the links belong.
     db : Database
         The database object containing line data and their properties.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-based property mapping.
 
     Notes
     -----
@@ -278,10 +259,12 @@ def set_link_flows(network: Network, db: PlexosDB):
     --------
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
-    >>> set_link_flows(network, db)
+    >>> set_link_flows(network, db, "timeslice.csv")
     Set flow limits for 10 links
     """
-    min_flow_df, max_flow_df, fallback_val_dict = parse_lines_flow(db, network)
+    min_flow_df, max_flow_df, fallback_val_dict = parse_lines_flow(
+        db, network, timeslice_csv
+    )
 
     # Set p_nom based on fallback_val_dict
     for line in network.links.index:
