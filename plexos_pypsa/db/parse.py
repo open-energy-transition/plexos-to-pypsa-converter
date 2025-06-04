@@ -1,3 +1,4 @@
+import pandas as pd
 from plexosdb.enums import ClassEnum  # type: ignore
 
 
@@ -99,6 +100,57 @@ def find_fuel_for_generator(db, generator_name):
             return m.get("name")
     # print(f"No associated fuel found for {generator_name}")
     return None
+
+
+def read_timeslice_activity(timeslice_csv, snapshots):
+    """
+    Reads a timeslice CSV and returns a DataFrame indexed by snapshots, columns=timeslice names, values=True/False for activity.
+    Assumes the CSV has columns: DATETIME, NAME, TIMESLICE (where TIMESLICE is -1 for active, 0 for inactive).
+    Ensures that if the last setting before the first snapshot is present, it is carried over to the first snapshot.
+    """
+
+    df = pd.read_csv(timeslice_csv)
+    df["DATETIME"] = pd.to_datetime(df["DATETIME"], dayfirst=True)
+    timeslice_names = df["NAME"].unique()
+    activity = pd.DataFrame(False, index=snapshots, columns=timeslice_names)
+
+    for ts_name in timeslice_names:
+        ts_df = df[df["NAME"] == ts_name].sort_values("DATETIME")
+        # Find the last TIMESLICE setting before the first snapshot
+        before_first = ts_df[ts_df["DATETIME"] < snapshots[0]]
+        if not before_first.empty:
+            last_setting = before_first.iloc[-1]["TIMESLICE"]
+            activity.loc[:, ts_name] = last_setting == -1
+        # Apply all changes at or after the first snapshot
+        for _, row in ts_df[ts_df["DATETIME"] >= snapshots[0]].iterrows():
+            datetime = row["DATETIME"]
+            mask = activity.index >= datetime
+            if row["TIMESLICE"] == -1:  # Active
+                activity.loc[mask, ts_name] = True
+            elif row["TIMESLICE"] == 0:  # Inactive
+                activity.loc[mask, ts_name] = False
+
+    return activity
+
+
+def get_dataid_timeslice_map(db):
+    """
+    Returns a dict mapping data_id to timeslice object_id(s) (class_id=76) via the tag table.
+    """
+    # Query for all data_id, tag_object_id pairs where tag_object_id is a timeslice
+    query = """
+        SELECT t.data_id, t.object_id, o.name
+        FROM t_tag t
+        JOIN t_object o ON t.object_id = o.object_id
+        JOIN t_class c ON o.class_id = c.class_id
+        WHERE c.class_id = 76
+    """
+    rows = db.query(query)
+    # Map data_id to timeslice name(s)
+    dataid_to_timeslice = {}
+    for data_id, object_id, timeslice_name in rows:
+        dataid_to_timeslice.setdefault(data_id, []).append(timeslice_name)
+    return dataid_to_timeslice
 
 
 # gen_name = "MURRAY10"
