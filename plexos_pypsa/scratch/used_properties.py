@@ -1,3 +1,4 @@
+import glob
 import os
 
 import pandas as pd
@@ -271,6 +272,76 @@ def get_combined_properties_for_all_xmls(xml_files, class_id_to_name, save_path)
             print(f"Saved combined possible/used properties to {out_csv_path}")
 
 
+def summarize_property_usage_across_models(properties_dir):
+    """
+    Analyze all *_properties.csv files in subfolders of properties_dir and output a DataFrame
+    with a count of how many models use each property, and the total number of models.
+    """
+    import os
+
+    import pandas as pd
+
+    # Find all *_properties.csv files recursively
+    pattern = os.path.join(properties_dir, "*", "*_properties.csv")
+    files = glob.glob(pattern)
+    if not files:
+        print(f"No property files found in {properties_dir}")
+        return None
+    all_dfs = []
+    for f in files:
+        df = pd.read_csv(f)
+        # Only keep used properties
+        used = df[df["used"]].copy()
+        used["model"] = os.path.splitext(os.path.basename(f))[0].replace(
+            "_properties", ""
+        )
+        all_dfs.append(used)
+    if not all_dfs:
+        print("No used properties found in any model.")
+        return None
+    concat = pd.concat(all_dfs, ignore_index=True)
+    # Group by property identity columns
+    group_cols = [
+        "class_id",
+        "class_name",
+        "collection_id",
+        "collection_description",
+        "property_id",
+        "property",
+        "property_description",
+    ]
+    usage = (
+        concat.groupby(group_cols)
+        .agg(
+            models_used=("model", "nunique"),
+            models_list=("model", lambda x: list(sorted(set(x)))),
+        )
+        .reset_index()
+    )
+    total_models = len(files)
+    usage["total_models"] = total_models
+    usage["fraction"] = usage["models_used"] / total_models
+    usage = usage.sort_values(["class_name", "property"])
+
+    # reorder columns for better readability
+    usage = usage[
+        [
+            "class_id",
+            "class_name",
+            "collection_id",
+            "collection_description",
+            "property_id",
+            "property",
+            "property_description",
+            "models_used",
+            "total_models",
+            "fraction",
+            "models_list",
+        ]
+    ]
+    return usage
+
+
 CLASS_ID_TO_NAME = {
     1: "System",
     2: "Generator",
@@ -397,3 +468,8 @@ full_paths = [os.path.join(COMMON_PREFIX, rel_path) for rel_path in xml_files]
 if __name__ == "__main__":
     save_path = "plexos_pypsa/data/properties/"
     get_combined_properties_for_all_xmls(full_paths, CLASS_ID_TO_NAME, save_path)
+    summary = summarize_property_usage_across_models("plexos_pypsa/data/properties")
+    summary.to_csv(
+        "plexos_pypsa/data/properties/property_usage_summary.csv", index=False
+    )
+    # print(summary.head())
