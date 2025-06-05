@@ -212,6 +212,65 @@ def get_all_possible_and_used_properties_for_all_xmls(
     return all_possible_df, all_used_df
 
 
+def get_combined_properties_for_all_xmls(xml_files, class_id_to_name, save_path):
+    for xml_file in xml_files:
+        base = os.path.splitext(os.path.basename(xml_file))[0]
+        # Get the subfolder from the first portion of the xml_file path (relative to COMMON_PREFIX)
+        rel_path = os.path.relpath(xml_file, COMMON_PREFIX)
+        subfolder = rel_path.split(os.sep)[0]
+        out_dir = os.path.join(save_path, subfolder)
+        os.makedirs(out_dir, exist_ok=True)
+        possible_df, used_df = get_all_possible_and_used_properties_for_all_classes(
+            xml_file, class_id_to_name
+        )
+        if possible_df is not None and not possible_df.empty:
+            possible_df = possible_df.copy()
+            possible_df["filename"] = base
+            used_set = (
+                set(
+                    tuple(row)
+                    for row in used_df[
+                        [
+                            "class_id",
+                            "class_name",
+                            "collection_id",
+                            "collection_description",
+                            "property_id",
+                            "property",
+                            "property_description",
+                        ]
+                    ].itertuples(index=False, name=None)
+                )
+                if used_df is not None and not used_df.empty
+                else set()
+            )
+
+            def is_used(row):
+                return (
+                    tuple(
+                        row[
+                            [
+                                "class_id",
+                                "class_name",
+                                "collection_id",
+                                "collection_description",
+                                "property_id",
+                                "property",
+                                "property_description",
+                            ]
+                        ]
+                    )
+                    in used_set
+                )
+
+            possible_df["used"] = possible_df.apply(is_used, axis=1)
+            # Save single CSV per file
+            out_csv = f"{base}_properties.csv"
+            out_csv_path = os.path.join(out_dir, out_csv)
+            possible_df.to_csv(out_csv_path, index=False)
+            print(f"Saved combined possible/used properties to {out_csv_path}")
+
+
 CLASS_ID_TO_NAME = {
     1: "System",
     2: "Generator",
@@ -311,27 +370,30 @@ CLASS_ID_TO_NAME = {
     96: "Layout",
 }
 
+# Common prefix for all xml_files
+COMMON_PREFIX = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
+
 xml_files = [
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Green Energy Exports/2024 ISP Green Energy Exports Model.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Step Change/2024 ISP Step Change Model.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-deterministic-2026-2030/CAISOIRP21 0130.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2026/CAISOIRP21 Stochastic2026 0130.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2030/CAISOIRP21 Stochastic2030 0130.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/Seasonal Assessments/2025-summer-loads-and-resources-assessment-public-stochastic-model/CAISOSA25 20250505.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/NREL/NREL-118/mti-118-mt-da-rt-reserves-all-generators.xml",
-    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml",
+    "AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml",
+    "AEMO/2024 ISP/2024 ISP Green Energy Exports/2024 ISP Green Energy Exports Model.xml",
+    "AEMO/2024 ISP/2024 ISP Step Change/2024 ISP Step Change Model.xml",
+    "AEMO/2022 ISP/2022 Final ISP Model/2022 ISP Hydrogen Superpower/2022 Hydrogen Superpower ISP Model.xml",
+    "AEMO/2022 ISP/2022 Final ISP Model/2022 ISP Progressive Change/2022 Progressive Change ISP Model.xml",
+    "AEMO/2022 ISP/2022 Final ISP Model/2022 ISP Slow Change/2022 Slow Change ISP Model.xml",
+    "AEMO/2022 ISP/2022 Final ISP Model/2022 ISP Step Change/2022 Step Change ISP Model.xml",
+    "CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml",
+    "CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-deterministic-2026-2030/CAISOIRP21 0130.xml",
+    "CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2026/CAISOIRP21 Stochastic2026 0130.xml",
+    "CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2030/CAISOIRP21 Stochastic2030 0130.xml",
+    "CAISO/Seasonal Assessments/2025-summer-loads-and-resources-assessment-public-stochastic-model/CAISOSA25 20250505.xml",
+    "NREL/NREL-118/mti-118-mt-da-rt-reserves-all-generators.xml",
+    "SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml",
+    "University College Cork/MaREI/EU Power & Gas Model/European Integrated Power & Gas Model.xml",
+    "University College Cork/PLEXOS-World - Spatial Resolution Case Study/dataverse_files/PLEXOS-World Spatial Resolution Case Study (Second Journal Submission version).xml",
 ]
+
+full_paths = [os.path.join(COMMON_PREFIX, rel_path) for rel_path in xml_files]
 
 if __name__ == "__main__":
     save_path = "plexos_pypsa/data/properties/"
-    all_possible_df, all_used_df = get_all_possible_and_used_properties_for_all_xmls(
-        xml_files, CLASS_ID_TO_NAME, save_path
-    )
-    if not all_possible_df.empty:
-        print("All possible properties (all files, all classes):")
-        print(all_possible_df.head())
-    if not all_used_df.empty:
-        print("\nUsed properties (all files, all classes):")
-        print(all_used_df.head())
+    get_combined_properties_for_all_xmls(full_paths, CLASS_ID_TO_NAME, save_path)
