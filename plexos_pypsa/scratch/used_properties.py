@@ -179,6 +179,39 @@ def get_all_possible_and_used_properties_for_all_classes(xml_file, class_id_to_n
     return all_possible_df, all_used_df
 
 
+def get_all_possible_and_used_properties_for_all_xmls(
+    xml_files, class_id_to_name, save_path
+):
+    all_possible = []
+    all_used = []
+    for xml_file in xml_files:
+        base = os.path.splitext(os.path.basename(xml_file))[0]
+        possible_df, used_df = get_all_possible_and_used_properties_for_all_classes(
+            xml_file, class_id_to_name
+        )
+        if possible_df is not None and not possible_df.empty:
+            possible_df = possible_df.copy()
+            possible_df["filename"] = base
+            all_possible.append(possible_df)
+            all_csv = f"{base}_all.csv"
+            all_csv_path = os.path.join(save_path, all_csv)
+            possible_df.to_csv(all_csv_path, index=False)
+            print(f"Saved all possible properties to {all_csv_path}")
+        if used_df is not None and not used_df.empty:
+            used_df = used_df.copy()
+            used_df["filename"] = base
+            all_used.append(used_df)
+            used_csv = f"{base}_used.csv"
+            used_csv_path = os.path.join(save_path, used_csv)
+            used_df.to_csv(used_csv_path, index=False)
+            print(f"Saved used properties to {used_csv_path}")
+    all_possible_df = (
+        pd.concat(all_possible, ignore_index=True) if all_possible else pd.DataFrame()
+    )
+    all_used_df = pd.concat(all_used, ignore_index=True) if all_used else pd.DataFrame()
+    return all_possible_df, all_used_df
+
+
 CLASS_ID_TO_NAME = {
     1: "System",
     2: "Generator",
@@ -278,25 +311,27 @@ CLASS_ID_TO_NAME = {
     96: "Layout",
 }
 
+xml_files = [
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Green Energy Exports/2024 ISP Green Energy Exports Model.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/AEMO/2024 ISP/2024 ISP Step Change/2024 ISP Step Change Model.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-deterministic-2026-2030/CAISOIRP21 0130.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2026/CAISOIRP21 Stochastic2026 0130.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/IRP/IRP20 - 38MMT PSP Stochastic and Deterministic Models with CEC 2019 IEPR Load Forecast/caiso-integrated-resource-planning-38mmt-coreportfolio-plexos-stochastic-2030/CAISOIRP21 Stochastic2030 0130.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/CAISO/Seasonal Assessments/2025-summer-loads-and-resources-assessment-public-stochastic-model/CAISOSA25 20250505.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/NREL/NREL-118/mti-118-mt-da-rt-reserves-all-generators.xml",
+    "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models/SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml",
+]
+
 if __name__ == "__main__":
-    xml_file = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
     save_path = "plexos_pypsa/data/properties/"
-    all_possible_df, all_used_df = get_all_possible_and_used_properties_for_all_classes(
-        xml_file, CLASS_ID_TO_NAME
+    all_possible_df, all_used_df = get_all_possible_and_used_properties_for_all_xmls(
+        xml_files, CLASS_ID_TO_NAME, save_path
     )
-    # Determine base filename for output
-    base = os.path.splitext(os.path.basename(xml_file))[0]
-    all_csv = f"{base}_all.csv"
-    used_csv = f"{base}_used.csv"
-    all_csv_path = os.path.join(save_path, all_csv)
-    used_csv_path = os.path.join(save_path, used_csv)
     if not all_possible_df.empty:
-        print("All possible properties (all classes):")
+        print("All possible properties (all files, all classes):")
         print(all_possible_df.head())
-        all_possible_df.to_csv(all_csv_path, index=False)
-        print(f"Saved all possible properties to {all_csv_path}")
     if not all_used_df.empty:
-        print("\nUsed properties (all classes):")
+        print("\nUsed properties (all files, all classes):")
         print(all_used_df.head())
-        all_used_df.to_csv(used_csv_path, index=False)
-        print(f"Saved used properties to {used_csv_path}")
