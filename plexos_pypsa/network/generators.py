@@ -10,6 +10,7 @@ from plexos_pypsa.db.parse import (
     find_bus_for_object,
     find_fuel_for_generator,
     get_dataid_timeslice_map,
+    get_property_active_mask,
     read_timeslice_activity,
 )
 
@@ -226,36 +227,6 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
     merged = pd.merge(
         merged, gen_df, left_on="child_object_id", right_on="object_id", how="inner"
     )
-
-    def get_property_active_mask(
-        row, snapshots, timeslice_activity=None, dataid_to_timeslice=None
-    ):
-        """
-        Returns a boolean mask for the snapshots where the property entry is active, based on date and timeslice info.
-        """
-        mask = pd.Series(True, index=snapshots)
-        # Date logic
-        if pd.notnull(row.get("from")):
-            mask &= snapshots >= row["from"]
-        if pd.notnull(row.get("to")):
-            mask &= snapshots <= row["to"]
-        # Timeslice logic
-        if (
-            timeslice_activity is not None
-            and dataid_to_timeslice is not None
-            and row.get("data_id") in dataid_to_timeslice
-        ):
-            for ts in dataid_to_timeslice[row["data_id"]]:
-                if ts in timeslice_activity.columns:
-                    mask &= timeslice_activity[ts]
-                elif ts.startswith("M") and ts[1:].isdigit() and 1 <= int(ts[1:]) <= 12:
-                    # Month timeslice (M1..M12): active for the full month
-                    month = int(ts[1:])
-                    mask &= snapshots.month == month
-                else:
-                    # Unknown timeslice: assume always active
-                    mask &= True
-        return mask
 
     def build_generator_p_max_pu_timeseries(
         merged,
