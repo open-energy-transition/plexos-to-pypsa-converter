@@ -137,6 +137,19 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
     - "t_date_to" Only: Value applies up to and including this date, starting from simulation start or last defined "Date From".
     - Both: Value applies within the defined date range.
     All snapshots with no rating are filled with Max Capacity.
+
+    for each generator, create a time series for Rating, Rating Factor, or Max Capacity using merged
+    use the following logic:
+    - If Rating Factor is available, use it (as p_max_pu = Rating Factor / 100)
+    - If Rating is available, use it (as p_max_pu = Rating / p_nom)
+    - If neither is available, use Max Capacity (p_max_pu = Max Capacity / p_nom)
+    - If no Max Capacity is available, fallback to p_max_pu = 1.0
+    - If no timeslice is defined, the property is always active, UNLESS it is overriden by a date-specific entry:
+    - If timeslice exists, use the timeslice timeseries file to determine and set when the property is active (if the timeslice doesn't exist in the timeslice file but has names like M1, M2, M3, .. M12, assume it is active for the full month).
+    - "t_date_from" Only: Value is effective from this date onward, until superseded.
+    - "t_date_to" Only: Value applies up to and including this date, starting from simulation start or last defined "Date From" or timeslice.
+    - "t_date_from" and "t_date_to": Value applies within the defined date range.
+
     """
     snapshots = network.snapshots
     timeslice_activity = None
@@ -156,6 +169,9 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
     gen_rows = db.query(gen_query)
     gen_df = pd.DataFrame(gen_rows, columns=["object_id", "generator"])
 
+    # only keep generators that are in the network
+    gen_df = gen_df[gen_df["generator"].isin(network.generators.index)]
+
     # 2. Get data_id for each generator (child_object_id) from t_membership
     membership_query = """
         SELECT m.parent_object_id AS parent_object_id, m.child_object_id AS child_object_id, m.membership_id AS membership_id
@@ -171,7 +187,8 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
         columns=["parent_object_id", "child_object_id", "membership_id"],
     )
 
-    # 3. Get property values for each data_id (Rating, Rating Factor, or Max Capacity), with t_date_from/to
+    # 3. Get property values for each data_id (Rating, Rating Factor, or Max Capacity), with t_date_from/to,
+    # including both entries with and without a tag/timeslice (class_id=76).
     prop_query = """
         SELECT
             d.data_id,
@@ -179,14 +196,18 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
             p.name as property,
             d.value,
             df.date as t_date_from,
-            dt.date as t_date_to
+            dt.date as t_date_to,
+            o.name as timeslice
         FROM t_data d
         JOIN t_property p ON d.property_id = p.property_id
         LEFT JOIN t_date_from df ON d.data_id = df.data_id
         LEFT JOIN t_date_to dt ON d.data_id = dt.data_id
-        WHERE p.name = 'Rating' OR p.name = 'Max Capacity' OR p.name = 'Rating Factor'
+        LEFT JOIN t_tag t ON d.data_id = t.data_id
+        LEFT JOIN t_object o ON t.object_id = o.object_id AND o.class_id = 76
+        WHERE (p.name = 'Rating' OR p.name = 'Max Capacity' OR p.name = 'Rating Factor')
     """
     prop_rows = db.query(prop_query)
+
     prop_df = pd.DataFrame(
         prop_rows,
         columns=[
@@ -196,6 +217,7 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
             "value",
             "t_date_from",
             "t_date_to",
+            "timeslice",
         ],
     )
 
@@ -205,117 +227,148 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
         merged, gen_df, left_on="child_object_id", right_on="object_id", how="inner"
     )
 
-    # 5. Collect generator Series in a dictionary for efficient concatenation
-    gen_series = {}
+    def get_property_active_mask(
+        row, snapshots, timeslice_activity=None, dataid_to_timeslice=None
+    ):
+        """
+        Returns a boolean mask for the snapshots where the property entry is active, based on date and timeslice info.
+        """
+        mask = pd.Series(True, index=snapshots)
+        # Date logic
+        if pd.notnull(row.get("from")):
+            mask &= snapshots >= row["from"]
+        if pd.notnull(row.get("to")):
+            mask &= snapshots <= row["to"]
+        # Timeslice logic
+        if (
+            timeslice_activity is not None
+            and dataid_to_timeslice is not None
+            and row.get("data_id") in dataid_to_timeslice
+        ):
+            for ts in dataid_to_timeslice[row["data_id"]]:
+                if ts in timeslice_activity.columns:
+                    mask &= timeslice_activity[ts]
+                elif ts.startswith("M") and ts[1:].isdigit() and 1 <= int(ts[1:]) <= 12:
+                    # Month timeslice (M1..M12): active for the full month
+                    month = int(ts[1:])
+                    mask &= snapshots.month == month
+                else:
+                    # Unknown timeslice: assume always active
+                    mask &= True
+        return mask
 
-    for gen in gen_df["generator"]:
-        props = merged[merged["generator"] == gen]
-        # Get all property entries (time-dependent, timeslice-dependent, or static)
-        property_entries = []
-        for _, p in props.iterrows():
-            entry = {
-                "property": p["property"],
-                "value": float(p["value"]),
-                "from": pd.to_datetime(p["t_date_from"])
-                if pd.notnull(p["t_date_from"])
-                else None,
-                "to": pd.to_datetime(p["t_date_to"])
-                if pd.notnull(p["t_date_to"])
-                else None,
-                "data_id": p["data_id"],
-            }
-            # Attach timeslice info if available
-            if p["data_id"] in dataid_to_timeslice:
-                # Ensure timeslices are always a list of full names
-                entry["timeslices"] = dataid_to_timeslice[p["data_id"]]
-            property_entries.append(entry)
+    def build_generator_p_max_pu_timeseries(
+        merged,
+        gen_df,
+        network,
+        snapshots,
+        timeslice_activity=None,
+        dataid_to_timeslice=None,
+    ):
+        """
+        For each generator, create a time series for p_max_pu using Rating, Rating Factor, or Max Capacity, with timeslice and date logic.
+        Returns a DataFrame: index=snapshots, columns=generator names, values=p_max_pu.
+        """
+        gen_series = {}
+        for gen in gen_df["generator"]:
+            print(f"Processing generator: {gen}")
+            props = merged[merged["generator"] == gen]
+            # Build property entries
+            property_entries = []
+            for _, p in props.iterrows():
+                entry = {
+                    "property": p["property"],
+                    "value": float(p["value"]),
+                    "from": pd.to_datetime(p["t_date_from"])
+                    if pd.notnull(p["t_date_from"])
+                    else None,
+                    "to": pd.to_datetime(p["t_date_to"])
+                    if pd.notnull(p["t_date_to"])
+                    else None,
+                    "data_id": p["data_id"],
+                }
+                if dataid_to_timeslice and p["data_id"] in dataid_to_timeslice:
+                    entry["timeslices"] = dataid_to_timeslice[p["data_id"]]
+                property_entries.append(entry)
+            prop_df_entries = pd.DataFrame(property_entries)
 
-        # Build a DataFrame for all property entries
-        prop_df_entries = pd.DataFrame(property_entries)
-
-        # For each property type (Rating, Rating Factor, Max Capacity), build a time series
-        def build_ts(prop_name, fallback=None):
-            ts = pd.Series(index=snapshots, dtype=float)
-            # 1. Timeslice-based entries (take precedence)
-            if timeslice_activity is not None:
+            # Helper to build a time series for a property
+            def build_ts(prop_name, fallback=None):
+                ts = pd.Series(index=snapshots, dtype=float)
                 for _, row in prop_df_entries[
                     prop_df_entries["property"] == prop_name
                 ].iterrows():
-                    for tslice in row["timeslices"]:
-                        # Use the full timeslice name as key, warn if not found
-                        if tslice in timeslice_activity.columns:
-                            mask = timeslice_activity[tslice]
-                            ts.loc[mask] = row["value"]
-                        else:
-                            print(
-                                f"Warning: Timeslice '{tslice}' not found in timeslice_activity columns: {list(timeslice_activity.columns)}"
-                            )
-                        ts.loc[mask] = row["value"]
-            # 2. t_date_from/t_date_to entries (only if not already set by timeslice)
-            for _, row in prop_df_entries[
-                prop_df_entries["property"] == prop_name
-            ].iterrows():
-                if ("timeslices" in row and row["timeslices"]) or (
-                    row["from"] is None and row["to"] is None
-                ):
-                    continue  # skip if timeslice already handled or static
-                if row["from"] is not None and row["to"] is not None:
-                    mask = (snapshots >= row["from"]) & (snapshots <= row["to"])
-                    ts.loc[mask & ts.isnull()] = row["value"]
-                elif row["from"] is not None:
-                    mask = snapshots >= row["from"]
-                    ts.loc[mask & ts.isnull()] = row["value"]
-                elif row["to"] is not None:
-                    mask = snapshots <= row["to"]
-                    ts.loc[mask & ts.isnull()] = row["value"]
-            # 3. Static entries (only if not already set)
-            for _, row in prop_df_entries[
-                prop_df_entries["property"] == prop_name
-            ].iterrows():
-                if ("timeslices" in row and row["timeslices"]) or (
-                    row["from"] is not None or row["to"] is not None
-                ):
-                    continue
-                ts.loc[ts.isnull()] = row["value"]
-            # 4. Fallback
-            if fallback is not None:
-                ts = ts.fillna(fallback)
-            return ts
+                    is_time_specific = (
+                        pd.notnull(row.get("from"))
+                        or pd.notnull(row.get("to"))
+                        or (
+                            dataid_to_timeslice
+                            and row["data_id"] in dataid_to_timeslice
+                        )
+                    )
+                    if is_time_specific:
+                        mask = get_property_active_mask(
+                            row, snapshots, timeslice_activity, dataid_to_timeslice
+                        )
+                        ts.loc[mask & ts.isnull()] = row["value"]
+                for _, row in prop_df_entries[
+                    prop_df_entries["property"] == prop_name
+                ].iterrows():
+                    is_time_specific = (
+                        pd.notnull(row.get("from"))
+                        or pd.notnull(row.get("to"))
+                        or (
+                            dataid_to_timeslice
+                            and row["data_id"] in dataid_to_timeslice
+                        )
+                    )
+                    if not is_time_specific:
+                        ts.loc[ts.isnull()] = row["value"]
+                if fallback is not None:
+                    ts = ts.fillna(fallback)
+                return ts
 
-        # Get Max Capacity (for fallback and for scaling)
-        maxcap = None
-        maxcap_entries = prop_df_entries[prop_df_entries["property"] == "Max Capacity"]
-        if not maxcap_entries.empty:
-            maxcap = maxcap_entries.iloc[0]["value"]
+            # Get Max Capacity (for fallback and for scaling)
+            maxcap = None
+            maxcap_entries = prop_df_entries[
+                prop_df_entries["property"] == "Max Capacity"
+            ]
+            if not maxcap_entries.empty:
+                maxcap = maxcap_entries.iloc[0]["value"]
 
-        # Build time series for Rating and Rating Factor
-        rating_ts = build_ts("Rating")
-        rating_factor_ts = build_ts("Rating Factor")
-        # If there are any Rating entries, use them (as p_max_pu = Rating / p_nom)
-        if rating_ts.notnull().any():
-            p_nom = (
-                network.generators.loc[gen, "p_nom"]
-                if gen in network.generators.index
-                and "p_nom" in network.generators.columns
-                else maxcap
-            )
-            ts = rating_ts.fillna(maxcap)
-            ts = ts / p_nom if p_nom else ts
-            gen_series[gen] = ts
-            continue
-        # If no Rating, use Rating Factor (as p_max_pu = Rating Factor / 100)
-        if rating_factor_ts.notnull().any():
-            ts = rating_factor_ts.fillna(1.0)
-            gen_series[gen] = ts
-            continue
-        # If neither, fallback to Max Capacity (p_max_pu = 1.0)
-        gen_series[gen] = pd.Series(1.0, index=snapshots)
+            # Build time series for Rating and Rating Factor
+            rating_ts = build_ts("Rating")
+            rating_factor_ts = build_ts("Rating Factor")
+            # If there are any Rating entries, use them (as p_max_pu = Rating / p_nom)
+            if rating_ts.notnull().any():
+                p_nom = (
+                    network.generators.loc[gen, "p_nom"]
+                    if gen in network.generators.index
+                    and "p_nom" in network.generators.columns
+                    else maxcap
+                )
+                ts = rating_ts.fillna(maxcap)
+                ts = ts / p_nom if p_nom else ts
+                gen_series[gen] = ts
+                continue
+            # If no Rating, use Rating Factor (as p_max_pu = Rating Factor / 100)
+            if rating_factor_ts.notnull().any():
+                ts = rating_factor_ts.fillna(1.0) / 100.0
+                gen_series[gen] = ts
+                continue
+            # If neither, fallback to Max Capacity (p_max_pu = 1.0)
+            gen_series[gen] = pd.Series(1.0, index=snapshots)
+        # Concatenate all generator Series into a single DataFrame
+        result = pd.concat(gen_series, axis=1)
+        result.index = snapshots
+        return result
 
-    # Concatenate all generator Series into a single DataFrame
-    result = pd.concat(gen_series, axis=1)
-    result.index = snapshots
+    # Build the p_max_pu timeseries for each generator
+    p_max_pu_timeseries = build_generator_p_max_pu_timeseries(
+        merged, gen_df, network, snapshots, timeslice_activity, dataid_to_timeslice
+    )
 
-    return result
+    return p_max_pu_timeseries
 
 
 def set_capacity_ratings(network: Network, db: PlexosDB, timeslice_csv=None):
