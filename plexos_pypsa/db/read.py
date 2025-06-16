@@ -8,8 +8,10 @@ def print_objects_alphabetically(objects, object_type="object"):
         print(f"  - {obj}")
 
 
-def list_and_print_objects(db, class_enum, object_type):
+def list_and_print_objects(db, class_enum, object_type=None):
     objects = db.list_objects_by_class(class_enum)
+    if object_type is None:
+        object_type = "object"
     print(f"Found {len(objects)} {object_type}s")
     print_objects_alphabetically(objects, object_type=object_type)
     return objects
