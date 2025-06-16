@@ -153,6 +153,74 @@ def get_dataid_timeslice_map(db):
     return dataid_to_timeslice
 
 
+def get_property_active_mask(
+    row, snapshots, timeslice_activity=None, dataid_to_timeslice=None
+):
+    """
+    Returns a boolean mask indicating the periods (snapshots) during which a property entry is considered active,
+    based on its date range and optional timeslice activity.
+
+    Parameters
+    ----------
+    row : dict or pandas.Series
+        A mapping containing at least the keys "from", "to", and optionally "data_id".
+        - "from": The start date (inclusive) when the property becomes active. Can be None or NaT for no lower bound.
+        - "to": The end date (inclusive) when the property is no longer active. Can be None or NaT for no upper bound.
+        - "data_id": Identifier used to look up timeslice information (optional).
+
+    snapshots : pandas.DatetimeIndex or pandas.Series
+        The time periods over which to evaluate the property's activity status.
+
+    timeslice_activity : pandas.DataFrame, optional
+        A DataFrame where columns are timeslice labels and the index matches `snapshots`.
+        Each column is a boolean Series indicating whether the timeslice is active at each snapshot.
+
+    dataid_to_timeslice : dict, optional
+        Mapping from data_id values to lists of timeslice labels (strings).
+        Used to determine which timeslices are relevant for the given property.
+
+    Returns
+    -------
+    mask : pandas.Series (bool)
+        Boolean Series indexed by `snapshots`, where True indicates the property is active at that snapshot,
+        and False otherwise.
+
+    Notes
+    -----
+    - The mask is first filtered by the "from" and "to" date range, if provided.
+    - If timeslice information is available for the property's data_id, the mask is further filtered:
+        - For each relevant timeslice:
+            - If the timeslice exists in `timeslice_activity`, its boolean mask is applied.
+            - If the timeslice is of the form "M1".."M12", it is interpreted as a month and the mask is True for that month.
+            - Unknown timeslices are treated as always active (no additional filtering).
+    - If no timeslice information is provided, only the date range is used.
+    row, snapshots, timeslice_activity=None, dataid_to_timeslice=None
+    """
+    mask = pd.Series(True, index=snapshots)
+    # Date logic
+    if pd.notnull(row.get("from")):
+        mask &= snapshots >= row["from"]
+    if pd.notnull(row.get("to")):
+        mask &= snapshots <= row["to"]
+    # Timeslice logic
+    if (
+        timeslice_activity is not None
+        and dataid_to_timeslice is not None
+        and row.get("data_id") in dataid_to_timeslice
+    ):
+        for ts in dataid_to_timeslice[row["data_id"]]:
+            if ts in timeslice_activity.columns:
+                mask &= timeslice_activity[ts]
+            elif ts.startswith("M") and ts[1:].isdigit() and 1 <= int(ts[1:]) <= 12:
+                # Month timeslice (M1..M12): active for the full month
+                month = int(ts[1:])
+                mask &= snapshots.month == month
+            else:
+                # Unknown timeslice: assume always active
+                mask &= True
+    return mask
+
+
 # gen_name = "MURRAY10"
 # emissions = get_emission_rates(prog_db, gen_name)
 # print(f"Emission rates for {gen_name}:")
