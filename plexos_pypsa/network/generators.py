@@ -796,8 +796,54 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
             print(f"  - {gen}")
 
 
+def reassign_generators_to_node(network: Network, target_node: str):
+    """
+    Reassign all generators to a specific node.
+
+    This is useful when demand is aggregated to a single node and all generators
+    need to be connected to the same node for a meaningful optimization.
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network containing generators.
+    target_node : str
+        Name of the node to assign all generators to.
+
+    Returns
+    -------
+    dict
+        Summary information about the reassignment.
+    """
+    if target_node not in network.buses.index:
+        raise ValueError(f"Target node '{target_node}' not found in network buses")
+
+    original_assignments = network.generators["bus"].copy()
+    unique_original_buses = original_assignments.unique()
+
+    # Reassign all generators to the target node
+    network.generators["bus"] = target_node
+
+    reassigned_count = len(network.generators)
+    print(f"Reassigned {reassigned_count} generators to node '{target_node}'")
+    print(
+        f"  - Originally spread across {len(unique_original_buses)} buses: {list(unique_original_buses)[:5]}{'...' if len(unique_original_buses) > 5 else ''}"
+    )
+
+    return {
+        "reassigned_count": reassigned_count,
+        "target_node": target_node,
+        "original_buses": list(unique_original_buses),
+        "original_assignments": original_assignments,
+    }
+
+
 def port_generators(
-    network: Network, db: PlexosDB, timeslice_csv=None, vre_profiles_path=None
+    network: Network,
+    db: PlexosDB,
+    timeslice_csv=None,
+    vre_profiles_path=None,
+    target_node=None,
 ):
     """
     Comprehensive function to add generators and set all their properties in the PyPSA network.
@@ -809,6 +855,7 @@ def port_generators(
     - Sets capital costs
     - Sets marginal costs (time-dependent)
     - Sets VRE profiles for solar and wind generators
+    - Optionally reassigns all generators to a specific node
 
     Parameters
     ----------
@@ -820,6 +867,14 @@ def port_generators(
         Path to the timeslice CSV file for time-dependent properties.
     vre_profiles_path : str, optional
         Path to the folder containing VRE generation profile files.
+    target_node : str, optional
+        If specified, all generators will be reassigned to this node after setup.
+        This is useful when demand is aggregated to a single node.
+
+    Returns
+    -------
+    dict or None
+        If target_node is specified, returns summary information about reassignment.
 
     Examples
     --------
@@ -828,6 +883,12 @@ def port_generators(
     >>> port_generators(network, db,
     ...                 timeslice_csv="path/to/timeslice.csv",
     ...                 vre_profiles_path="path/to/profiles")
+
+    # With node reassignment for aggregated demand
+    >>> reassignment_info = port_generators(network, db,
+    ...                                   timeslice_csv="path/to/timeslice.csv",
+    ...                                   vre_profiles_path="path/to/profiles",
+    ...                                   target_node="Load_Aggregate")
     """
     print("Starting generator porting process...")
 
@@ -857,5 +918,12 @@ def port_generators(
         set_vre_profiles(network, db, vre_profiles_path)
     else:
         print("6. Skipping VRE profiles (no path provided)")
+
+    # Step 7: Reassign generators to target node if specified
+    if target_node:
+        print(f"7. Reassigning generators to node '{target_node}'...")
+        return reassign_generators_to_node(network, target_node)
+    else:
+        print("7. Skipping generator reassignment (no target node specified)")
 
     print(f"Generator porting complete! Added {len(network.generators)} generators.")

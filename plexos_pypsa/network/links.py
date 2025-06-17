@@ -288,13 +288,14 @@ def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
     print(f"Set flow limits for {len(network.links)} links")
 
 
-def port_links(network: Network, db: PlexosDB):
+def port_links(network: Network, db: PlexosDB, target_node=None):
     """
     Comprehensive function to add links and set all their properties in the PyPSA network.
 
     This function combines all link-related operations:
     - Adds transmission links from the Plexos database
     - Sets link flow limits (p_min_pu and p_max_pu)
+    - Optionally reassigns all links to a specific node
 
     Parameters
     ----------
@@ -302,12 +303,23 @@ def port_links(network: Network, db: PlexosDB):
         The PyPSA network to which links will be added.
     db : PlexosDB
         The Plexos database containing link/transmission data.
+    target_node : str, optional
+        If specified, all links will be reassigned to this node after setup.
+        This is useful when demand is aggregated to a single node.
+
+    Returns
+    -------
+    dict or None
+        If target_node is specified, returns summary information about reassignment.
 
     Examples
     --------
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
     >>> port_links(network, db)
+
+    # With node reassignment for aggregated demand
+    >>> reassignment_info = port_links(network, db, target_node="Load_Aggregate")
     """
     print("Starting link porting process...")
 
@@ -319,4 +331,64 @@ def port_links(network: Network, db: PlexosDB):
     print("2. Setting link flow limits...")
     set_link_flows(network, db)
 
+    # Step 3: Reassign links to target node if specified
+    if target_node:
+        print(f"3. Reassigning links to target node: {target_node}")
+        return reassign_links_to_node(network, target_node)
+    else:
+        print("3. Skipping link reassignment (no target node specified)")
+
     print(f"Link porting complete! Added {len(network.links)} links.")
+
+
+def reassign_links_to_node(network: Network, target_node: str):
+    """
+    Reassign all links to connect a specific node.
+
+    This is useful when demand is aggregated to a single node and all links
+    need to be connected to the same node for a meaningful optimization.
+    For links between different buses, both bus0 and bus1 are set to the target node.
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network containing links.
+    target_node : str
+        Name of the node to assign all links to.
+
+    Returns
+    -------
+    dict
+        Summary information about the reassignment.
+    """
+    if target_node not in network.buses.index:
+        raise ValueError(f"Target node '{target_node}' not found in network buses")
+
+    if len(network.links) == 0:
+        print("No links found in network. Skipping link reassignment.")
+        return {
+            "reassigned_count": 0,
+            "target_node": target_node,
+            "original_connections": [],
+        }
+
+    original_bus0 = network.links["bus0"].copy()
+    original_bus1 = network.links["bus1"].copy()
+    original_connections = [(b0, b1) for b0, b1 in zip(original_bus0, original_bus1)]
+    unique_original_connections = list(set(original_connections))
+
+    # Reassign all links to connect the target node
+    # Note: In aggregated scenarios, all links become self-loops on the aggregate node
+    network.links["bus0"] = target_node
+    network.links["bus1"] = target_node
+
+    reassigned_count = len(network.links)
+    print(f"Reassigned {reassigned_count} links to node '{target_node}'")
+    print(f"  - Originally {len(unique_original_connections)} unique connections")
+    print(f"  - All links now connect {target_node} to {target_node} (self-loops)")
+
+    return {
+        "reassigned_count": reassigned_count,
+        "target_node": target_node,
+        "original_connections": unique_original_connections,
+    }

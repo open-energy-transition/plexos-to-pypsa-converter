@@ -37,11 +37,6 @@ def add_buses(network: Network, db: PlexosDB):
     """
     nodes = db.list_objects_by_class(ClassEnum.Node)
     for node in nodes:
-        try:
-            props = db.get_object_properties(ClassEnum.Node, node)
-        except Exception:
-            # If node has no properties, just proceed
-            props = []
         # add bus to network, set carrier as "AC"
         network.add("Bus", name=node, carrier="AC")
     print(f"Added {len(nodes)} buses")
@@ -49,66 +44,140 @@ def add_buses(network: Network, db: PlexosDB):
 
 def add_snapshots(network: Network, path: str):
     """
-    Reads all {bus}...csv files in the specified path, determines the resolution,
-    and creates a unified time series to set as the network snapshots.
+    Reads demand data to determine time resolution and creates unified time series
+    to set as the network snapshots. Handles both directory-based and single CSV formats.
 
     Parameters
     ----------
     network : pypsa.Network
         The PyPSA network object.
     path : str
-        Path to the folder containing raw demand data files.
+        Path to the folder containing raw demand data files, or path to a single CSV file.
     """
-    all_times = []
+    # Check if path is a single file or directory
+    if os.path.isfile(path) and path.endswith(".csv"):
+        # Single CSV file format (CAISO/SEM style)
+        df = pd.read_csv(path)
 
-    # Read all {bus}...csv files in the folder
-    for file in os.listdir(path):
-        if file.endswith(".csv"):
-            file_path = os.path.join(path, file)
-            df = pd.read_csv(file_path)
+        # Check if Period column exists (indicates sub-daily resolution)
+        if "Period" in df.columns:
+            # Create datetime from Year, Month, Day
             df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
-            df.set_index("datetime", inplace=True)
 
-            # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
-            df.columns = pd.Index(
-                [
-                    str(int(col))
-                    if col.strip().isdigit() and col not in {"Year", "Month", "Day"}
-                    else col
-                    for col in df.columns
-                ]
-            )
+            # Determine resolution from Period column
+            max_period = df["Period"].max()
+            min_period = df["Period"].min()
 
-            # Determine the resolution based on the number of columns
-            non_date_columns = [
-                col for col in df.columns if col not in {"Year", "Month", "Day"}
-            ]
-            if len(non_date_columns) == 24:
-                resolution = 60  # hourly
-            elif len(non_date_columns) == 48:
-                resolution = 30  # 30 minutes
+            # For CAISO/SEM format, periods typically start at 1 and go to 24 (representing hours)
+            if min_period == 1 and max_period == 24:
+                # 24 periods = hourly resolution
+                resolution = 60  # 60 minutes per hour
+            elif min_period == 1 and max_period == 48:
+                # 48 periods = 30-minute resolution
+                resolution = 30
+            elif min_period == 1 and max_period == 96:
+                # 96 periods = 15-minute resolution
+                resolution = 15
+            elif min_period == 1 and max_period == 4:
+                # 4 periods = 6-hour resolution
+                resolution = 6 * 60  # 360 minutes
             else:
-                raise ValueError(f"Unsupported resolution in file: {file}")
+                # Calculate resolution based on periods per day
+                resolution = int(24 * 60 / max_period)  # minutes per period
 
-            # Create a time series for this file
-            times = pd.date_range(
-                start=df.index.min(),
-                end=df.index.max()
-                + pd.Timedelta(days=1)
-                - pd.Timedelta(minutes=resolution),
-                freq=f"{resolution}min",
+            print(
+                f"  - Detected {max_period} periods per day, using {resolution}-minute resolution"
             )
-            all_times.append(times)
 
-    # Combine all time series into a unified time series
-    unified_times = (
-        pd.concat([pd.Series(times) for times in all_times])
-        .drop_duplicates()
-        .sort_values()
-    )
+            # Create time series with proper resolution
+            unique_dates = (
+                df[["Year", "Month", "Day"]]
+                .drop_duplicates()
+                .sort_values(["Year", "Month", "Day"])
+            )
+            all_times = []
 
-    # Set the unified time series as the network snapshots
-    network.set_snapshots(unified_times.tolist())
+            for _, row in unique_dates.iterrows():
+                import datetime
+
+                date = datetime.datetime(
+                    year=int(row["Year"]), month=int(row["Month"]), day=int(row["Day"])
+                )
+                # Create periods starting from the beginning of the day
+                # Period 1 = 00:00, Period 2 = 01:00 (for hourly), etc.
+                daily_times = pd.date_range(
+                    start=date, periods=max_period, freq=f"{resolution}min"
+                )
+                all_times.extend(daily_times.tolist())
+
+            # Set the time series as network snapshots
+            network.set_snapshots(sorted(all_times))
+
+        else:
+            # Simple daily or other resolution without Period column
+            df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+            unique_dates_list = sorted(df["datetime"].unique())
+            network.set_snapshots(unique_dates_list)
+
+    elif os.path.isdir(path):
+        # Directory with multiple CSV files (original format)
+        all_times_list = []
+
+        for file in os.listdir(path):
+            if file.endswith(".csv"):
+                file_path = os.path.join(path, file)
+                df = pd.read_csv(file_path)
+                df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+                df.set_index("datetime", inplace=True)
+
+                # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
+                df.columns = pd.Index(
+                    [
+                        str(int(col))
+                        if col.strip().isdigit() and col not in {"Year", "Month", "Day"}
+                        else col
+                        for col in df.columns
+                    ]
+                )
+
+                # Determine the resolution based on the number of columns
+                non_date_columns = [
+                    col for col in df.columns if col not in {"Year", "Month", "Day"}
+                ]
+                if len(non_date_columns) == 24:
+                    resolution = 60  # hourly
+                elif len(non_date_columns) == 48:
+                    resolution = 30  # 30 minutes
+                else:
+                    # For iteration-based formats in directory, just use daily resolution
+                    resolution = 24 * 60  # daily
+                    print(
+                        f"Warning: File {file} has {len(non_date_columns)} columns, assuming daily resolution"
+                    )
+
+                # Create a time series for this file
+                times = pd.date_range(
+                    start=df.index.min(),
+                    end=df.index.max()
+                    + pd.Timedelta(days=1)
+                    - pd.Timedelta(minutes=resolution),
+                    freq=f"{resolution}min",
+                )
+                all_times_list.append(times)
+
+        # Combine all time series into a unified time series
+        if all_times_list:
+            unified_times = (
+                pd.concat([pd.Series(times) for times in all_times_list])
+                .drop_duplicates()
+                .sort_values()
+            )
+            # Set the unified time series as the network snapshots
+            network.set_snapshots(unified_times.tolist())
+        else:
+            raise ValueError("No valid CSV files found in directory")
+    else:
+        raise ValueError(f"Path must be either a CSV file or directory: {path}")
 
 
 def add_loads(network: Network, path: str):
@@ -274,59 +343,86 @@ def parse_demand_data(demand_source, bus_mapping=None):
 
 
 def _parse_demand_directory(directory_path):
-    """Parse demand data from directory with individual CSV files per bus."""
+    """Parse demand data from directory with individual CSV files per bus or CAISO/SEM format files."""
     demand_data = {}
 
     for file_name in os.listdir(directory_path):
         if not file_name.endswith(".csv"):
             continue
 
-        # Extract bus name from filename (assumes format: {bus}_*.csv)
-        bus_name = file_name.split("_")[0]
         file_path = os.path.join(directory_path, file_name)
 
         try:
-            # Read the load file
-            df = pd.read_csv(file_path, index_col=["Year", "Month", "Day"])
-            df = df.reset_index()
-            df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+            # First, peek at the file to determine its format
+            df_peek = pd.read_csv(file_path, nrows=1)
 
-            # Normalize column names
-            df.columns = pd.Index(
-                [
-                    str(int(col))
-                    if col.strip().isdigit()
-                    and col not in {"Year", "Month", "Day", "datetime"}
-                    else col
+            # Check if this is a CAISO/SEM format file (has Year, Month, Day, Period columns)
+            if all(
+                col in df_peek.columns for col in ["Year", "Month", "Day", "Period"]
+            ):
+                # This is a CAISO/SEM format file - treat it as a single file
+                print(f"  - Detected CAISO/SEM format file: {file_name}")
+                single_file_data = _parse_demand_single_file(file_path)
+
+                # Merge the data from this file
+                for col in single_file_data.columns:
+                    # Use filename as prefix for column names to avoid conflicts
+                    file_prefix = file_name.replace(".csv", "")
+                    column_name = f"{file_prefix}_{col}"
+                    demand_data[column_name] = single_file_data[col]
+
+            else:
+                # Original format: individual bus files with format {bus}_*.csv
+                bus_name = file_name.split("_")[0]
+
+                # Read the load file (original format without Period column)
+                df = pd.read_csv(file_path, index_col=["Year", "Month", "Day"])
+                df = df.reset_index()
+                df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+
+                # Normalize column names
+                df.columns = pd.Index(
+                    [
+                        str(int(col))
+                        if col.strip().isdigit()
+                        and col not in {"Year", "Month", "Day", "datetime"}
+                        else col
+                        for col in df.columns
+                    ]
+                )
+
+                # Get time columns (exclude datetime columns)
+                time_columns = [
+                    col
                     for col in df.columns
+                    if col not in {"Year", "Month", "Day", "datetime"}
                 ]
-            )
 
-            # Get time columns (exclude datetime columns)
-            time_columns = [
-                col
-                for col in df.columns
-                if col not in {"Year", "Month", "Day", "datetime"}
-            ]
+                # Convert to long format
+                df_long = df.melt(
+                    id_vars=["datetime"],
+                    value_vars=time_columns,
+                    var_name="period",
+                    value_name="load",
+                )
 
-            # Convert to long format
-            df_long = df.melt(
-                id_vars=["datetime"],
-                value_vars=time_columns,
-                var_name="period",
-                value_name="load",
-            )
-
-            # Create proper datetime index
-            df_long = _create_datetime_index(df_long, len(time_columns))
-            demand_data[bus_name] = df_long["load"]
+                # Create proper datetime index
+                df_long = _create_datetime_index(df_long, len(time_columns))
+                demand_data[bus_name] = df_long["load"]
 
         except Exception as e:
             logger.warning(f"Failed to parse demand file {file_name}: {e}")
             continue
 
     if demand_data:
-        return pd.DataFrame(demand_data)
+        result_df = pd.DataFrame(demand_data)
+
+        # Add metadata - check if any files were CAISO/SEM format
+        has_iterations = any("iteration_" in col for col in result_df.columns)
+        result_df._format_type = "iteration" if has_iterations else "zone"
+        result_df._num_iterations = None
+
+        return result_df
     else:
         raise ValueError("No valid demand files found in directory")
 
@@ -368,63 +464,143 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
     if not load_columns:
         raise ValueError("No load zone columns found in demand file")
 
+    # Detect if this is an iteration-based format
+    # Check if all load columns are numeric strings (indicating iterations)
+    is_iteration_format = all(
+        col.strip().isdigit()
+        or (isinstance(col, (int, float)) and str(col).replace(".", "").isdigit())
+        for col in load_columns
+    )
+
+    if is_iteration_format:
+        print(
+            f"  - Detected iteration-based format with {len(load_columns)} iterations"
+        )
+        # Sort columns numerically for proper iteration order
+        load_columns = sorted(load_columns, key=lambda x: int(float(str(x))))
+    else:
+        print(f"  - Detected zone-based format with {len(load_columns)} zones")
+
     # Apply bus mapping if provided
+    original_columns = load_columns.copy()
     if bus_mapping:
         # Rename columns according to mapping
         df = df.rename(columns=bus_mapping)
-        load_columns = [bus_mapping.get(col, col) for col in load_columns]
+        load_columns = [bus_mapping.get(str(col), str(col)) for col in load_columns]
 
     # If there's a Period column, we need to convert to long format first
     if period_col:
-        # Melt the DataFrame to long format
-        df_long = df.melt(
-            id_vars=["datetime"] + ([period_col] if period_col else []),
-            value_vars=load_columns,
-            var_name="load_zone",
-            value_name="load",
-        )
+        # For iteration format, we need to handle each iteration separately
+        if is_iteration_format:
+            demand_data = {}
 
-        # Group by datetime and load_zone, then create time series
-        demand_data = {}
-        for zone in load_columns:
-            zone_data = df_long[df_long["load_zone"] == zone].copy()
-            zone_data = zone_data.sort_values(
-                ["datetime", period_col] if period_col else ["datetime"]
-            )
+            # Process each iteration
+            for i, orig_col in enumerate(original_columns):
+                # Create iteration-specific data
+                iteration_data = df[["datetime", period_col, orig_col]].copy()
+                iteration_data = iteration_data.sort_values(["datetime", period_col])
 
-            # Create full datetime index
-            if period_col:
-                # Determine resolution from number of periods per day
+                # Create full datetime index
                 periods_per_day = (
-                    zone_data.groupby("datetime")[period_col].count().iloc[0]
+                    iteration_data.groupby("datetime")[period_col].count().iloc[0]
                 )
-                if periods_per_day == 24:
+                min_period = iteration_data[period_col].min()
+                max_period = iteration_data[period_col].max()
+
+                # For CAISO/SEM format: periods 1-24 represent hours 0-23
+                if min_period == 1 and max_period == 24:
                     resolution = 60  # hourly
-                elif periods_per_day == 48:
+                elif min_period == 1 and max_period == 48:
                     resolution = 30  # 30-minute
-                elif periods_per_day == 96:
+                elif min_period == 1 and max_period == 96:
                     resolution = 15  # 15-minute
                 else:
                     resolution = int(24 * 60 / periods_per_day)  # calculate minutes
 
-                # Create time offsets
-                zone_data["time_offset"] = pd.to_timedelta(
-                    (zone_data[period_col] - 1) * resolution, unit="m"
+                print(
+                    f"    - Processing iteration {orig_col}: {periods_per_day} periods/day, {resolution}min resolution"
                 )
-                zone_data["full_datetime"] = (
-                    zone_data["datetime"] + zone_data["time_offset"]
-                )
-            else:
-                zone_data["full_datetime"] = zone_data["datetime"]
 
-            zone_data = zone_data.set_index("full_datetime")
-            demand_data[zone] = zone_data["load"]
+                # Create time offsets (Period 1 = hour 0, Period 2 = hour 1, etc.)
+                iteration_data["time_offset"] = pd.to_timedelta(
+                    (iteration_data[period_col] - 1) * resolution, unit="m"
+                )
+                iteration_data["full_datetime"] = (
+                    iteration_data["datetime"] + iteration_data["time_offset"]
+                )
+
+                iteration_data = iteration_data.set_index("full_datetime")
+
+                # Store with iteration identifier
+                iteration_key = f"iteration_{int(float(str(orig_col)))}"
+                demand_data[iteration_key] = iteration_data[orig_col]
+
+        else:
+            # Original zone-based processing
+            # Melt the DataFrame to long format
+            df_long = df.melt(
+                id_vars=["datetime"] + ([period_col] if period_col else []),
+                value_vars=original_columns,
+                var_name="load_zone",
+                value_name="load",
+            )
+
+            # Group by datetime and load_zone, then create time series
+            demand_data = {}
+            for zone in load_columns:
+                zone_data = df_long[df_long["load_zone"] == zone].copy()
+                zone_data = zone_data.sort_values(
+                    ["datetime", period_col] if period_col else ["datetime"]
+                )
+
+                # Create full datetime index
+                if period_col:
+                    # Determine resolution from number of periods per day
+                    periods_per_day = (
+                        zone_data.groupby("datetime")[period_col].count().iloc[0]
+                    )
+                    min_period = zone_data[period_col].min()
+                    max_period = zone_data[period_col].max()
+
+                    # For CAISO/SEM format: periods 1-24 represent hours 0-23
+                    if min_period == 1 and max_period == 24:
+                        resolution = 60  # hourly
+                    elif min_period == 1 and max_period == 48:
+                        resolution = 30  # 30-minute
+                    elif min_period == 1 and max_period == 96:
+                        resolution = 15  # 15-minute
+                    else:
+                        resolution = int(24 * 60 / periods_per_day)  # calculate minutes
+
+                    # Create time offsets (Period 1 = hour 0, Period 2 = hour 1, etc.)
+                    zone_data["time_offset"] = pd.to_timedelta(
+                        (zone_data[period_col] - 1) * resolution, unit="m"
+                    )
+                    zone_data["full_datetime"] = (
+                        zone_data["datetime"] + zone_data["time_offset"]
+                    )
+                else:
+                    zone_data["full_datetime"] = zone_data["datetime"]
+
+                zone_data = zone_data.set_index("full_datetime")
+                demand_data[zone] = zone_data["load"]
     else:
         # Simple case: each row is a time point, columns are load zones
         df = df.set_index("datetime")
-        demand_data = {col: df[col] for col in load_columns}
+        if is_iteration_format:
+            demand_data = {}
+            for i, orig_col in enumerate(original_columns):
+                iteration_key = f"iteration_{int(float(str(orig_col)))}"
+                demand_data[iteration_key] = df[orig_col]
+        else:
+            demand_data = {col: df[col] for col in load_columns}
 
-    return pd.DataFrame(demand_data)
+    # Add metadata about format type
+    demand_df = pd.DataFrame(demand_data)
+    demand_df._format_type = "iteration" if is_iteration_format else "zone"
+    demand_df._num_iterations = len(load_columns) if is_iteration_format else None
+
+    return demand_df
 
 
 def _create_datetime_index(df_long, num_periods):
@@ -447,7 +623,13 @@ def _create_datetime_index(df_long, num_periods):
     return df_long.set_index("full_datetime")
 
 
-def add_loads_flexible(network: Network, demand_source, bus_mapping=None):
+def add_loads_flexible(
+    network: Network,
+    demand_source,
+    bus_mapping=None,
+    target_node=None,
+    aggregate_node_name=None,
+):
     """
     Flexible function to add loads to the PyPSA network from various demand data formats.
 
@@ -459,19 +641,28 @@ def add_loads_flexible(network: Network, demand_source, bus_mapping=None):
         Path to demand data (directory with individual files or single CSV file).
     bus_mapping : dict, optional
         Mapping from demand data column names to network bus names.
+    target_node : str, optional
+        If specified, all demand will be assigned to this existing node.
+        Example: "SEM" to assign all demand to the SEM node.
+    aggregate_node_name : str, optional
+        If specified, creates a new node with this name and assigns all demand to it.
+        Example: "Load_Aggregate" to create an aggregate load node.
 
     Examples
     --------
-    # Original format (directory)
+    # Original format (directory) - per-node assignment
     >>> add_loads_flexible(network, "/path/to/demand/folder")
 
-    # Single CSV with numbered zones
+    # Single CSV with numbered zones - per-node assignment
     >>> add_loads_flexible(network, "/path/to/demand.csv",
     ...                    bus_mapping={"1": "Bus_001", "2": "Bus_002"})
 
-    # Single CSV with named zones
+    # Assign all demand to specific existing node
+    >>> add_loads_flexible(network, "/path/to/demand.csv", target_node="SEM")
+
+    # Aggregate all demand to new node
     >>> add_loads_flexible(network, "/path/to/demand.csv",
-    ...                    bus_mapping={"Zone_A": "Bus_A", "Zone_B": "Bus_B"})
+    ...                    aggregate_node_name="Load_Aggregate")
     """
     print("Parsing demand data...")
     demand_df = parse_demand_data(demand_source, bus_mapping)
@@ -479,61 +670,16 @@ def add_loads_flexible(network: Network, demand_source, bus_mapping=None):
     print(f"Found demand data for {len(demand_df.columns)} load zones")
     print(f"Time range: {demand_df.index.min()} to {demand_df.index.max()}")
 
-    loads_added = 0
-    loads_skipped = 0
-
-    for load_zone in demand_df.columns:
-        # Check if there's a corresponding bus in the network
-        if load_zone in network.buses.index:
-            bus_name = load_zone
-        else:
-            # Try to find a matching bus (case-insensitive or partial match)
-            matching_buses = [
-                bus
-                for bus in network.buses.index
-                if bus.lower() == load_zone.lower()
-                or load_zone.lower() in bus.lower()
-                or bus.lower() in load_zone.lower()
-            ]
-
-            if matching_buses:
-                bus_name = matching_buses[0]
-                if len(matching_buses) > 1:
-                    logger.warning(
-                        f"Multiple buses match load zone {load_zone}: {matching_buses}. Using {bus_name}"
-                    )
-            else:
-                logger.warning(f"No bus found for load zone {load_zone}. Skipping.")
-                loads_skipped += 1
-                continue
-
-        # Add the load to the network
-        load_name = f"Load_{load_zone}"
-        network.add("Load", name=load_name, bus=bus_name)
-
-        # Add the load time series (align with network snapshots)
-        load_series = demand_df[load_zone].reindex(network.snapshots).fillna(0)
-        network.loads_t.p_set.loc[:, load_name] = load_series
-
-        loads_added += 1
-        print(f"  - Added load time series for {load_name} (bus: {bus_name})")
-
-    print(f"Successfully added {loads_added} loads, skipped {loads_skipped} load zones")
-
-    # Report any network buses without loads
-    buses_without_loads = [
-        bus
-        for bus in network.buses.index
-        if not any(
-            load.startswith("Load_") and network.loads.loc[load, "bus"] == bus
-            for load in network.loads.index
-        )
-    ]
-
-    if buses_without_loads:
-        print(
-            f"Warning: {len(buses_without_loads)} buses have no loads: {buses_without_loads[:5]}{'...' if len(buses_without_loads) > 5 else ''}"
-        )
+    # Handle different demand assignment modes
+    if target_node is not None:
+        # Mode 1: Assign all demand to a specific existing node
+        return _add_loads_to_target_node(network, demand_df, target_node)
+    elif aggregate_node_name is not None:
+        # Mode 2: Create new aggregate node and assign all demand to it
+        return _add_loads_to_aggregate_node(network, demand_df, aggregate_node_name)
+    else:
+        # Mode 3: Default per-node assignment
+        return _add_loads_per_node(network, demand_df)
 
 
 def port_core_network(
@@ -542,6 +688,8 @@ def port_core_network(
     snapshots_source,
     demand_source,
     demand_bus_mapping=None,
+    target_node=None,
+    aggregate_node_name=None,
 ):
     """
     Comprehensive function to set up the core PyPSA network infrastructure.
@@ -564,6 +712,17 @@ def port_core_network(
         Path to demand data (directory with individual files or single CSV file).
     demand_bus_mapping : dict, optional
         Mapping from demand data column names to network bus names.
+    target_node : str, optional
+        If specified, all demand will be assigned to this existing node.
+        Example: "SEM" to assign all demand to the SEM node.
+    aggregate_node_name : str, optional
+        If specified, creates a new node with this name and assigns all demand to it.
+        Example: "Load_Aggregate" to create an aggregate load node.
+
+    Returns
+    -------
+    dict
+        Summary information about the load assignment including mode and statistics.
 
     Examples
     --------
@@ -578,6 +737,18 @@ def port_core_network(
     ...                   snapshots_source="/path/to/demand.csv",
     ...                   demand_source="/path/to/demand.csv",
     ...                   demand_bus_mapping={"1": "Zone_001", "2": "Zone_002"})
+
+    # Assign all demand to specific node (SEM example)
+    >>> port_core_network(network, db,
+    ...                   snapshots_source="/path/to/demand.csv",
+    ...                   demand_source="/path/to/demand.csv",
+    ...                   target_node="SEM")
+
+    # Aggregate all demand to new node (CAISO example)
+    >>> port_core_network(network, db,
+    ...                   snapshots_source="/path/to/demand.csv",
+    ...                   demand_source="/path/to/demand.csv",
+    ...                   aggregate_node_name="CAISO_Load")
     """
     print("Setting up core network infrastructure...")
 
@@ -595,13 +766,17 @@ def port_core_network(
 
     # Step 4: Add loads with flexible parsing
     print("4. Adding loads...")
-    add_loads_flexible(network, demand_source, demand_bus_mapping)
+    load_summary = add_loads_flexible(
+        network, demand_source, demand_bus_mapping, target_node, aggregate_node_name
+    )
 
     print(
         f"Core network setup complete! Network has {len(network.buses)} buses, "
         f"{len(network.snapshots)} snapshots, {len(network.carriers)} carriers, "
         f"and {len(network.loads)} loads."
     )
+
+    return load_summary
 
 
 def create_bus_mapping_from_csv(csv_path, network_buses=None, auto_detect=True):
@@ -746,3 +921,575 @@ def get_demand_format_info(source_path):
         info["error"] = "Path is neither a directory nor a CSV file"
 
     return info
+
+
+def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
+    """
+    Default mode: Assign loads to individual nodes based on matching.
+
+    For iteration-based formats, creates multiple loads per node (Load1_{Node}, Load2_{Node}, etc.)
+    For zone-based formats, creates one load per zone (Load_{Zone})
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network object.
+    demand_df : DataFrame
+        DataFrame with demand time series for each load zone/iteration.
+
+    Returns
+    -------
+    dict
+        Summary information about the load assignment.
+    """
+    loads_added = 0
+    loads_skipped = 0
+
+    # Check if this is an iteration-based format
+    is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
+    num_iterations = getattr(demand_df, "_num_iterations", None)
+
+    if is_iteration_format:
+        print(f"Processing iteration-based format with {num_iterations} iterations")
+
+        # For iteration-based formats, we need to determine which node to assign to
+        # For per-node strategy, we'll assign to the first available node or create a default node
+        available_buses = list(network.buses.index)
+
+        if not available_buses:
+            # No buses available, create a default node
+            default_node = "Node_001"
+            network.add("Bus", name=default_node, carrier="AC")
+            target_node = default_node
+            print(f"  - Created default node: {default_node}")
+        else:
+            # Use the first available bus
+            target_node = available_buses[0]
+            print(f"  - Assigning iterations to node: {target_node}")
+
+        # Create one load for each iteration
+        for col in demand_df.columns:
+            if col.startswith("iteration_"):
+                iteration_num = col.split("_")[1]
+                load_name = f"Load{iteration_num}_{target_node}"
+
+                network.add("Load", name=load_name, bus=target_node)
+
+                # Add the load time series (align with network snapshots)
+                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
+                network.loads_t.p_set.loc[:, load_name] = load_series
+
+                loads_added += 1
+                print(
+                    f"  - Added load time series for {load_name} (bus: {target_node})"
+                )
+
+    else:
+        print("Processing zone-based format")
+
+        # Original zone-based logic
+        for load_zone in demand_df.columns:
+            # Check if there's a corresponding bus in the network
+            if load_zone in network.buses.index:
+                bus_name = load_zone
+            else:
+                # Try to find a matching bus (case-insensitive or partial match)
+                matching_buses = [
+                    bus
+                    for bus in network.buses.index
+                    if bus.lower() == load_zone.lower()
+                    or load_zone.lower() in bus.lower()
+                    or bus.lower() in load_zone.lower()
+                ]
+
+                if matching_buses:
+                    bus_name = matching_buses[0]
+                    if len(matching_buses) > 1:
+                        logger.warning(
+                            f"Multiple buses match load zone {load_zone}: {matching_buses}. Using {bus_name}"
+                        )
+                else:
+                    logger.warning(f"No bus found for load zone {load_zone}. Skipping.")
+                    loads_skipped += 1
+                    continue
+
+            # Add the load to the network
+            load_name = f"Load_{load_zone}"
+            network.add("Load", name=load_name, bus=bus_name)
+
+            # Add the load time series (align with network snapshots)
+            load_series = demand_df[load_zone].reindex(network.snapshots).fillna(0)
+            network.loads_t.p_set.loc[:, load_name] = load_series
+
+            loads_added += 1
+            print(f"  - Added load time series for {load_name} (bus: {bus_name})")
+
+    print(f"Successfully added {loads_added} loads, skipped {loads_skipped} load zones")
+
+    # Report any network buses without loads (only for zone-based format)
+    if not is_iteration_format:
+        buses_without_loads = [
+            bus
+            for bus in network.buses.index
+            if not any(
+                load.startswith("Load_") and network.loads.loc[load, "bus"] == bus
+                for load in network.loads.index
+            )
+        ]
+
+        if buses_without_loads:
+            print(
+                f"Warning: {len(buses_without_loads)} buses have no loads: {buses_without_loads[:5]}{'...' if len(buses_without_loads) > 5 else ''}"
+            )
+    else:
+        buses_without_loads = []
+
+    return {
+        "mode": "per_node",
+        "loads_added": loads_added,
+        "loads_skipped": loads_skipped,
+        "buses_without_loads": len(buses_without_loads),
+        "format_type": "iteration" if is_iteration_format else "zone",
+        "target_node": target_node if is_iteration_format else None,
+    }
+
+
+def _add_loads_to_target_node(
+    network: Network, demand_df: pd.DataFrame, target_node: str
+):
+    """
+    Assign all demand to a specific existing node.
+
+    For iteration-based formats, creates multiple loads (Load1_{target_node}, Load2_{target_node}, etc.)
+    For zone-based formats, creates a single aggregated load
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network object.
+    demand_df : DataFrame
+        DataFrame with demand time series for each load zone/iteration.
+    target_node : str
+        Name of the existing node to assign all demand to.
+
+    Returns
+    -------
+    dict
+        Summary information about the load assignment.
+    """
+    # Verify target node exists
+    if target_node not in network.buses.index:
+        raise ValueError(
+            f"Target node '{target_node}' not found in network buses: {list(network.buses.index)}"
+        )
+
+    print(f"Assigning all demand to target node: {target_node}")
+
+    # Check if this is an iteration-based format
+    is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
+    num_iterations = getattr(demand_df, "_num_iterations", None)
+
+    loads_added = 0
+
+    if is_iteration_format:
+        print(f"Processing iteration-based format with {num_iterations} iterations")
+
+        # Create one load for each iteration
+        for col in demand_df.columns:
+            if col.startswith("iteration_"):
+                iteration_num = col.split("_")[1]
+                load_name = f"Load{iteration_num}_{target_node}"
+
+                network.add("Load", name=load_name, bus=target_node)
+
+                # Add the load time series (align with network snapshots)
+                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
+                network.loads_t.p_set.loc[:, load_name] = load_series
+
+                loads_added += 1
+                print(f"  - Added load {load_name} to bus {target_node}")
+
+        # Calculate total demand for reporting
+        total_demand = demand_df.sum(axis=1)
+        peak_demand = total_demand.max()
+
+        print(f"  - Total iterations: {num_iterations}")
+        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+
+        return {
+            "mode": "target_node",
+            "format_type": "iteration",
+            "target_node": target_node,
+            "loads_added": loads_added,
+            "iterations_processed": num_iterations,
+            "peak_demand": peak_demand,
+        }
+
+    else:
+        print("Processing zone-based format - creating aggregated load")
+
+        # Sum all demand across zones to create aggregate demand
+        total_demand = demand_df.sum(axis=1)
+
+        # Add single aggregate load to the target node
+        load_name = f"Load_Aggregate_{target_node}"
+        network.add("Load", name=load_name, bus=target_node)
+
+        # Add the aggregated load time series
+        load_series = total_demand.reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        loads_added = 1
+        print(f"  - Added aggregated load {load_name} to bus {target_node}")
+        print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
+        print(f"  - Peak demand: {total_demand.max():.2f} MW")
+
+        return {
+            "mode": "target_node",
+            "format_type": "zone",
+            "target_node": target_node,
+            "load_name": load_name,
+            "zones_aggregated": len(demand_df.columns),
+            "peak_demand": total_demand.max(),
+        }
+
+
+def _add_loads_to_aggregate_node(
+    network: Network, demand_df: pd.DataFrame, aggregate_node_name: str
+):
+    """
+    Create a new aggregate node and assign all demand to it.
+
+    For iteration-based formats, creates multiple loads (Load1_{aggregate_node}, Load2_{aggregate_node}, etc.)
+    For zone-based formats, creates a single aggregated load
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network object.
+    demand_df : DataFrame
+        DataFrame with demand time series for each load zone/iteration.
+    aggregate_node_name : str
+        Name for the new aggregate node.
+
+    Returns
+    -------
+    dict
+        Summary information about the load assignment.
+    """
+    # Check if aggregate node already exists
+    if aggregate_node_name in network.buses.index:
+        logger.warning(
+            f"Aggregate node '{aggregate_node_name}' already exists. Using existing node."
+        )
+    else:
+        # Create new aggregate bus
+        network.add("Bus", name=aggregate_node_name, carrier="AC")
+        print(f"Created new aggregate bus: {aggregate_node_name}")
+
+    print(f"Assigning all demand to aggregate node: {aggregate_node_name}")
+
+    # Check if this is an iteration-based format
+    is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
+    num_iterations = getattr(demand_df, "_num_iterations", None)
+
+    loads_added = 0
+
+    if is_iteration_format:
+        print(f"Processing iteration-based format with {num_iterations} iterations")
+
+        # Create one load for each iteration
+        for col in demand_df.columns:
+            if col.startswith("iteration_"):
+                iteration_num = col.split("_")[1]
+                load_name = f"Load{iteration_num}_{aggregate_node_name}"
+
+                network.add("Load", name=load_name, bus=aggregate_node_name)
+
+                # Add the load time series (align with network snapshots)
+                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
+                network.loads_t.p_set.loc[:, load_name] = load_series
+
+                loads_added += 1
+                print(f"  - Added load {load_name} to bus {aggregate_node_name}")
+
+        # Calculate total demand for reporting
+        total_demand = demand_df.sum(axis=1)
+        peak_demand = total_demand.max()
+
+        print(f"  - Total iterations: {num_iterations}")
+        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+
+        return {
+            "mode": "aggregate_node",
+            "format_type": "iteration",
+            "aggregate_node": aggregate_node_name,
+            "loads_added": loads_added,
+            "iterations_processed": num_iterations,
+            "peak_demand": peak_demand,
+        }
+
+    else:
+        print("Processing zone-based format - creating single aggregated load")
+
+        # Sum all demand across zones to create aggregate demand
+        total_demand = demand_df.sum(axis=1)
+
+        # Add single aggregate load to the new node
+        load_name = "Load_Aggregate"
+        network.add("Load", name=load_name, bus=aggregate_node_name)
+
+        # Add the aggregated load time series
+        load_series = total_demand.reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        loads_added = 1
+        print(f"  - Added aggregated load {load_name} to bus {aggregate_node_name}")
+        print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
+        print(f"  - Peak demand: {total_demand.max():.2f} MW")
+
+        return {
+            "mode": "aggregate_node",
+            "format_type": "zone",
+            "aggregate_node": aggregate_node_name,
+            "load_name": load_name,
+            "zones_aggregated": len(demand_df.columns),
+            "peak_demand": total_demand.max(),
+        }
+
+
+def setup_network_with_aggregation(
+    network: Network,
+    db: PlexosDB,
+    snapshots_source,
+    demand_source,
+    aggregate_node_name,
+    timeslice_csv=None,
+    vre_profiles_path=None,
+    demand_bus_mapping=None,
+):
+    """
+    Complete network setup workflow with demand aggregation and component reassignment.
+
+    This function is specifically designed for scenarios where all demand should be
+    aggregated to a single node and all generators and links should be assigned to
+    that same node (e.g., CAISO IRP23 scenario).
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to set up.
+    db : PlexosDB
+        The Plexos database containing network data.
+    snapshots_source : str
+        Path to demand data for creating time snapshots.
+    demand_source : str
+        Path to demand data (directory with individual files or single CSV file).
+    aggregate_node_name : str
+        Name for the new aggregate node that will receive all demand.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties.
+    vre_profiles_path : str, optional
+        Path to the folder containing VRE generation profile files.
+    demand_bus_mapping : dict, optional
+        Mapping from demand data column names to network bus names.
+
+    Returns
+    -------
+    dict
+        Summary information about the aggregation including load, generator, and link assignments.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> summary = setup_network_with_aggregation(
+    ...     network, db,
+    ...     snapshots_source="/path/to/demand.csv",
+    ...     demand_source="/path/to/demand.csv",
+    ...     aggregate_node_name="CAISO_Load",
+    ...     vre_profiles_path="/path/to/profiles")
+    """
+    print(f"Setting up network with demand aggregation to node: {aggregate_node_name}")
+
+    # Import required modules (avoid circular imports)
+    from plexos_pypsa.network.generators import (
+        port_generators,
+        reassign_generators_to_node,
+    )
+    from plexos_pypsa.network.links import port_links, reassign_links_to_node
+
+    # Step 1: Set up core network with aggregated demand
+    print("=" * 60)
+    print("STEP 1: Setting up core network with aggregated demand")
+    print("=" * 60)
+    load_summary = port_core_network(
+        network,
+        db,
+        snapshots_source=snapshots_source,
+        demand_source=demand_source,
+        demand_bus_mapping=demand_bus_mapping,
+        aggregate_node_name=aggregate_node_name,
+    )
+
+    # Step 2: Add generators (they will be assigned to original nodes first)
+    print("\n" + "=" * 60)
+    print("STEP 2: Adding generators")
+    print("=" * 60)
+    port_generators(
+        network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
+    )
+
+    # Step 3: Reassign all generators to the aggregate node
+    print("\n" + "=" * 60)
+    print("STEP 3: Reassigning generators to aggregate node")
+    print("=" * 60)
+    generator_summary = reassign_generators_to_node(network, aggregate_node_name)
+
+    # Step 4: Add links (they will be assigned to original nodes first)
+    print("\n" + "=" * 60)
+    print("STEP 4: Adding links")
+    print("=" * 60)
+    port_links(network, db)
+
+    # Step 5: Reassign all links to the aggregate node
+    print("\n" + "=" * 60)
+    print("STEP 5: Reassigning links to aggregate node")
+    print("=" * 60)
+    link_summary = reassign_links_to_node(network, aggregate_node_name)
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("AGGREGATION COMPLETE!")
+    print("=" * 60)
+    print("Network summary:")
+    print(
+        f"  - {len(network.buses)} buses (with {aggregate_node_name} as aggregate node)"
+    )
+    print(f"  - {len(network.snapshots)} snapshots")
+    print(f"  - {len(network.loads)} loads (all on {aggregate_node_name})")
+    print(f"  - {len(network.generators)} generators (all on {aggregate_node_name})")
+    print(f"  - {len(network.links)} links (all connecting {aggregate_node_name})")
+
+    return {
+        "aggregate_node": aggregate_node_name,
+        "load_summary": load_summary,
+        "generator_summary": generator_summary,
+        "link_summary": link_summary,
+        "network_summary": {
+            "buses": len(network.buses),
+            "snapshots": len(network.snapshots),
+            "loads": len(network.loads),
+            "generators": len(network.generators),
+            "links": len(network.links),
+        },
+    }
+
+
+def setup_network_with_target_node(
+    network: Network,
+    db: PlexosDB,
+    snapshots_source,
+    demand_source,
+    target_node,
+    timeslice_csv=None,
+    vre_profiles_path=None,
+    demand_bus_mapping=None,
+):
+    """
+    Complete network setup workflow with demand assignment to a specific existing node.
+
+    This function is specifically designed for scenarios where all demand should be
+    assigned to a specific existing node (e.g., SEM 2024 scenario where all demand
+    goes to the "SEM" node).
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to set up.
+    db : PlexosDB
+        The Plexos database containing network data.
+    snapshots_source : str
+        Path to demand data for creating time snapshots.
+    demand_source : str
+        Path to demand data (directory with individual files or single CSV file).
+    target_node : str
+        Name of the existing node that will receive all demand.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties.
+    vre_profiles_path : str, optional
+        Path to the folder containing VRE generation profile files.
+    demand_bus_mapping : dict, optional
+        Mapping from demand data column names to network bus names.
+
+    Returns
+    -------
+    dict
+        Summary information about the target node assignment.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> summary = setup_network_with_target_node(
+    ...     network, db,
+    ...     snapshots_source="/path/to/demand.csv",
+    ...     demand_source="/path/to/demand.csv",
+    ...     target_node="SEM",
+    ...     vre_profiles_path="/path/to/profiles")
+    """
+    print(f"Setting up network with all demand assigned to target node: {target_node}")
+
+    # Import required modules (avoid circular imports)
+    from plexos_pypsa.network.generators import port_generators
+    from plexos_pypsa.network.links import port_links
+
+    # Step 1: Set up core network with targeted demand
+    print("=" * 60)
+    print(f"STEP 1: Setting up core network with demand to {target_node}")
+    print("=" * 60)
+    load_summary = port_core_network(
+        network,
+        db,
+        snapshots_source=snapshots_source,
+        demand_source=demand_source,
+        demand_bus_mapping=demand_bus_mapping,
+        target_node=target_node,
+    )
+
+    # Step 2: Add generators (maintain original node assignments)
+    print("\n" + "=" * 60)
+    print("STEP 2: Adding generators")
+    print("=" * 60)
+    port_generators(
+        network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
+    )
+
+    # Step 3: Add links (maintain original node assignments)
+    print("\n" + "=" * 60)
+    print("STEP 3: Adding links")
+    print("=" * 60)
+    port_links(network, db)
+
+    # Final summary
+    print("\n" + "=" * 60)
+    print("TARGET NODE ASSIGNMENT COMPLETE!")
+    print("=" * 60)
+    print("Network summary:")
+    print(f"  - {len(network.buses)} buses")
+    print(f"  - {len(network.snapshots)} snapshots")
+    print(f"  - {len(network.loads)} loads (all on {target_node})")
+    print(f"  - {len(network.generators)} generators (distributed across nodes)")
+    print(f"  - {len(network.links)} links (maintaining original connections)")
+
+    return {
+        "target_node": target_node,
+        "load_summary": load_summary,
+        "network_summary": {
+            "buses": len(network.buses),
+            "snapshots": len(network.snapshots),
+            "loads": len(network.loads),
+            "generators": len(network.generators),
+            "links": len(network.links),
+        },
+    }
