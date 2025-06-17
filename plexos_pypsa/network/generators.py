@@ -242,7 +242,6 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
         """
         gen_series = {}
         for gen in gen_df["generator"]:
-            print(f"Processing generator: {gen}")
             props = merged[merged["generator"] == gen]
             # Build property entries
             property_entries = []
