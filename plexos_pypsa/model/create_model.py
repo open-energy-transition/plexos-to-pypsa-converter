@@ -49,14 +49,21 @@ def create_aemo_model():
     print("\nCore Network Setup Complete:")
     print(f"  Format type: {load_summary['format_type']}")
     if load_summary["format_type"] == "iteration":
-        print(f"  Iterations processed: {load_summary['iterations_processed']}")
+        print(
+            f"  Iterations processed: {load_summary.get('iterations_processed', 'N/A')}"
+        )
         print(f"  Loads created: {load_summary['loads_added']}")
-    if load_summary["format_type"] == "zone":
+    else:  # zone format
         print(f"  Loads mapped to buses: {load_summary['loads_added']}")
-    else:
-        print(f"  Zone-based loads: {load_summary['zones_processed']}")
-        print(f"  Load files mapped to buses: {load_summary['loads_added']}")
-    print(f"  Peak total demand: {load_summary['peak_demand']:.2f} MW")
+        if load_summary.get("loads_skipped", 0) > 0:
+            print(f"  Loads skipped (no matching bus): {load_summary['loads_skipped']}")
+
+    # Calculate peak demand from the network loads
+    if len(n.loads_t.p_set.columns) > 0:
+        total_demand = n.loads_t.p_set.sum(axis=1)
+        peak_demand = total_demand.max()
+        print(f"  Peak total demand: {peak_demand:.2f} MW")
+
     print(f"  Total buses: {len(n.buses)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
 
@@ -85,7 +92,7 @@ def create_aemo_model():
 
 
 if __name__ == "__main__":
-    # Create the network
+    # create the network
     network = create_aemo_model()
 
     # select a subset of snapshots for optimization
