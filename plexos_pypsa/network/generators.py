@@ -71,7 +71,6 @@ def add_generators(network: Network, db: PlexosDB):
         # Extract generator properties
         prop_map = {
             "Min Capacity": "p_nom_min",
-            "VO&M Charge": "marginal_cost",
             "Start Cost": "start_up_cost",
             "Shutdown Cost": "shut_down_cost",
             "Min Up Time": "min_up_time",
