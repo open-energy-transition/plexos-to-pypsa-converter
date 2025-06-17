@@ -309,25 +309,26 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
             # Build time series for Rating and Rating Factor
             rating_ts = build_ts("Rating")
             rating_factor_ts = build_ts("Rating Factor")
-            # If there are any Rating entries, use them (as p_max_pu = Rating / p_nom)
-            if rating_ts.notnull().any():
-                p_nom = (
-                    network.generators.loc[gen, "p_nom"]
-                    if gen in network.generators.index
-                    and "p_nom" in network.generators.columns
-                    else maxcap
-                )
-                ts = rating_ts.fillna(maxcap)
-                ts = ts / p_nom if p_nom else ts
-                gen_series[gen] = ts
-                continue
-            # If no Rating, use Rating Factor (as p_max_pu = Rating Factor / 100)
-            if rating_factor_ts.notnull().any():
-                ts = rating_factor_ts.fillna(1.0) / 100.0
-                gen_series[gen] = ts
-                continue
-            # If neither, fallback to Max Capacity (p_max_pu = 1.0)
-            gen_series[gen] = pd.Series(1.0, index=snapshots)
+            # Get p_nom for scaling Rating
+            p_nom = (
+                network.generators.loc[gen, "p_nom"]
+                if gen in network.generators.index
+                and "p_nom" in network.generators.columns
+                else maxcap
+            )
+            # Start with all NaN
+            ts = pd.Series(index=snapshots, dtype=float)
+            # At each snapshot: use Rating Factor if present, else Rating if present, else 1.0
+            if p_nom:
+                # Use Rating Factor if present
+                mask_rf = rating_factor_ts.notnull()
+                ts[mask_rf] = rating_factor_ts[mask_rf] / 100.0
+                # Where Rating Factor is not present, use Rating if present
+                mask_rating = ts.isnull() & rating_ts.notnull()
+                ts[mask_rating] = rating_ts[mask_rating] / p_nom
+            # Where neither is present, fallback to 1.0
+            ts = ts.fillna(1.0)
+            gen_series[gen] = ts
         # Concatenate all generator Series into a single DataFrame
         result = pd.concat(gen_series, axis=1)
         result.index = snapshots
