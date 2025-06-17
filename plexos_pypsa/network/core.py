@@ -120,50 +120,108 @@ def add_snapshots(network: Network, path: str):
             network.set_snapshots(unique_dates_list)
 
     elif os.path.isdir(path):
-        # Directory with multiple CSV files (original format)
+        # Directory with multiple CSV files
         all_times_list = []
 
         for file in os.listdir(path):
             if file.endswith(".csv"):
                 file_path = os.path.join(path, file)
                 df = pd.read_csv(file_path)
-                df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
-                df.set_index("datetime", inplace=True)
 
-                # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
-                df.columns = pd.Index(
-                    [
-                        str(int(col))
-                        if col.strip().isdigit() and col not in {"Year", "Month", "Day"}
-                        else col
-                        for col in df.columns
-                    ]
-                )
+                # Check if this is a CAISO/SEM format file (has Period column)
+                if "Period" in df.columns:
+                    print(f"  - Processing CAISO/SEM format file: {file}")
+                    # Create datetime from Year, Month, Day
+                    df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
 
-                # Determine the resolution based on the number of columns
-                non_date_columns = [
-                    col for col in df.columns if col not in {"Year", "Month", "Day"}
-                ]
-                if len(non_date_columns) == 24:
-                    resolution = 60  # hourly
-                elif len(non_date_columns) == 48:
-                    resolution = 30  # 30 minutes
-                else:
-                    # For iteration-based formats in directory, just use daily resolution
-                    resolution = 24 * 60  # daily
+                    # Determine resolution from Period column
+                    max_period = df["Period"].max()
+                    min_period = df["Period"].min()
+
+                    # For CAISO/SEM format, periods typically start at 1 and go to 24 (representing hours)
+                    if min_period == 1 and max_period == 24:
+                        # 24 periods = hourly resolution
+                        resolution = 60  # 60 minutes per hour
+                    elif min_period == 1 and max_period == 48:
+                        # 48 periods = 30-minute resolution
+                        resolution = 30
+                    elif min_period == 1 and max_period == 96:
+                        # 96 periods = 15-minute resolution
+                        resolution = 15
+                    elif min_period == 1 and max_period == 4:
+                        # 4 periods = 6-hour resolution
+                        resolution = 6 * 60  # 360 minutes
+                    else:
+                        # Calculate resolution based on periods per day
+                        resolution = int(24 * 60 / max_period)  # minutes per period
+
                     print(
-                        f"Warning: File {file} has {len(non_date_columns)} columns, assuming daily resolution"
+                        f"    - Detected {max_period} periods per day, using {resolution}-minute resolution"
                     )
 
-                # Create a time series for this file
-                times = pd.date_range(
-                    start=df.index.min(),
-                    end=df.index.max()
-                    + pd.Timedelta(days=1)
-                    - pd.Timedelta(minutes=resolution),
-                    freq=f"{resolution}min",
-                )
-                all_times_list.append(times)
+                    # Create time series with proper resolution
+                    unique_dates = (
+                        df[["Year", "Month", "Day"]]
+                        .drop_duplicates()
+                        .sort_values(["Year", "Month", "Day"])
+                    )
+
+                    for _, row in unique_dates.iterrows():
+                        import datetime
+
+                        date = datetime.datetime(
+                            year=int(row["Year"]),
+                            month=int(row["Month"]),
+                            day=int(row["Day"]),
+                        )
+                        # Create periods starting from the beginning of the day
+                        # Period 1 = 00:00, Period 2 = 01:00 (for hourly), etc.
+                        daily_times = pd.date_range(
+                            start=date, periods=max_period, freq=f"{resolution}min"
+                        )
+                        all_times_list.append(daily_times)
+
+                else:
+                    # Original format: columns represent time periods
+                    print(f"  - Processing traditional format file: {file}")
+                    df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+                    df.set_index("datetime", inplace=True)
+
+                    # Normalize column names to handle both cases (e.g., 1, 2, ...48 or 01, 02, ...48)
+                    df.columns = pd.Index(
+                        [
+                            str(int(col))
+                            if col.strip().isdigit()
+                            and col not in {"Year", "Month", "Day"}
+                            else col
+                            for col in df.columns
+                        ]
+                    )
+
+                    # Determine the resolution based on the number of columns
+                    non_date_columns = [
+                        col for col in df.columns if col not in {"Year", "Month", "Day"}
+                    ]
+                    if len(non_date_columns) == 24:
+                        resolution = 60  # hourly
+                    elif len(non_date_columns) == 48:
+                        resolution = 30  # 30 minutes
+                    else:
+                        # Default to daily resolution
+                        resolution = 24 * 60  # daily
+                        print(
+                            f"    - File has {len(non_date_columns)} columns, using daily resolution"
+                        )
+
+                    # Create a time series for this file
+                    times = pd.date_range(
+                        start=df.index.min(),
+                        end=df.index.max()
+                        + pd.Timedelta(days=1)
+                        - pd.Timedelta(minutes=resolution),
+                        freq=f"{resolution}min",
+                    )
+                    all_times_list.append(times)
 
         # Combine all time series into a unified time series
         if all_times_list:
