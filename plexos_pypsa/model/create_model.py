@@ -1,3 +1,7 @@
+from collections import defaultdict
+from typing import DefaultDict
+
+import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
@@ -10,7 +14,6 @@ from plexos_pypsa.network.generators import (
     set_vre_profiles,
 )
 from plexos_pypsa.network.links import add_links, set_link_flows
-from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
 
 # list XML file
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
@@ -52,16 +55,26 @@ set_link_flows(n, plexos_db)
 add_loads(n, path_demand)
 
 # add storage (TODO: fix)
-add_storage(n, plexos_db)
-add_hydro_inflows(n, plexos_db, path_ren)
+# add_storage(n, plexos_db)
+# add_hydro_inflows(n, plexos_db, path_ren)
 
 # run consistency check on network
 n.consistency_check()
 
 # select a subset of snapshots
-subset = n.snapshots[:50]  # the first 10 snapshots
+# subset = n.snapshots[:50]  # the first 50 snapshots
 
-# S the network
+# in each year in the snapshots, select the first x snapshots
+x = 60  # number of snapshots to select per year
+snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+for snap in n.snapshots:
+    year = pd.Timestamp(snap).year
+    if len(snapshots_by_year[year]) < x:
+        snapshots_by_year[year].append(snap)
+
+subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
+
+# solve the network
 n.optimize(solver_name="highs", snapshots=subset)  # type: ignore
 
 # save to file
