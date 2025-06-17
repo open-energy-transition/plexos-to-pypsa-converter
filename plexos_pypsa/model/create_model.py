@@ -9,54 +9,102 @@ from plexos_pypsa.network.core import port_core_network
 from plexos_pypsa.network.generators import port_generators
 from plexos_pypsa.network.links import port_links
 
-# list XML file
-path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
-file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
-file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
-# file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/sem/2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
 
-# specify renewables profiles and demand paths
-path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
+def create_aemo_model():
+    """
+    Examples
+    --------
+    >>> network = create_aemo_model()
+    >>> print(f"Network has {len(network.buses)} buses and {len(network.loads)} loads")
+    >>> network.optimize(solver_name="highs")
+    """
+    # list XML file
+    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
+    file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+    file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
 
-# load PlexosDB from XML file
-plexos_db = PlexosDB.from_xml(file_xml)
+    # specify renewables profiles and demand paths
+    path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
+    path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
 
-# initialize PyPSA network
-n = pypsa.Network()
+    print("Creating AEMO PyPSA Model...")
+    print(f"XML file: {file_xml}")
+    print(f"Demand path: {path_demand}")
+    print(f"VRE profiles path: {path_ren}")
 
-# set up core network (buses, snapshots, carriers, loads)
-port_core_network(n, plexos_db, snapshots_source=path_demand, demand_source=path_demand)
+    # load PlexosDB from XML file
+    print("\nLoading Plexos database...")
+    plexos_db = PlexosDB.from_xml(file_xml)
 
-# add generators
-port_generators(n, plexos_db, timeslice_csv=file_timeslice, vre_profiles_path=path_ren)
+    # initialize PyPSA network
+    n = pypsa.Network()
 
-# add links
-port_links(n, plexos_db)
+    # set up core network (buses, snapshots, carriers, loads)
+    # AEMO model: Uses traditional per-bus load assignment (each CSV file maps to a bus)
+    print("\nSetting up core network...")
+    load_summary = port_core_network(
+        n, plexos_db, snapshots_source=path_demand, demand_source=path_demand
+    )
 
-# add storage (TODO: fix)
-# add_storage(n, plexos_db)
-# add_hydro_inflows(n, plexos_db, path_ren)
+    print("\nCore Network Setup Complete:")
+    print(f"  Format type: {load_summary['format_type']}")
+    if load_summary["format_type"] == "iteration":
+        print(f"  Iterations processed: {load_summary['iterations_processed']}")
+        print(f"  Loads created: {load_summary['loads_added']}")
+    if load_summary["format_type"] == "zone":
+        print(f"  Loads mapped to buses: {load_summary['loads_added']}")
+    else:
+        print(f"  Zone-based loads: {load_summary['zones_processed']}")
+        print(f"  Load files mapped to buses: {load_summary['loads_added']}")
+    print(f"  Peak total demand: {load_summary['peak_demand']:.2f} MW")
+    print(f"  Total buses: {len(n.buses)}")
+    print(f"  Total snapshots: {len(n.snapshots)}")
 
-# run consistency check on network
-n.consistency_check()
+    # add generators
+    print("\nAdding generators...")
+    port_generators(
+        n, plexos_db, timeslice_csv=file_timeslice, vre_profiles_path=path_ren
+    )
+    print(f"  Total generators: {len(n.generators)}")
 
-# select a subset of snapshots
-# subset = n.snapshots[:50]  # the first 50 snapshots
+    # add links
+    print("\nAdding links...")
+    port_links(n, plexos_db)
+    print(f"  Total links: {len(n.links)}")
 
-# in each year in the snapshots, select the first x snapshots
-x = 60  # number of snapshots to select per year
-snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
-for snap in n.snapshots:
-    year = pd.Timestamp(snap).year
-    if len(snapshots_by_year[year]) < x:
-        snapshots_by_year[year].append(snap)
+    # add storage (TODO: fix)
+    # add_storage(n, plexos_db)
+    # add_hydro_inflows(n, plexos_db, path_ren)
 
-subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
+    # run consistency check on network
+    print("\nRunning network consistency check...")
+    n.consistency_check()
+    print("  Network consistency check passed!")
 
-# solve the network
-n.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+    return n
 
-# save to file
-# n.export_to_netcdf("converted_network.nc")
-# print("Network exported to converted_network.nc")
+
+if __name__ == "__main__":
+    # Create the network
+    network = create_aemo_model()
+
+    # select a subset of snapshots for optimization
+    print("\nPreparing optimization subset...")
+    x = 60  # number of snapshots to select per year
+    snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+    for snap in network.snapshots:
+        year = pd.Timestamp(snap).year
+        if len(snapshots_by_year[year]) < x:
+            snapshots_by_year[year].append(snap)
+
+    subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
+    print(f"  Selected {len(subset)} snapshots from {len(snapshots_by_year)} years")
+
+    # solve the network
+    print(f"\nOptimizing network with {len(subset)} snapshots...")
+    network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+    print("  Optimization complete!")
+
+    # save to file
+    # network.export_to_netcdf("aemo_network.nc")
+    # print("Network exported to aemo_network.nc")
