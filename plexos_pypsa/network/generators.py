@@ -265,9 +265,14 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
             # Helper to build a time series for a property
             def build_ts(prop_name, fallback=None):
                 ts = pd.Series(index=snapshots, dtype=float)
-                for _, row in prop_df_entries[
+                prop_rows = prop_df_entries[
                     prop_df_entries["property"] == prop_name
-                ].iterrows():
+                ].copy()
+                prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
+                prop_rows = prop_rows.sort_values("from_sort", na_position="first")
+                # Track which snapshots have been set, to handle overrides
+                already_set = pd.Series(False, index=snapshots)
+                for _, row in prop_rows.iterrows():
                     is_time_specific = (
                         pd.notnull(row.get("from"))
                         or pd.notnull(row.get("to"))
@@ -280,10 +285,12 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
                         mask = get_property_active_mask(
                             row, snapshots, timeslice_activity, dataid_to_timeslice
                         )
-                        ts.loc[mask & ts.isnull()] = row["value"]
-                for _, row in prop_df_entries[
-                    prop_df_entries["property"] == prop_name
-                ].iterrows():
+                        # Only override where not already set, or where overlapping (newer overrides older)
+                        to_set = mask & (~already_set | mask)
+                        ts.loc[to_set] = row["value"]
+                        already_set |= mask
+                # Non-time-specific entries fill remaining unset values
+                for _, row in prop_rows.iterrows():
                     is_time_specific = (
                         pd.notnull(row.get("from"))
                         or pd.notnull(row.get("to"))
