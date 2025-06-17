@@ -701,9 +701,9 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
             carrier = find_fuel_for_generator(db, gen)
 
         if carrier is None or carrier not in fuel_prices.columns:
-            logger.warning(
-                f"No carrier/fuel found for generator {gen} or no price data available"
-            )
+            # logger.warning(
+            #     f"No carrier/fuel found for generator {gen} or no price data available"
+            # )
             skipped_generators.append(gen)
             continue
 
@@ -711,9 +711,9 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
         fuel_price_ts = fuel_prices[carrier]
 
         if fuel_price_ts.isna().all() or (fuel_price_ts == 0).all():
-            logger.warning(
-                f"No valid fuel price found for carrier {carrier} (generator {gen})"
-            )
+            # logger.warning(
+            #     f"No valid fuel price found for carrier {carrier} (generator {gen})"
+            # )
             skipped_generators.append(gen)
             continue
 
@@ -784,14 +784,14 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
 
         # Report success
         successful_gens = len(valid_gens)
-        logger.info(f"Successfully set marginal costs for {successful_gens} generators")
+        print(f"Successfully set marginal costs for {successful_gens} generators")
     else:
-        logger.warning("No generators had complete data for marginal cost calculation")
+        print("No generators had complete data for marginal cost calculation")
 
     # Report skipped generators
     if skipped_generators:
-        logger.info(
+        print(
             f"Skipped {len(skipped_generators)} generators due to missing properties:"
         )
         for gen in skipped_generators:
-            logger.info(f"  - {gen}")
+            print(f"  - {gen}")

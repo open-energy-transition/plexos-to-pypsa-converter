@@ -135,7 +135,6 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
         """
         fuel_series = {}
         for fuel in fuel_df["carrier"]:
-            print(f"Processing fuel: {fuel}")
             props = merged[merged["carrier"] == fuel]
 
             # Build property entries
