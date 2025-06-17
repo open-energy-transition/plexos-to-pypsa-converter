@@ -15,6 +15,7 @@ from plexos_pypsa.network.storage import add_hydro_inflows, add_storage
 # list XML file
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
 file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
 # file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/sem/2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
 
 # specify renewables profiles and demand paths
@@ -38,9 +39,9 @@ add_carriers(n, plexos_db)
 
 # add generators
 add_generators(n, plexos_db)
+set_capacity_ratings(n, plexos_db, timeslice_csv=file_timeslice)
 set_generator_efficiencies(n, plexos_db, use_incr=True)
 set_capital_costs(n, plexos_db)
-set_capacity_ratings(n, plexos_db)
 set_vre_profiles(n, plexos_db, path_ren)
 
 # add links
