@@ -13,6 +13,7 @@ from plexos_pypsa.db.parse import (
     get_property_active_mask,
     read_timeslice_activity,
 )
+from plexos_pypsa.network.carriers import parse_fuel_prices
 
 logger = logging.getLogger(__name__)
 
@@ -641,3 +642,156 @@ def set_capital_costs(network: Network, db: PlexosDB):
         capital_costs.append(capital_cost)
 
     network.generators["capital_cost"] = capital_costs
+
+
+def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
+    """
+    Sets the marginal costs for generators in the PyPSA network based on fuel prices,
+    heat rates, and VO&M charges from the Plexos database.
+
+    The marginal cost is calculated as:
+    marginal_cost = (fuel_price * heat_rate_inc) + vo_m_charge
+
+    If there are multiple heat rate inc values, the average is used.
+    If any required properties are missing, a warning is printed and the generator is skipped.
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network containing generators.
+    db : PlexosDB
+        The Plexos database containing generator and fuel data.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent fuel prices.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> set_marginal_costs(network, db, "path/to/timeslice.csv")
+    """
+    # Get fuel prices for all carriers
+    fuel_prices = parse_fuel_prices(db, network, timeslice_csv)
+
+    if fuel_prices.empty:
+        logger.warning("No fuel prices found. Cannot set marginal costs.")
+        return
+
+    snapshots = network.snapshots
+    marginal_costs_dict = {}
+    skipped_generators = []
+
+    for gen in network.generators.index:
+        try:
+            # Get generator properties from database
+            gen_props = db.get_object_properties(ClassEnum.Generator, gen)
+        except Exception as e:
+            logger.warning(f"Error retrieving properties for generator {gen}: {e}")
+            skipped_generators.append(gen)
+            continue
+
+        # Find the generator's carrier/fuel
+        carrier = None
+        if "carrier" in network.generators.columns and pd.notna(
+            network.generators.loc[gen, "carrier"]
+        ):
+            carrier = network.generators.loc[gen, "carrier"]
+        else:
+            # Try to find carrier from database
+            carrier = find_fuel_for_generator(db, gen)
+
+        if carrier is None or carrier not in fuel_prices.columns:
+            logger.warning(
+                f"No carrier/fuel found for generator {gen} or no price data available"
+            )
+            skipped_generators.append(gen)
+            continue
+
+        # Get fuel price time series
+        fuel_price_ts = fuel_prices[carrier]
+
+        if fuel_price_ts.isna().all() or (fuel_price_ts == 0).all():
+            logger.warning(
+                f"No valid fuel price found for carrier {carrier} (generator {gen})"
+            )
+            skipped_generators.append(gen)
+            continue
+
+        # Get Heat Rate Inc values
+        heat_rate_inc_values = []
+        for prop in gen_props:
+            prop_name = prop.get("property", "")
+            if prop_name.startswith("Heat Rate Incr") or prop_name == "Heat Rate Inc":
+                try:
+                    heat_rate_inc_values.append(float(prop["value"]))
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"Invalid Heat Rate Inc value for generator {gen}: {prop['value']}"
+                    )
+
+        # Calculate average heat rate inc
+        if heat_rate_inc_values:
+            heat_rate_inc = sum(heat_rate_inc_values) / len(heat_rate_inc_values)
+        else:
+            logger.warning(f"No Heat Rate Inc found for generator {gen}")
+            skipped_generators.append(gen)
+            continue
+
+        # Get VO&M Charge
+        vo_m_charge = None
+        for prop in gen_props:
+            if prop.get("property") == "VO&M Charge":
+                try:
+                    vo_m_charge = float(prop["value"])
+                    break
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"Invalid VO&M Charge value for generator {gen}: {prop['value']}"
+                    )
+
+        if vo_m_charge is None:
+            logger.warning(f"No VO&M Charge found for generator {gen}")
+            skipped_generators.append(gen)
+            continue
+
+        # Calculate marginal cost time series
+        marginal_cost_ts = (fuel_price_ts * heat_rate_inc) + vo_m_charge
+        marginal_costs_dict[gen] = marginal_cost_ts
+
+        logger.debug(
+            f"Generator {gen}: heat_rate_inc={heat_rate_inc}, vo_m_charge={vo_m_charge}"
+        )
+
+    # Create DataFrame from marginal costs dictionary
+    if marginal_costs_dict:
+        marginal_costs_df = pd.DataFrame(marginal_costs_dict, index=snapshots)
+
+        # Only keep generators present in both network and marginal_costs_df
+        valid_gens = [
+            gen for gen in network.generators.index if gen in marginal_costs_df.columns
+        ]
+
+        # Assign time series to network
+        # Check if marginal_cost time series exists, if not initialize it
+        if not hasattr(network.generators_t, "marginal_cost"):
+            network.generators_t["marginal_cost"] = pd.DataFrame(
+                index=snapshots, columns=network.generators.index, dtype=float
+            )
+
+        network.generators_t.marginal_cost.loc[:, valid_gens] = marginal_costs_df[
+            valid_gens
+        ].copy()
+
+        # Report success
+        successful_gens = len(valid_gens)
+        logger.info(f"Successfully set marginal costs for {successful_gens} generators")
+    else:
+        logger.warning("No generators had complete data for marginal cost calculation")
+
+    # Report skipped generators
+    if skipped_generators:
+        logger.info(
+            f"Skipped {len(skipped_generators)} generators due to missing properties:"
+        )
+        for gen in skipped_generators:
+            logger.info(f"  - {gen}")
