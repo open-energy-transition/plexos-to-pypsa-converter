@@ -6,15 +6,8 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.network.core import add_buses, add_carriers, add_loads, add_snapshots
-from plexos_pypsa.network.generators import (
-    add_generators,
-    set_capacity_ratings,
-    set_capital_costs,
-    set_generator_efficiencies,
-    set_marginal_costs,
-    set_vre_profiles,
-)
-from plexos_pypsa.network.links import add_links, set_link_flows
+from plexos_pypsa.network.generators import port_generators
+from plexos_pypsa.network.links import port_links
 
 # list XML file
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
@@ -42,16 +35,10 @@ add_snapshots(n, path_demand)
 add_carriers(n, plexos_db)
 
 # add generators
-add_generators(n, plexos_db)
-set_capacity_ratings(n, plexos_db, timeslice_csv=file_timeslice)
-set_generator_efficiencies(n, plexos_db, use_incr=True)
-set_capital_costs(n, plexos_db)
-set_marginal_costs(n, plexos_db, timeslice_csv=file_timeslice)
-set_vre_profiles(n, plexos_db, path_ren)
+port_generators(n, plexos_db, timeslice_csv=file_timeslice, vre_profiles_path=path_ren)
 
 # add links
-add_links(n, plexos_db)
-set_link_flows(n, plexos_db)
+port_links(n, plexos_db)
 
 # add demand/loads
 add_loads(n, path_demand)

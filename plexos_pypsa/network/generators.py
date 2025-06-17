@@ -794,3 +794,68 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
         )
         for gen in skipped_generators:
             print(f"  - {gen}")
+
+
+def port_generators(
+    network: Network, db: PlexosDB, timeslice_csv=None, vre_profiles_path=None
+):
+    """
+    Comprehensive function to add generators and set all their properties in the PyPSA network.
+
+    This function combines all generator-related operations:
+    - Adds generators from the Plexos database
+    - Sets capacity ratings (p_max_pu)
+    - Sets generator efficiencies
+    - Sets capital costs
+    - Sets marginal costs (time-dependent)
+    - Sets VRE profiles for solar and wind generators
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to which generators will be added.
+    db : PlexosDB
+        The Plexos database containing generator data.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties.
+    vre_profiles_path : str, optional
+        Path to the folder containing VRE generation profile files.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> port_generators(network, db,
+    ...                 timeslice_csv="path/to/timeslice.csv",
+    ...                 vre_profiles_path="path/to/profiles")
+    """
+    print("Starting generator porting process...")
+
+    # Step 1: Add generators
+    print("1. Adding generators...")
+    add_generators(network, db)
+
+    # Step 2: Set capacity ratings (p_max_pu)
+    print("2. Setting capacity ratings...")
+    set_capacity_ratings(network, db, timeslice_csv=timeslice_csv)
+
+    # Step 3: Set generator efficiencies
+    print("3. Setting generator efficiencies...")
+    set_generator_efficiencies(network, db, use_incr=True)
+
+    # Step 4: Set capital costs
+    print("4. Setting capital costs...")
+    set_capital_costs(network, db)
+
+    # Step 5: Set marginal costs (time-dependent)
+    print("5. Setting marginal costs...")
+    set_marginal_costs(network, db, timeslice_csv=timeslice_csv)
+
+    # Step 6: Set VRE profiles (if path provided)
+    if vre_profiles_path:
+        print("6. Setting VRE profiles...")
+        set_vre_profiles(network, db, vre_profiles_path)
+    else:
+        print("6. Skipping VRE profiles (no path provided)")
+
+    print(f"Generator porting complete! Added {len(network.generators)} generators.")

@@ -5,7 +5,11 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import get_dataid_timeslice_map, read_timeslice_activity
+from plexos_pypsa.db.parse import (
+    get_dataid_timeslice_map,
+    get_property_active_mask,
+    read_timeslice_activity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,46 +171,39 @@ def parse_lines_flow(db: PlexosDB, network, timeslice_csv=None):
 
     def build_ts(props, prop_name, fallback=None):
         ts = pd.Series(index=snapshots, dtype=float)
-        # 1. Timeslice-based entries (take precedence)
-        if timeslice_activity is not None:
-            for _, row in props[props["property"] == prop_name].iterrows():
-                if row["data_id"] in dataid_to_timeslice:
-                    for tslice in dataid_to_timeslice[row["data_id"]]:
-                        mask = timeslice_activity[tslice]
-                        ts.loc[mask] = float(row["value"])
-        # 2. t_date_from/t_date_to entries (only if not already set by timeslice)
+        # 1. Apply all time/timeslice-specific entries first
         for _, row in props[props["property"] == prop_name].iterrows():
-            if (row["data_id"] in dataid_to_timeslice) or (
-                pd.isnull(row["t_date_from"]) and pd.isnull(row["t_date_to"])
-            ):
-                continue  # skip if timeslice already handled or static
-            from_ = (
-                pd.to_datetime(row["t_date_from"])
-                if pd.notnull(row["t_date_from"])
-                else None
+            is_time_specific = (
+                pd.notnull(row.get("t_date_from"))
+                or pd.notnull(row.get("t_date_to"))
+                or (
+                    timeslice_activity is not None
+                    and dataid_to_timeslice is not None
+                    and row["data_id"] in dataid_to_timeslice
+                )
             )
-            to_ = (
-                pd.to_datetime(row["t_date_to"])
-                if pd.notnull(row["t_date_to"])
-                else None
-            )
-            if from_ is not None and to_ is not None:
-                mask = (snapshots >= from_) & (snapshots <= to_)
+            if is_time_specific:
+                mask = get_property_active_mask(
+                    row,
+                    snapshots,
+                    timeslice_activity=timeslice_activity,
+                    dataid_to_timeslice=dataid_to_timeslice,
+                )
                 ts.loc[mask & ts.isnull()] = float(row["value"])
-            elif from_ is not None:
-                mask = snapshots >= from_
-                ts.loc[mask & ts.isnull()] = float(row["value"])
-            elif to_ is not None:
-                mask = snapshots <= to_
-                ts.loc[mask & ts.isnull()] = float(row["value"])
-        # 3. Static entries (only if not already set)
+        # 2. Fill remaining NaNs with static (always-active) entries
         for _, row in props[props["property"] == prop_name].iterrows():
-            if (row["data_id"] in dataid_to_timeslice) or (
-                pd.notnull(row["t_date_from"]) or pd.notnull(row["t_date_to"])
-            ):
-                continue
-            ts.loc[ts.isnull()] = float(row["value"])
-        # 4. Fallback
+            is_time_specific = (
+                pd.notnull(row.get("t_date_from"))
+                or pd.notnull(row.get("t_date_to"))
+                or (
+                    timeslice_activity is not None
+                    and dataid_to_timeslice is not None
+                    and row["data_id"] in dataid_to_timeslice
+                )
+            )
+            if not is_time_specific:
+                ts.loc[ts.isnull()] = float(row["value"])
+        # 3. Fallback
         if fallback is not None:
             ts = ts.fillna(fallback)
         return ts
@@ -289,3 +286,37 @@ def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
     network.links_t.p_max_pu = p_max_pu
 
     print(f"Set flow limits for {len(network.links)} links")
+
+
+def port_links(network: Network, db: PlexosDB):
+    """
+    Comprehensive function to add links and set all their properties in the PyPSA network.
+
+    This function combines all link-related operations:
+    - Adds transmission links from the Plexos database
+    - Sets link flow limits (p_min_pu and p_max_pu)
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to which links will be added.
+    db : PlexosDB
+        The Plexos database containing link/transmission data.
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> db = PlexosDB("path/to/file.xml")
+    >>> port_links(network, db)
+    """
+    print("Starting link porting process...")
+
+    # Step 1: Add links
+    print("1. Adding links...")
+    add_links(network, db)
+
+    # Step 2: Set link flow limits
+    print("2. Setting link flow limits...")
+    set_link_flows(network, db)
+
+    print(f"Link porting complete! Added {len(network.links)} links.")
