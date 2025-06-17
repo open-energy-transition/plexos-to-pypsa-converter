@@ -1145,33 +1145,41 @@ def _add_loads_to_target_node(
 
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
-    num_iterations = getattr(demand_df, "_num_iterations", None)
 
     loads_added = 0
 
     if is_iteration_format:
-        print(f"Processing iteration-based format with {num_iterations} iterations")
+        # Count actual iteration columns (handle both prefixed and non-prefixed)
+        iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
+        actual_iterations = len(iteration_cols)
+
+        print(f"Processing iteration-based format with {actual_iterations} iterations")
 
         # Create one load for each iteration
-        for col in demand_df.columns:
+        for col in iteration_cols:
+            # Extract iteration number from column name (handle prefixed names)
             if col.startswith("iteration_"):
                 iteration_num = col.split("_")[1]
-                load_name = f"Load{iteration_num}_{target_node}"
+            else:
+                # Handle prefixed columns like "filename_iteration_1"
+                iteration_num = col.split("iteration_")[1]
 
-                network.add("Load", name=load_name, bus=target_node)
+            load_name = f"Load{iteration_num}_{target_node}"
 
-                # Add the load time series (align with network snapshots)
-                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-                network.loads_t.p_set.loc[:, load_name] = load_series
+            network.add("Load", name=load_name, bus=target_node)
 
-                loads_added += 1
-                print(f"  - Added load {load_name} to bus {target_node}")
+            # Add the load time series (align with network snapshots)
+            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
+            network.loads_t.p_set.loc[:, load_name] = load_series
+
+            loads_added += 1
+            print(f"  - Added load {load_name} to bus {target_node}")
 
         # Calculate total demand for reporting
-        total_demand = demand_df.sum(axis=1)
+        total_demand = demand_df[iteration_cols].sum(axis=1)
         peak_demand = total_demand.max()
 
-        print(f"  - Total iterations: {num_iterations}")
+        print(f"  - Total iterations: {actual_iterations}")
         print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
 
         return {
@@ -1179,7 +1187,7 @@ def _add_loads_to_target_node(
             "format_type": "iteration",
             "target_node": target_node,
             "loads_added": loads_added,
-            "iterations_processed": num_iterations,
+            "iterations_processed": actual_iterations,
             "peak_demand": peak_demand,
         }
 
@@ -1249,33 +1257,41 @@ def _add_loads_to_aggregate_node(
 
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
-    num_iterations = getattr(demand_df, "_num_iterations", None)
 
     loads_added = 0
 
     if is_iteration_format:
-        print(f"Processing iteration-based format with {num_iterations} iterations")
+        # Count actual iteration columns (handle both prefixed and non-prefixed)
+        iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
+        actual_iterations = len(iteration_cols)
+
+        print(f"Processing iteration-based format with {actual_iterations} iterations")
 
         # Create one load for each iteration
-        for col in demand_df.columns:
+        for col in iteration_cols:
+            # Extract iteration number from column name (handle prefixed names)
             if col.startswith("iteration_"):
                 iteration_num = col.split("_")[1]
-                load_name = f"Load{iteration_num}_{aggregate_node_name}"
+            else:
+                # Handle prefixed columns like "filename_iteration_1"
+                iteration_num = col.split("iteration_")[1]
 
-                network.add("Load", name=load_name, bus=aggregate_node_name)
+            load_name = f"Load{iteration_num}_{aggregate_node_name}"
 
-                # Add the load time series (align with network snapshots)
-                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-                network.loads_t.p_set.loc[:, load_name] = load_series
+            network.add("Load", name=load_name, bus=aggregate_node_name)
 
-                loads_added += 1
-                print(f"  - Added load {load_name} to bus {aggregate_node_name}")
+            # Add the load time series (align with network snapshots)
+            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
+            network.loads_t.p_set.loc[:, load_name] = load_series
+
+            loads_added += 1
+            print(f"  - Added load {load_name} to bus {aggregate_node_name}")
 
         # Calculate total demand for reporting
-        total_demand = demand_df.sum(axis=1)
+        total_demand = demand_df[iteration_cols].sum(axis=1)
         peak_demand = total_demand.max()
 
-        print(f"  - Total iterations: {num_iterations}")
+        print(f"  - Total iterations: {actual_iterations}")
         print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
 
         return {
@@ -1283,7 +1299,7 @@ def _add_loads_to_aggregate_node(
             "format_type": "iteration",
             "aggregate_node": aggregate_node_name,
             "loads_added": loads_added,
-            "iterations_processed": num_iterations,
+            "iterations_processed": actual_iterations,
             "peak_demand": peak_demand,
         }
 
