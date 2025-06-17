@@ -11,6 +11,7 @@ from plexos_pypsa.network.generators import (
     set_capacity_ratings,
     set_capital_costs,
     set_generator_efficiencies,
+    set_marginal_costs,
     set_vre_profiles,
 )
 from plexos_pypsa.network.links import add_links, set_link_flows
@@ -45,6 +46,7 @@ add_generators(n, plexos_db)
 set_capacity_ratings(n, plexos_db, timeslice_csv=file_timeslice)
 set_generator_efficiencies(n, plexos_db, use_incr=True)
 set_capital_costs(n, plexos_db)
+set_marginal_costs(n, plexos_db, timeslice_csv=file_timeslice)
 set_vre_profiles(n, plexos_db, path_ren)
 
 # add links
