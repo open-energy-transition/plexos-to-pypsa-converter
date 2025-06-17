@@ -5,7 +5,7 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.core import add_buses, add_carriers, add_loads, add_snapshots
+from plexos_pypsa.network.core import port_core_network
 from plexos_pypsa.network.generators import port_generators
 from plexos_pypsa.network.links import port_links
 
@@ -25,23 +25,14 @@ plexos_db = PlexosDB.from_xml(file_xml)
 # initialize PyPSA network
 n = pypsa.Network()
 
-# add buses
-add_buses(n, plexos_db)
-
-# add snapshots
-add_snapshots(n, path_demand)
-
-# add carriers
-add_carriers(n, plexos_db)
+# set up core network (buses, snapshots, carriers, loads)
+port_core_network(n, plexos_db, snapshots_source=path_demand, demand_source=path_demand)
 
 # add generators
 port_generators(n, plexos_db, timeslice_csv=file_timeslice, vre_profiles_path=path_ren)
 
 # add links
 port_links(n, plexos_db)
-
-# add demand/loads
-add_loads(n, path_demand)
 
 # add storage (TODO: fix)
 # add_storage(n, plexos_db)
