@@ -1,5 +1,6 @@
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
+from plexos_pypsa.db.models import INPUT_XMLS
 from plexos_pypsa.db.plexosdb import PlexosDB  # type: ignore
 from plexos_pypsa.db.read import (
     check_valid_properties,
@@ -10,10 +11,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-# list XML file
-file_xml = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/My Drive/open-tyndp/aemo/2024/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
-# file_xml = "/Users/meas/Desktop/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
-# file_xml = "/Users/meas/Dropbox/downloads/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
+file_xml = INPUT_XMLS["caiso-irp23"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -38,24 +36,41 @@ for cls in mod_classes:
 # mod_db.list_objects_by_class(ClassEnum.Scenario)
 # mod_db.list_objects_by_class(ClassEnum.Load)
 
+mod_db.list_objects_by_class(ClassEnum.STSchedule)
+mod_db.list_objects_by_class(ClassEnum.MTSchedule)
+mod_db.list_objects_by_class(ClassEnum.Horizon)
+mod_db.list_objects_by_class(ClassEnum.Scenario)
+
 # list and print objects for various classes
 mod_nodes = list_and_print_objects(mod_db, ClassEnum.Node, "node")
 mod_generators = list_and_print_objects(mod_db, ClassEnum.Generator, "generator")
-
 mod_storage = list_and_print_objects(mod_db, ClassEnum.Storage, "storage")
 mod_lines = list_and_print_objects(mod_db, ClassEnum.Line, "line")
 mod_constraints = list_and_print_objects(mod_db, ClassEnum.Constraint, "constraint")
 mod_emissions = list_and_print_objects(mod_db, ClassEnum.Emission, "emission")
 mod_fuels = list_and_print_objects(mod_db, ClassEnum.Fuel, "fuel")
+list_and_print_objects(mod_db, ClassEnum.Scenario, "scenario")
+print_properties(mod_db, ClassEnum.Scenario, "Apply GB+FR HR Decline", detailed=False)
+
+mem_scenario = mod_db.get_memberships_system(
+    "Apply GB+FR HR Decline", object_class=ClassEnum.Scenario
+)
+
+print_memberships(mem_scenario)
 
 # print properties for specific objects
 print_properties(mod_db, ClassEnum.Node, "CNSW")
-print_properties(mod_db, ClassEnum.Generator, "Wind_SA_LS", detailed=False)
-print_properties(mod_db, ClassEnum.Generator, "ADPPV1", detailed=True)
+print_properties(mod_db, ClassEnum.Generator, "YABULU2", detailed=False)
+print_properties(mod_db, ClassEnum.Generator, "CQ CCGT", detailed=False)
+print_properties(mod_db, ClassEnum.Generator, "CQ CCGT", detailed=True)
+print_properties(mod_db, ClassEnum.Generator, "BOGONG2", detailed=False)
+
 print_properties(mod_db, ClassEnum.Generator, "YSWF1", detailed=False)
+print_properties(mod_db, ClassEnum.Fuel, "New OCGT NSW", detailed=False)
+print_properties(mod_db, ClassEnum.Fuel, "New OCGT NSW", detailed=True)
 
 print_properties(mod_db, ClassEnum.Storage, "Kidston Lower", detailed=False)
-print_properties(mod_db, ClassEnum.Line, "CNSW-NNSW", detailed=False)
+print_properties(mod_db, ClassEnum.Line, "SESA-CSA", detailed=False)
 save_properties(
     mod_db,
     ClassEnum.Line,
@@ -130,6 +145,11 @@ print_properties(mod_db, ClassEnum.Fuel, "Hallett")
 mem_node = mod_db.get_memberships_system("CNSW", object_class=ClassEnum.Node)
 print_memberships(mem_node)
 
+
+print_memberships(
+    mod_db.get_memberships_system("New OCGT NSW", object_class=ClassEnum.Fuel)
+)
+
 # check memberships of constraint
 mem_constraint = mod_db.get_memberships_system(
     "2050 Emissions Budget 4", object_class=ClassEnum.Constraint
@@ -173,26 +193,37 @@ print_memberships(
 # get properties of generator BASTYAN
 print_properties(mod_db, ClassEnum.Generator, "BASTYAN", detailed=False)
 
-# check constraints related to "CNSW-NNSW"
+# explore constraints --------
+mod_constraints = list_and_print_objects(mod_db, ClassEnum.Constraint, "constraint")
 print_properties(mod_db, ClassEnum.Constraint, "CNSW-SNW North")
 
+print_properties(mod_db, ClassEnum.Constraint, "2030 Emissions Budget 1", detailed=True)
+print_memberships(mod_db.search_child_object_id(1600))
+print_properties(mod_db, ClassEnum.Emission, "Comb Co2 VIC", detailed=True)
+print_memberships(mod_db.search_child_object_id(1165))  # Comb Co2 VIC
+print_memberships(mod_db.search_child_object_id(16))
+
+print_properties(
+    mod_db, ClassEnum.Constraint, "2050 Emissions Budget NSW 1", detailed=True
+)
+print_memberships(mod_db.search_child_object_id(1325))
+
+print_properties(mod_db, ClassEnum.Constraint, "Annual GPG Limit", detailed=True)
+print_memberships(mod_db.search_child_object_id(1725))
+print_properties(mod_db, ClassEnum.Generator, "TAS OCGT Large", detailed=True)
+
+print_properties(mod_db, ClassEnum.Constraint, "Barron Gorge Constraint", detailed=True)
+print_memberships(mod_db.search_child_object_id(1337))
+
+print_properties(mod_db, ClassEnum.Constraint, "Group_MN1", detailed=True)
+print_memberships(mod_db.search_child_object_id(1349))
+
+print_properties(mod_db, ClassEnum.Constraint, "ResourceLimit_N5_Solar", detailed=True)
+print_memberships(mod_db.search_child_object_id(1408))
+
+print_properties(mod_db, ClassEnum.Constraint, "Snowy 2.0 - Gen_1", detailed=True)
+print_memberships(mod_db.search_child_object_id(1509))
 
 # check all memberships associated with child_object_id
 obj_mem = mod_db.search_child_object_id(1340)
 print_memberships(obj_mem)
-
-# mod_db.to_csv("/Users/meas/oet/plexos-pypsa/plexos_pypsa/data/scratch/csv/")
-
-# coad = COAD(file_xml)
-# coad.list("Model")
-# coad.show("Progressive Change")
-# coad["Model"]["Progressive Change"].dump()
-# coad["Line"].get_property_names()
-
-# from coad.COAD import COAD
-# from coad.export_plexos_model import get_all_objects, write_object_report
-
-# all_objs = get_all_objects(coad["System"]["System"])
-# write_object_report(coad["System"]["System"], interesting_objects=all_objs)
-# print(coad.keys())
-# print(coad["System"].keys())  # Check available keys
