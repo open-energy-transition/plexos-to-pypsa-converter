@@ -19,27 +19,59 @@ def parse_excel_date(serial_date):
         return f"Invalid date: {serial_date}"
 
 
-file_xml = INPUT_XMLS["caiso-irp23"]
+file_xml = INPUT_XMLS["aemo-2024-isp-progressive"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
 
-# Define the class IDs and names we're interested in
-target_classes = {
-    71: "Horizon",
-    72: "Report",
-    73: "Stochastic",
-    74: "LT Plan",
-    75: "PASA",
-    76: "MT Schedule",
-    77: "ST Schedule",
-    78: "Transmission",
-    79: "Production",
-    80: "Competition",
-    81: "Performance",
-}
+# Define the class names we're interested in (IDs may vary across XML files)
+target_class_names = [
+    "Horizon",
+    "Report",
+    "Stochastic",
+    "LT Plan",
+    "PASA",
+    "MT Schedule",
+    "ST Schedule",
+    "Transmission",
+    "Production",
+    "Competition",
+    "Performance",
+]
 
-print(f"Target classes: {target_classes}")
+print(f"Target class names: {target_class_names}")
+
+# Step 0: Find the actual class IDs for these class names
+print("\nStep 0: Finding class IDs for target class names...")
+class_names_str = "', '".join(target_class_names)
+query_class_ids = f"""
+    SELECT class_id, name
+    FROM t_class
+    WHERE name IN ('{class_names_str}')
+    ORDER BY name
+"""
+
+print(f"Query: {query_class_ids}")
+class_rows = mod_db.query(query_class_ids)
+
+target_classes = {}
+found_class_names = []
+for row in class_rows:
+    class_id, class_name = row
+    target_classes[class_id] = class_name
+    found_class_names.append(class_name)
+    print(f"  - Found: {class_name} -> class_id {class_id}")
+
+# Check for missing classes
+missing_classes = set(target_class_names) - set(found_class_names)
+if missing_classes:
+    print(f"\nWarning: The following class names were not found: {missing_classes}")
+
+if not target_classes:
+    print("Error: No target classes found in the database!")
+    exit(1)
+
+print(f"\nFinal target classes mapping: {target_classes}")
 
 # Step 1: Search for all attribute_ids with the specified class_ids
 print("\nStep 1: Searching for attributes with target class IDs...")
@@ -145,3 +177,15 @@ if attribute_ids:
 
 else:
     print("No attributes found for the specified class IDs")
+
+# Additional analysis: Show all available classes for reference
+print("\nAll available classes in this XML file:")
+query_all_classes = """
+    SELECT class_id, name
+    FROM t_class
+    ORDER BY class_id
+"""
+all_classes = mod_db.query(query_all_classes)
+for class_id, class_name in all_classes:
+    found_indicator = "✓" if class_id in target_classes else " "
+    print(f"  {found_indicator} {class_id:3d}: {class_name}")
