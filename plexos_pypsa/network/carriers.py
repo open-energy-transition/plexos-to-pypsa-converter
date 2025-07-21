@@ -154,7 +154,13 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
                 if dataid_to_timeslice and p["data_id"] in dataid_to_timeslice:
                     entry["timeslices"] = dataid_to_timeslice[p["data_id"]]
                 property_entries.append(entry)
-            prop_df_entries = pd.DataFrame(property_entries)
+            if property_entries:
+                prop_df_entries = pd.DataFrame(property_entries)
+            else:
+                # Create empty DataFrame with expected columns
+                prop_df_entries = pd.DataFrame(columns=[
+                    "property", "value", "from", "to", "data_id", "timeslices"
+                ])
 
             # Helper to build a time series for a property
             def build_ts(prop_name, fallback=None):
