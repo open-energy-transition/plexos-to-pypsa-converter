@@ -3373,3 +3373,69 @@ class PlexosDB:
         """
         results = self._db.fetchall_dict(query, (child_object_id,))
         return results
+
+    def search_parent_object_id(self, parent_object_id):
+        """Retrieve memberships and related information for a specific child_object_id."""
+        query = """
+        SELECT
+            mem.membership_id,
+            mem.parent_class_id,
+            mem.child_class_id,
+            mem.parent_object_id,
+            mem.child_object_id,
+            mem.collection_id,
+            parent_class.name AS parent_class_name,
+            child_class.name AS child_class_name,
+            parent_object.name AS parent_object_name,
+            child_object.name AS child_object_name,
+            collection.name AS collection_name
+        FROM
+            t_membership AS mem
+        LEFT JOIN
+            t_class AS parent_class ON mem.parent_class_id = parent_class.class_id
+        LEFT JOIN
+            t_class AS child_class ON mem.child_class_id = child_class.class_id
+        LEFT JOIN
+            t_object AS parent_object ON mem.parent_object_id = parent_object.object_id
+        LEFT JOIN
+            t_object AS child_object ON mem.child_object_id = child_object.object_id
+        LEFT JOIN
+            t_collection AS collection ON mem.collection_id = collection.collection_id
+        WHERE
+            mem.parent_object_id = ?
+        """
+        results = self._db.fetchall_dict(query, (parent_object_id,))
+        return results
+
+    def search_child_class_id(self, child_class_id):
+        """Retrieve memberships and related information for a specific child_class_id."""
+        query = """
+        SELECT
+            mem.membership_id,
+            mem.parent_class_id,
+            mem.child_class_id,
+            mem.parent_object_id,
+            mem.child_object_id,
+            mem.collection_id,
+            parent_class.name AS parent_class_name,
+            child_class.name AS child_class_name,
+            parent_object.name AS parent_object_name,
+            child_object.name AS child_object_name,
+            collection.name AS collection_name
+        FROM
+            t_membership AS mem
+        LEFT JOIN
+            t_class AS parent_class ON mem.parent_class_id = parent_class.class_id
+        LEFT JOIN
+            t_class AS child_class ON mem.child_class_id = child_class.class_id
+        LEFT JOIN
+            t_object AS parent_object ON mem.parent_object_id = parent_object.object_id
+        LEFT JOIN
+            t_object AS child_object ON mem.child_object_id = child_object.object_id
+        LEFT JOIN
+            t_collection AS collection ON mem.collection_id = collection.collection_id
+        WHERE
+            mem.child_class_id = ?
+        """
+        results = self._db.fetchall_dict(query, (child_class_id,))
+        return results
