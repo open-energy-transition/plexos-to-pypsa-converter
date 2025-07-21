@@ -59,10 +59,10 @@ def create_aemo_model():
             print(f"  Loads skipped (no matching bus): {load_summary['loads_skipped']}")
 
     # Calculate peak demand from the network loads
-    if len(n.loads_t.p_set.columns) > 0:
-        total_demand = n.loads_t.p_set.sum(axis=1)
-        peak_demand = total_demand.max()
-        print(f"  Peak total demand: {peak_demand:.2f} MW")
+    # if len(n.loads_t.p_set.columns) > 0:
+    #     total_demand = n.loads_t.p_set.sum(axis=1)
+    #     peak_demand = total_demand.max()
+    #     print(f"  Peak total demand: {peak_demand:.2f} MW")
 
     print(f"  Total buses: {len(n.buses)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     # select a subset of snapshots for optimization
     print("\nPreparing optimization subset...")
-    x = 60  # number of snapshots to select per year
+    x = 50  # number of snapshots to select per year
     snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
     for snap in network.snapshots:
         year = pd.Timestamp(snap).year
