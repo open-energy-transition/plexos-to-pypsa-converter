@@ -1155,7 +1155,11 @@ def _add_loads_to_target_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Create one load for each iteration
+        # Prepare batch data for efficient DataFrame assignment
+        load_time_series_data = {}
+        load_names = []
+
+        # Create one load for each iteration and prepare time series data
         for col in iteration_cols:
             # Extract iteration number from column name (handle prefixed names)
             if col.startswith("iteration_"):
@@ -1165,15 +1169,24 @@ def _add_loads_to_target_node(
                 iteration_num = col.split("iteration_")[1]
 
             load_name = f"Load{iteration_num}_{target_node}"
+            load_names.append(load_name)
 
             network.add("Load", name=load_name, bus=target_node)
 
-            # Add the load time series (align with network snapshots)
+            # Prepare the load time series (align with network snapshots)
             load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            network.loads_t.p_set.loc[:, load_name] = load_series
+            load_time_series_data[load_name] = load_series
 
             loads_added += 1
             print(f"  - Added load {load_name} to bus {target_node}")
+
+        # Batch assign all load time series to avoid DataFrame fragmentation
+        if load_time_series_data:
+            load_time_series_df = pd.DataFrame(load_time_series_data)
+            # Use pd.concat to efficiently add all columns at once
+            network.loads_t.p_set = pd.concat(
+                [network.loads_t.p_set, load_time_series_df], axis=1
+            )
 
         # Calculate total demand for reporting
         total_demand = demand_df[iteration_cols].sum(axis=1)
@@ -1267,7 +1280,11 @@ def _add_loads_to_aggregate_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Create one load for each iteration
+        # Prepare batch data for efficient DataFrame assignment
+        load_time_series_data = {}
+        load_names = []
+
+        # Create one load for each iteration and prepare time series data
         for col in iteration_cols:
             # Extract iteration number from column name (handle prefixed names)
             if col.startswith("iteration_"):
@@ -1277,15 +1294,24 @@ def _add_loads_to_aggregate_node(
                 iteration_num = col.split("iteration_")[1]
 
             load_name = f"Load{iteration_num}_{aggregate_node_name}"
+            load_names.append(load_name)
 
             network.add("Load", name=load_name, bus=aggregate_node_name)
 
-            # Add the load time series (align with network snapshots)
+            # Prepare the load time series (align with network snapshots)
             load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            network.loads_t.p_set.loc[:, load_name] = load_series
+            load_time_series_data[load_name] = load_series
 
             loads_added += 1
             print(f"  - Added load {load_name} to bus {aggregate_node_name}")
+
+        # Batch assign all load time series to avoid DataFrame fragmentation
+        if load_time_series_data:
+            load_time_series_df = pd.DataFrame(load_time_series_data)
+            # Use pd.concat to efficiently add all columns at once
+            network.loads_t.p_set = pd.concat(
+                [network.loads_t.p_set, load_time_series_df], axis=1
+            )
 
         # Calculate total demand for reporting
         total_demand = demand_df[iteration_cols].sum(axis=1)
