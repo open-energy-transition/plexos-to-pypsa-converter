@@ -174,3 +174,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# .DS_Store
+*.DS_Store
+
+# data
+plexos_pypsa/data/scratch/
+plexos_pypsa/data/plexos_objects/
