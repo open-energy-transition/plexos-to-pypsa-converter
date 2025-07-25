@@ -179,5 +179,5 @@ cython_debug/
 *.DS_Store
 
 # data
-plexos_pypsa/data/scratch/
-plexos_pypsa/data/plexos_objects/
+plexos_pypsa/data/
+plexos_pypsa/data/
