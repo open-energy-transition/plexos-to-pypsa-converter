@@ -178,8 +178,6 @@ cython_debug/
 # .DS_Store
 *.DS_Store
 
-# data/scratch
-# plexos_pypsa/data/scratch/
-
-# scratch
-# plexos_pypsa/scratch/
+# data
+plexos_pypsa/data/scratch/
+plexos_pypsa/data/plexos_objects/
