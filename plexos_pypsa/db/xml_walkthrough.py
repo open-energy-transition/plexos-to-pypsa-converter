@@ -40,6 +40,11 @@ mod_db.list_objects_by_class(ClassEnum.STSchedule)
 mod_db.list_objects_by_class(ClassEnum.MTSchedule)
 mod_db.list_objects_by_class(ClassEnum.Horizon)
 mod_db.list_objects_by_class(ClassEnum.Scenario)
+mod_db.list_objects_by_class(ClassEnum.Region)
+mod_db.list_objects_by_class(ClassEnum.Node)
+
+mem_node = mod_db.get_memberships_system("CIPB", object_class=ClassEnum.Node)
+print_memberships(mem_node)
 
 # list and print objects for various classes
 mod_nodes = list_and_print_objects(mod_db, ClassEnum.Node, "node")
@@ -58,8 +63,9 @@ mem_scenario = mod_db.get_memberships_system(
 
 print_memberships(mem_scenario)
 
+
 # print properties for specific objects
-print_properties(mod_db, ClassEnum.Node, "CNSW")
+print_properties(mod_db, ClassEnum.Node, "CIPB")
 print_properties(mod_db, ClassEnum.Generator, "YABULU2", detailed=False)
 print_properties(mod_db, ClassEnum.Generator, "CQ CCGT", detailed=False)
 print_properties(mod_db, ClassEnum.Generator, "CQ CCGT", detailed=True)
@@ -142,9 +148,11 @@ print_memberships(mod_db.get_memberships_system("Hallett", object_class=ClassEnu
 print_properties(mod_db, ClassEnum.Fuel, "Hallett")
 
 # check memberships of node CNSW
-mem_node = mod_db.get_memberships_system("CNSW", object_class=ClassEnum.Node)
+mem_node = mod_db.get_memberships_system("CIPB", object_class=ClassEnum.Node)
 print_memberships(mem_node)
 
+mem_region = mod_db.get_memberships_system("SDGE", object_class=ClassEnum.Region)
+print_memberships(mem_region)
 
 print_memberships(
     mod_db.get_memberships_system("New OCGT NSW", object_class=ClassEnum.Fuel)
@@ -227,3 +235,11 @@ print_memberships(mod_db.search_child_object_id(1509))
 # check all memberships associated with child_object_id
 obj_mem = mod_db.search_child_object_id(1340)
 print_memberships(obj_mem)
+
+# search for all memberships of a specific class 66
+scenario_mem = mod_db.search_child_class_id(66)
+print_memberships(scenario_mem)
+
+# search for all memberships with parent_object_id 33399
+mod_mem = mod_db.search_parent_object_id(33399)
+print_memberships(mod_mem)
