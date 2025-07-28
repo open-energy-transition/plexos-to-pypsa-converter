@@ -20,10 +20,23 @@ def find_bus_for_object(db, object_name, object_class):
         print(f"Error finding memberships for {object_name}: {e}")
         return None
 
+    def find_node_from_memberships(memberships):
+        """
+        Given a list of membership dicts, return the child_object_name of the first Node found.
+        """
+        for m in memberships:
+            # Check if the child is a Node
+            if m.get("child_class_name") == "Node":
+                return m.get("child_object_name")
+            # Or if the parent is a Node (less common, but possible)
+            if m.get("parent_class_name") == "Node":
+                return m.get("parent_object_name")
+        return None
+
     # First pass: direct relationship to Node
-    for m in memberships:
-        if m.get("class") == "Node":
-            return m.get("name")
+    node_name = find_node_from_memberships(memberships)
+    if node_name:
+        return node_name
 
     # Second pass: indirect match via collection name (common for Storage)
     for m in memberships:
