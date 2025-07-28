@@ -4,9 +4,7 @@ from typing import DefaultDict
 import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
-from plexos_pypsa.network.core import port_core_network
-from plexos_pypsa.network.generators import port_generators
-from plexos_pypsa.network.links import port_links
+from plexos_pypsa.network.core import setup_network
 
 
 def create_aemo_model():
@@ -38,45 +36,35 @@ def create_aemo_model():
     # initialize PyPSA network
     n = pypsa.Network()
 
-    # set up core network (buses, snapshots, carriers, loads)
-    # AEMO model: Uses traditional per-bus load assignment (each CSV file maps to a bus)
-    print("\nSetting up core network...")
-    load_summary = port_core_network(
-        n, plexos_db, snapshots_source=path_demand, demand_source=path_demand
+    # set up complete network using unified function
+    # AEMO model: Uses traditional per-node load assignment (each CSV file maps to a bus)
+    print("\nSetting up complete network...")
+    setup_summary = setup_network(
+        n, 
+        plexos_db, 
+        snapshots_source=path_demand, 
+        demand_source=path_demand,
+        timeslice_csv=file_timeslice,
+        vre_profiles_path=path_ren
     )
 
-    print("\nCore Network Setup Complete:")
-    print(f"  Format type: {load_summary['format_type']}")
-    if load_summary["format_type"] == "iteration":
+    print("\nNetwork Setup Complete:")
+    print(f"  Mode: {setup_summary['mode']}")
+    print(f"  Format type: {setup_summary['format_type']}")
+    if setup_summary["format_type"] == "iteration":
         print(
-            f"  Iterations processed: {load_summary.get('iterations_processed', 'N/A')}"
+            f"  Iterations processed: {setup_summary.get('iterations_processed', 'N/A')}"
         )
-        print(f"  Loads created: {load_summary['loads_added']}")
+        print(f"  Loads created: {setup_summary['loads_added']}")
     else:  # zone format
-        print(f"  Loads mapped to buses: {load_summary['loads_added']}")
-        if load_summary.get("loads_skipped", 0) > 0:
-            print(f"  Loads skipped (no matching bus): {load_summary['loads_skipped']}")
-
-    # Calculate peak demand from the network loads
-    # if len(n.loads_t.p_set.columns) > 0:
-    #     total_demand = n.loads_t.p_set.sum(axis=1)
-    #     peak_demand = total_demand.max()
-    #     print(f"  Peak total demand: {peak_demand:.2f} MW")
+        print(f"  Loads mapped to buses: {setup_summary['loads_added']}")
+        if setup_summary.get("loads_skipped", 0) > 0:
+            print(f"  Loads skipped (no matching bus): {setup_summary['loads_skipped']}")
 
     print(f"  Total buses: {len(n.buses)}")
-    print(f"  Total snapshots: {len(n.snapshots)}")
-
-    # add generators
-    print("\nAdding generators...")
-    port_generators(
-        n, plexos_db, timeslice_csv=file_timeslice, vre_profiles_path=path_ren
-    )
     print(f"  Total generators: {len(n.generators)}")
-
-    # add links
-    print("\nAdding links...")
-    port_links(n, plexos_db)
     print(f"  Total links: {len(n.links)}")
+    print(f"  Total snapshots: {len(n.snapshots)}")
 
     # add storage (TODO: fix)
     # add_storage(n, plexos_db)

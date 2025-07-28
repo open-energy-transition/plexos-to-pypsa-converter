@@ -1390,23 +1390,26 @@ def _add_loads_to_aggregate_node(
         }
 
 
-def setup_network_with_aggregation(
+
+def setup_network(
     network: Network,
     db: PlexosDB,
     snapshots_source,
     demand_source,
-    aggregate_node_name,
+    target_node=None,
+    aggregate_node_name=None,
+    demand_bus_mapping=None,
     timeslice_csv=None,
     vre_profiles_path=None,
-    demand_bus_mapping=None,
     model_name=None,
 ):
     """
-    Complete network setup workflow with demand aggregation and component reassignment.
+    Unified network setup function that automatically detects the appropriate mode.
 
-    This function is specifically designed for scenarios where all demand should be
-    aggregated to a single node and all generators and links should be assigned to
-    that same node (e.g., CAISO IRP23 scenario).
+    This function intelligently chooses between three setup modes based on parameters:
+    1. Per-node mode: Neither target_node nor aggregate_node_name specified (AEMO scenario)
+    2. Target node mode: target_node specified (SEM scenario - loads to target, generators/links keep original assignments)  
+    3. Aggregation mode: aggregate_node_name specified (CAISO scenario - everything reassigned to aggregate node)
 
     Parameters
     ----------
@@ -1418,14 +1421,18 @@ def setup_network_with_aggregation(
         Path to demand data for creating time snapshots.
     demand_source : str
         Path to demand data (directory with individual files or single CSV file).
-    aggregate_node_name : str
-        Name for the new aggregate node that will receive all demand.
+    target_node : str, optional
+        If specified, all demand will be assigned to this existing node.
+        Example: "SEM" to assign all demand to the SEM node.
+    aggregate_node_name : str, optional
+        If specified, creates a new node with this name and assigns all demand,
+        generators, and links to it. Example: "CAISO_Load_Aggregate".
+    demand_bus_mapping : dict, optional
+        Mapping from demand data column names to network bus names.
     timeslice_csv : str, optional
         Path to the timeslice CSV file for time-dependent properties.
     vre_profiles_path : str, optional
         Path to the folder containing VRE generation profile files.
-    demand_bus_mapping : dict, optional
-        Mapping from demand data column names to network bus names.
     model_name : str, optional
         Name of the specific model to use when multiple models exist in the XML file.
         If None and multiple models exist, an error will be raised.
@@ -1433,20 +1440,40 @@ def setup_network_with_aggregation(
     Returns
     -------
     dict
-        Summary information about the aggregation including load, generator, and link assignments.
+        Summary information about the network setup including mode and statistics.
+
+    Raises
+    ------
+    ValueError
+        If both target_node and aggregate_node_name are specified.
 
     Examples
     --------
-    >>> network = pypsa.Network()
-    >>> db = PlexosDB("path/to/file.xml")
-    >>> summary = setup_network_with_aggregation(
-    ...     network, db,
-    ...     snapshots_source="/path/to/demand.csv",
-    ...     demand_source="/path/to/demand.csv",
-    ...     aggregate_node_name="CAISO_Load",
-    ...     vre_profiles_path="/path/to/profiles")
+    # Per-node mode (traditional AEMO)
+    >>> setup_network(network, db, snapshots_source=path, demand_source=path)
+    
+    # Target node mode (SEM scenario)
+    >>> setup_network(network, db, snapshots_source=path, demand_source=path, 
+    ...               target_node="SEM")
+    
+    # Aggregation mode (CAISO scenario)
+    >>> setup_network(network, db, snapshots_source=path, demand_source=path,
+    ...               aggregate_node_name="CAISO_Load_Aggregate")
     """
-    print(f"Setting up network with demand aggregation to node: {aggregate_node_name}")
+    # Validate parameter combinations
+    if target_node is not None and aggregate_node_name is not None:
+        raise ValueError("Cannot specify both target_node and aggregate_node_name. Choose one mode.")
+
+    # Detect mode and print status
+    if aggregate_node_name is not None:
+        mode = "aggregation"
+        print(f"Setting up network with demand aggregation to new node: {aggregate_node_name}")
+    elif target_node is not None:
+        mode = "target_node"
+        print(f"Setting up network with all demand assigned to target node: {target_node}")
+    else:
+        mode = "per_node"
+        print("Setting up network with per-node demand assignment")
 
     # Check for multiple models and validate model_name if needed
     print("Checking for multiple models in database...")
@@ -1477,173 +1504,12 @@ def setup_network_with_aggregation(
             )
 
     # Import required modules (avoid circular imports)
-    from plexos_pypsa.network.generators import (
-        port_generators,
-        reassign_generators_to_node,
-    )
+    from plexos_pypsa.network.generators import port_generators, reassign_generators_to_node
     from plexos_pypsa.network.links import port_links, reassign_links_to_node
 
-    # Step 1: Set up core network with aggregated demand
+    # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
-    print("STEP 1: Setting up core network with aggregated demand")
-    print("=" * 60)
-    load_summary = port_core_network(
-        network,
-        db,
-        snapshots_source=snapshots_source,
-        demand_source=demand_source,
-        demand_bus_mapping=demand_bus_mapping,
-        aggregate_node_name=aggregate_node_name,
-        model_name=model_name,
-    )
-
-    # Step 2: Add generators (they will be assigned to original nodes first)
-    print("\n" + "=" * 60)
-    print("STEP 2: Adding generators")
-    print("=" * 60)
-    port_generators(
-        network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
-    )
-
-    # Step 3: Reassign all generators to the aggregate node
-    print("\n" + "=" * 60)
-    print("STEP 3: Reassigning generators to aggregate node")
-    print("=" * 60)
-    generator_summary = reassign_generators_to_node(network, aggregate_node_name)
-
-    # Step 4: Add links (they will be assigned to original nodes first)
-    print("\n" + "=" * 60)
-    print("STEP 4: Adding links")
-    print("=" * 60)
-    port_links(network, db)
-
-    # Step 5: Reassign all links to the aggregate node
-    print("\n" + "=" * 60)
-    print("STEP 5: Reassigning links to aggregate node")
-    print("=" * 60)
-    link_summary = reassign_links_to_node(network, aggregate_node_name)
-
-    # Final summary
-    print("\n" + "=" * 60)
-    print("AGGREGATION COMPLETE!")
-    print("=" * 60)
-    print("Network summary:")
-    print(
-        f"  - {len(network.buses)} buses (with {aggregate_node_name} as aggregate node)"
-    )
-    print(f"  - {len(network.snapshots)} snapshots")
-    print(f"  - {len(network.loads)} loads (all on {aggregate_node_name})")
-    print(f"  - {len(network.generators)} generators (all on {aggregate_node_name})")
-    print(f"  - {len(network.links)} links (all connecting {aggregate_node_name})")
-
-    return {
-        "aggregate_node": aggregate_node_name,
-        "load_summary": load_summary,
-        "generator_summary": generator_summary,
-        "link_summary": link_summary,
-        "network_summary": {
-            "buses": len(network.buses),
-            "snapshots": len(network.snapshots),
-            "loads": len(network.loads),
-            "generators": len(network.generators),
-            "links": len(network.links),
-        },
-    }
-
-
-def setup_network_with_target_node(
-    network: Network,
-    db: PlexosDB,
-    snapshots_source,
-    demand_source,
-    target_node,
-    timeslice_csv=None,
-    vre_profiles_path=None,
-    demand_bus_mapping=None,
-    model_name=None,
-):
-    """
-    Complete network setup workflow with demand assignment to a specific existing node.
-
-    This function is specifically designed for scenarios where all demand should be
-    assigned to a specific existing node (e.g., SEM 2024 scenario where all demand
-    goes to the "SEM" node).
-
-    Parameters
-    ----------
-    network : Network
-        The PyPSA network to set up.
-    db : PlexosDB
-        The Plexos database containing network data.
-    snapshots_source : str
-        Path to demand data for creating time snapshots.
-    demand_source : str
-        Path to demand data (directory with individual files or single CSV file).
-    target_node : str
-        Name of the existing node that will receive all demand.
-    timeslice_csv : str, optional
-        Path to the timeslice CSV file for time-dependent properties.
-    vre_profiles_path : str, optional
-        Path to the folder containing VRE generation profile files.
-    demand_bus_mapping : dict, optional
-        Mapping from demand data column names to network bus names.
-    model_name : str, optional
-        Name of the specific model to use when multiple models exist in the XML file.
-        If None and multiple models exist, an error will be raised.
-
-    Returns
-    -------
-    dict
-        Summary information about the target node assignment.
-
-    Examples
-    --------
-    >>> network = pypsa.Network()
-    >>> db = PlexosDB("path/to/file.xml")
-    >>> summary = setup_network_with_target_node(
-    ...     network, db,
-    ...     snapshots_source="/path/to/demand.csv",
-    ...     demand_source="/path/to/demand.csv",
-    ...     target_node="SEM",
-    ...     vre_profiles_path="/path/to/profiles")
-    """
-    print(f"Setting up network with all demand assigned to target node: {target_node}")
-
-    # Check for multiple models and validate model_name if needed
-    print("Checking for multiple models in database...")
-    models = db.list_objects_by_class(ClassEnum.Model)
-
-    if len(models) > 1:
-        if model_name is None:
-            raise ValueError(
-                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
-            )
-        elif model_name not in models:
-            raise ValueError(
-                f"Model '{model_name}' not found in XML file. Available models: {models}"
-            )
-        else:
-            print(f"  Using specified model: {model_name}")
-    elif len(models) == 1:
-        if model_name is not None and model_name != models[0]:
-            raise ValueError(
-                f"Model '{model_name}' not found. Only available model: {models[0]}"
-            )
-        print(f"  Found single model: {models[0]}")
-    else:
-        print("  No models found in database")
-        if model_name is not None:
-            raise ValueError(
-                f"Model '{model_name}' not found. No models available in XML file."
-            )
-
-    # Import required modules (avoid circular imports)
-    from plexos_pypsa.network.generators import port_generators
-    from plexos_pypsa.network.links import port_links
-
-    # Step 1: Set up core network with targeted demand
-    print("=" * 60)
-    print(f"STEP 1: Setting up core network with demand to {target_node}")
+    print("STEP 1: Setting up core network")
     print("=" * 60)
     load_summary = port_core_network(
         network,
@@ -1652,42 +1518,53 @@ def setup_network_with_target_node(
         demand_source=demand_source,
         demand_bus_mapping=demand_bus_mapping,
         target_node=target_node,
+        aggregate_node_name=aggregate_node_name,
         model_name=model_name,
     )
 
-    # Step 2: Add generators (maintain original node assignments)
+    # Step 2: Add generators
     print("\n" + "=" * 60)
     print("STEP 2: Adding generators")
     print("=" * 60)
     port_generators(
         network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
     )
+    
+    # For aggregation mode, reassign all generators to the aggregate node
+    generator_summary = None
+    if mode == "aggregation":
+        print(f"Reassigning all generators to aggregate node: {aggregate_node_name}")
+        generator_summary = reassign_generators_to_node(network, aggregate_node_name)
 
-    # Step 3: Add links (maintain original node assignments)
+    # Step 3: Add links/lines
     print("\n" + "=" * 60)
     print("STEP 3: Adding links")
     print("=" * 60)
     port_links(network, db)
+    
+    # For aggregation mode, reassign all links to/from the aggregate node
+    link_summary = None
+    if mode == "aggregation":
+        print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
+        link_summary = reassign_links_to_node(network, aggregate_node_name)
 
-    # Final summary
     print("\n" + "=" * 60)
-    print("TARGET NODE ASSIGNMENT COMPLETE!")
+    print(f"NETWORK SETUP COMPLETE ({mode.upper()} MODE)")
     print("=" * 60)
-    print("Network summary:")
-    print(f"  - {len(network.buses)} buses")
-    print(f"  - {len(network.snapshots)} snapshots")
-    print(f"  - {len(network.loads)} loads (all on {target_node})")
-    print(f"  - {len(network.generators)} generators (distributed across nodes)")
-    print(f"  - {len(network.links)} links (maintaining original connections)")
+    print(f"Final network summary:")
+    print(f"  Buses: {len(network.buses)}")
+    print(f"  Generators: {len(network.generators)}")
+    print(f"  Links: {len(network.links)}")
+    print(f"  Loads: {len(network.loads)}")
+    print(f"  Snapshots: {len(network.snapshots)}")
 
-    return {
-        "target_node": target_node,
-        "load_summary": load_summary,
-        "network_summary": {
-            "buses": len(network.buses),
-            "snapshots": len(network.snapshots),
-            "loads": len(network.loads),
-            "generators": len(network.generators),
-            "links": len(network.links),
-        },
-    }
+    # Add mode information to summary
+    load_summary["mode"] = mode
+    if mode == "aggregation":
+        load_summary["aggregate_node_name"] = aggregate_node_name
+        load_summary["generator_summary"] = generator_summary
+        load_summary["link_summary"] = link_summary
+    elif mode == "target_node":
+        load_summary["target_node"] = target_node
+
+    return load_summary
