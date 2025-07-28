@@ -27,6 +27,7 @@ n = pypsa.Network()
 setup_summary = setup_network_with_target_node(
     network=n,
     db=plexos_db,
+    model_name="Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
     snapshots_source=path_demand,
     demand_source=path_demand,
     target_node="SEM",

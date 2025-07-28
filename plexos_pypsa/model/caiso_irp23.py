@@ -26,6 +26,7 @@ n = pypsa.Network()
 setup_summary = setup_network_with_aggregation(
     network=n,
     db=plexos_db,
+    model_name="M01Y2024 PSP23_25MMT",
     snapshots_source=path_demand,
     demand_source=path_demand,
     aggregate_node_name="CAISO_Load_Aggregate",
