@@ -39,9 +39,7 @@ print(f"  Mode: {setup_summary['mode']}")
 print(f"  Aggregate node: {setup_summary['aggregate_node_name']}")
 print(f"  Format type: {setup_summary['format_type']}")
 if setup_summary["format_type"] == "iteration":
-    print(
-        f"  Iterations processed: {setup_summary['iterations_processed']}"
-    )
+    print(f"  Iterations processed: {setup_summary['iterations_processed']}")
     print(
         f"  Loads created: {setup_summary['loads_added']} (Load1_{setup_summary['aggregate_node_name']} to Load{setup_summary['iterations_processed']}_{setup_summary['aggregate_node_name']})"
     )
@@ -60,7 +58,7 @@ n.consistency_check()
 # subset = n.snapshots[:50]  # the first 50 snapshots
 
 # in each year in the snapshots, select the first x snapshots
-x = 60  # number of snapshots to select per year
+x = 50  # number of snapshots to select per year
 snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
 for snap in n.snapshots:
     year = pd.Timestamp(snap).year

@@ -4,6 +4,7 @@ from typing import DefaultDict
 import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
+
 from plexos_pypsa.network.core import setup_network
 
 
@@ -40,12 +41,12 @@ def create_aemo_model():
     # AEMO model: Uses traditional per-node load assignment (each CSV file maps to a bus)
     print("\nSetting up complete network...")
     setup_summary = setup_network(
-        n, 
-        plexos_db, 
-        snapshots_source=path_demand, 
+        n,
+        plexos_db,
+        snapshots_source=path_demand,
         demand_source=path_demand,
         timeslice_csv=file_timeslice,
-        vre_profiles_path=path_ren
+        vre_profiles_path=path_ren,
     )
 
     print("\nNetwork Setup Complete:")
@@ -59,21 +60,20 @@ def create_aemo_model():
     else:  # zone format
         print(f"  Loads mapped to buses: {setup_summary['loads_added']}")
         if setup_summary.get("loads_skipped", 0) > 0:
-            print(f"  Loads skipped (no matching bus): {setup_summary['loads_skipped']}")
+            print(
+                f"  Loads skipped (no matching bus): {setup_summary['loads_skipped']}"
+            )
 
     print(f"  Total buses: {len(n.buses)}")
     print(f"  Total generators: {len(n.generators)}")
     print(f"  Total links: {len(n.links)}")
+    print(f"  Total batteries: {len(n.storage_units)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
 
-    # add storage (TODO: fix)
-    # add_storage(n, plexos_db)
-    # add_hydro_inflows(n, plexos_db, path_ren)
-
-    # run consistency check on network
-    print("\nRunning network consistency check...")
-    n.consistency_check()
-    print("  Network consistency check passed!")
+    # # run consistency check on network
+    # print("\nRunning network consistency check...")
+    # n.consistency_check()
+    # print("  Network consistency check passed!")
 
     return n
 
@@ -102,3 +102,6 @@ if __name__ == "__main__":
     # save to file
     # network.export_to_netcdf("aemo_network.nc")
     # print("Network exported to aemo_network.nc")
+
+network = create_aemo_model()
+network.consistency_check()

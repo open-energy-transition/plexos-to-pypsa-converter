@@ -1506,6 +1506,7 @@ def setup_network(
     # Import required modules (avoid circular imports)
     from plexos_pypsa.network.generators import port_generators, reassign_generators_to_node
     from plexos_pypsa.network.links import port_links, reassign_links_to_node
+    from plexos_pypsa.network.storage import port_batteries
 
     # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
@@ -1548,6 +1549,18 @@ def setup_network(
         print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
         link_summary = reassign_links_to_node(network, aggregate_node_name)
 
+    # Step 4: Add batteries
+    print("\n" + "=" * 60)
+    print("STEP 4: Adding batteries")
+    print("=" * 60)
+    port_batteries(network, db, timeslice_csv=timeslice_csv)
+    
+    # For aggregation mode, reassign all batteries to the aggregate node
+    if mode == "aggregation":
+        print(f"Reassigning all batteries to aggregate node: {aggregate_node_name}")
+        for battery_name in network.storage_units.index:
+            network.storage_units.loc[battery_name, "bus"] = aggregate_node_name
+
     print("\n" + "=" * 60)
     print(f"NETWORK SETUP COMPLETE ({mode.upper()} MODE)")
     print("=" * 60)
@@ -1555,6 +1568,7 @@ def setup_network(
     print(f"  Buses: {len(network.buses)}")
     print(f"  Generators: {len(network.generators)}")
     print(f"  Links: {len(network.links)}")
+    print(f"  Batteries: {len(network.storage_units)}")
     print(f"  Loads: {len(network.loads)}")
     print(f"  Snapshots: {len(network.snapshots)}")
 

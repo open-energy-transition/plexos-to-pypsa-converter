@@ -264,9 +264,9 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
                 prop_df_entries = pd.DataFrame(property_entries)
             else:
                 # Create empty DataFrame with expected columns
-                prop_df_entries = pd.DataFrame(columns=[
-                    "property", "value", "from", "to", "data_id", "timeslices"
-                ])
+                prop_df_entries = pd.DataFrame(
+                    columns=["property", "value", "from", "to", "data_id", "timeslices"]
+                )
 
             # Helper to build a time series for a property
             def build_ts(prop_name, fallback=None):
@@ -796,7 +796,7 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
     # Report skipped generators
     if skipped_generators:
         print(
-            f"Skipped {len(skipped_generators)} generators due to missing properties:"
+            f"Skipped adding marginal costs for {len(skipped_generators)} generators due to missing cost properties:"
         )
         for gen in skipped_generators:
             print(f"  - {gen}")
