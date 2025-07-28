@@ -4,7 +4,6 @@ from typing import DefaultDict
 import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
-
 from plexos_pypsa.network.core import port_core_network
 from plexos_pypsa.network.generators import port_generators
 from plexos_pypsa.network.links import port_links

@@ -748,6 +748,7 @@ def port_core_network(
     demand_bus_mapping=None,
     target_node=None,
     aggregate_node_name=None,
+    model_name=None,
 ):
     """
     Comprehensive function to set up the core PyPSA network infrastructure.
@@ -776,6 +777,9 @@ def port_core_network(
     aggregate_node_name : str, optional
         If specified, creates a new node with this name and assigns all demand to it.
         Example: "Load_Aggregate" to create an aggregate load node.
+    model_name : str, optional
+        Name of the specific model to use when multiple models exist in the XML file.
+        If None and multiple models exist, an error will be raised.
 
     Returns
     -------
@@ -809,6 +813,34 @@ def port_core_network(
     ...                   aggregate_node_name="CAISO_Load")
     """
     print("Setting up core network infrastructure...")
+
+    # Check for multiple models and validate model_name if needed
+    print("Checking for multiple models in database...")
+    models = db.list_objects_by_class(ClassEnum.Model)
+
+    if len(models) > 1:
+        if model_name is None:
+            raise ValueError(
+                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
+            )
+        elif model_name not in models:
+            raise ValueError(
+                f"Model '{model_name}' not found in XML file. Available models: {models}"
+            )
+        else:
+            print(f"  Using specified model: {model_name}")
+    elif len(models) == 1:
+        if model_name is not None and model_name != models[0]:
+            raise ValueError(
+                f"Model '{model_name}' not found. Only available model: {models[0]}"
+            )
+        print(f"  Found single model: {models[0]}")
+    else:
+        print("  No models found in database")
+        if model_name is not None:
+            raise ValueError(
+                f"Model '{model_name}' not found. No models available in XML file."
+            )
 
     # Step 1: Add buses
     print("1. Adding buses...")
@@ -1367,6 +1399,7 @@ def setup_network_with_aggregation(
     timeslice_csv=None,
     vre_profiles_path=None,
     demand_bus_mapping=None,
+    model_name=None,
 ):
     """
     Complete network setup workflow with demand aggregation and component reassignment.
@@ -1393,6 +1426,9 @@ def setup_network_with_aggregation(
         Path to the folder containing VRE generation profile files.
     demand_bus_mapping : dict, optional
         Mapping from demand data column names to network bus names.
+    model_name : str, optional
+        Name of the specific model to use when multiple models exist in the XML file.
+        If None and multiple models exist, an error will be raised.
 
     Returns
     -------
@@ -1412,6 +1448,34 @@ def setup_network_with_aggregation(
     """
     print(f"Setting up network with demand aggregation to node: {aggregate_node_name}")
 
+    # Check for multiple models and validate model_name if needed
+    print("Checking for multiple models in database...")
+    models = db.list_objects_by_class(ClassEnum.Model)
+
+    if len(models) > 1:
+        if model_name is None:
+            raise ValueError(
+                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
+            )
+        elif model_name not in models:
+            raise ValueError(
+                f"Model '{model_name}' not found in XML file. Available models: {models}"
+            )
+        else:
+            print(f"  Using specified model: {model_name}")
+    elif len(models) == 1:
+        if model_name is not None and model_name != models[0]:
+            raise ValueError(
+                f"Model '{model_name}' not found. Only available model: {models[0]}"
+            )
+        print(f"  Found single model: {models[0]}")
+    else:
+        print("  No models found in database")
+        if model_name is not None:
+            raise ValueError(
+                f"Model '{model_name}' not found. No models available in XML file."
+            )
+
     # Import required modules (avoid circular imports)
     from plexos_pypsa.network.generators import (
         port_generators,
@@ -1430,6 +1494,7 @@ def setup_network_with_aggregation(
         demand_source=demand_source,
         demand_bus_mapping=demand_bus_mapping,
         aggregate_node_name=aggregate_node_name,
+        model_name=model_name,
     )
 
     # Step 2: Add generators (they will be assigned to original nodes first)
@@ -1495,6 +1560,7 @@ def setup_network_with_target_node(
     timeslice_csv=None,
     vre_profiles_path=None,
     demand_bus_mapping=None,
+    model_name=None,
 ):
     """
     Complete network setup workflow with demand assignment to a specific existing node.
@@ -1521,6 +1587,9 @@ def setup_network_with_target_node(
         Path to the folder containing VRE generation profile files.
     demand_bus_mapping : dict, optional
         Mapping from demand data column names to network bus names.
+    model_name : str, optional
+        Name of the specific model to use when multiple models exist in the XML file.
+        If None and multiple models exist, an error will be raised.
 
     Returns
     -------
@@ -1540,6 +1609,34 @@ def setup_network_with_target_node(
     """
     print(f"Setting up network with all demand assigned to target node: {target_node}")
 
+    # Check for multiple models and validate model_name if needed
+    print("Checking for multiple models in database...")
+    models = db.list_objects_by_class(ClassEnum.Model)
+
+    if len(models) > 1:
+        if model_name is None:
+            raise ValueError(
+                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
+            )
+        elif model_name not in models:
+            raise ValueError(
+                f"Model '{model_name}' not found in XML file. Available models: {models}"
+            )
+        else:
+            print(f"  Using specified model: {model_name}")
+    elif len(models) == 1:
+        if model_name is not None and model_name != models[0]:
+            raise ValueError(
+                f"Model '{model_name}' not found. Only available model: {models[0]}"
+            )
+        print(f"  Found single model: {models[0]}")
+    else:
+        print("  No models found in database")
+        if model_name is not None:
+            raise ValueError(
+                f"Model '{model_name}' not found. No models available in XML file."
+            )
+
     # Import required modules (avoid circular imports)
     from plexos_pypsa.network.generators import port_generators
     from plexos_pypsa.network.links import port_links
@@ -1555,6 +1652,7 @@ def setup_network_with_target_node(
         demand_source=demand_source,
         demand_bus_mapping=demand_bus_mapping,
         target_node=target_node,
+        model_name=model_name,
     )
 
     # Step 2: Add generators (maintain original node assignments)
