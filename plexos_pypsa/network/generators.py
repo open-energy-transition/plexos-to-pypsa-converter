@@ -14,6 +14,7 @@ from plexos_pypsa.db.parse import (
     read_timeslice_activity,
 )
 from plexos_pypsa.network.carriers import parse_fuel_prices
+from plexos_pypsa.network.costs import set_capital_costs_generic
 
 logger = logging.getLogger(__name__)
 
@@ -576,77 +577,19 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
 
 def set_capital_costs(network: Network, db: PlexosDB):
     """
-    Sets the capital_cost for each generator in the PyPSA network based on
-    'Build Cost', 'WACC', 'Economic Life' (preferred), 'Technical Life', and 'FO&M Charge' properties from the PlexosDB.
+    Sets the capital_cost for each generator in the PyPSA network.
 
-    The capital_cost is calculated as:
-        annuity_factor = wacc / (1 - (1 + wacc) ** -lifetime)
-        annualized_capex = build_cost * annuity_factor
-        capital_cost = annualized_capex + fo_m_charge
+    This is a wrapper function that calls the generic capital cost function.
+    For detailed documentation, see set_capital_costs_generic in costs.py.
 
-    All costs are converted to $/MW (PyPSA convention).
-
-    - Build Cost is given in $/kW, so multiply by 1000 to get $/MW.
-    - FO&M Charge is given in $/kW/yr, so multiply by 1000 to get $/MW/yr.
-    - capital_cost is stored in $/MW/yr.
-
-    If build_cost, wacc, or lifetime are missing, but FO&M Charge is present,
-    capital_cost is set to FO&M Charge only (converted to $/MW/yr).
-
-    If no cost can be calculated or found, capital_cost is set to 0.
-
-    The result is stored in network.generators['capital_cost'].
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network containing generators.
+    db : PlexosDB
+        The Plexos database containing generator data.
     """
-
-    capital_costs = []
-    for gen in network.generators.index:
-        props = db.get_object_properties(ClassEnum.Generator, gen)
-        # Extract properties
-        build_costs = [
-            float(p["value"]) for p in props if p["property"] == "Build Cost"
-        ]
-        build_cost = sum(build_costs) / len(build_costs) if build_costs else None
-        wacc = next((float(p["value"]) for p in props if p["property"] == "WACC"), None)
-        # Prefer Economic Life, fallback to Technical Life
-        economic_life = next(
-            (float(p["value"]) for p in props if p["property"] == "Economic Life"), None
-        )
-        technical_life = next(
-            (float(p["value"]) for p in props if p["property"] == "Technical Life"),
-            None,
-        )
-        lifetime = economic_life if economic_life is not None else technical_life
-        fo_m_charge = next(
-            (float(p["value"]) for p in props if p["property"] == "FO&M Charge"), None
-        )
-
-        # Convert units: $/kW -> $/MW
-        build_cost_MW = build_cost * 1000 if build_cost is not None else None
-        fo_m_charge_MW = fo_m_charge * 1000 if fo_m_charge is not None else None
-
-        if build_cost_MW is None or wacc is None or lifetime is None or lifetime <= 0:
-            if fo_m_charge_MW is not None:
-                capital_costs.append(fo_m_charge_MW)
-            else:
-                capital_costs.append(0.0)
-                print(
-                    f"Warning: Missing or invalid capital cost data for {gen}. Setting capital_cost to 0."
-                )
-            continue
-
-        # Calculate annuity factor
-        try:
-            annuity_factor = wacc / (1 - (1 + wacc) ** (-lifetime))
-        except ZeroDivisionError:
-            annuity_factor = 1.0
-
-        annualized_capex = build_cost_MW * annuity_factor
-        capital_cost = annualized_capex + (
-            fo_m_charge_MW if fo_m_charge_MW is not None else 0.0
-        )
-        capital_costs.append(capital_cost)
-
-    network.generators["capital_cost"] = capital_costs
+    set_capital_costs_generic(network, db, "Generator", ClassEnum.Generator)
 
 
 def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):

@@ -7,6 +7,7 @@ from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
 from plexos_pypsa.db.parse import find_bus_for_object
+from plexos_pypsa.network.costs import set_capital_costs_generic, set_battery_marginal_costs
 
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
@@ -329,3 +330,11 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
         print("  Skipped batteries:")
         for skipped in skipped_batteries:
             print(f"    - {skipped}")
+
+    # Set capital costs for all added batteries
+    if added_count > 0:
+        print("\nSetting battery capital costs...")
+        set_capital_costs_generic(network, db, "StorageUnit", ClassEnum.Battery)
+        
+        print("Setting battery marginal costs...")
+        set_battery_marginal_costs(network, db, timeslice_csv)
