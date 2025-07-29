@@ -6,6 +6,9 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
+from plexos_pypsa.db.parse import find_bus_for_object
+from plexos_pypsa.network.costs import set_capital_costs_generic, set_battery_marginal_costs
+
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
 
@@ -132,7 +135,206 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
                     f"Failed to process inflow profile for storage unit {storage_unit}: {e}"
                 )
         else:
-            # If the storage unit does not have a hydro inflow profile,      it
+            # If the storage unit does not have a hydro inflow profile, skip it
             print(
                 f"Storage unit {storage_unit} does not have a hydro inflow profile. Skipping."
             )
+
+
+def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
+    """
+    Comprehensive function to add PLEXOS batteries as PyPSA StorageUnit components.
+
+    This function converts PLEXOS Battery class objects to PyPSA StorageUnit components
+    with the following property mappings:
+    - Node -> bus (using find_bus_for_object)
+    - Max Power -> p_nom
+    - Max SoC/Max Volume -> max_hours (calculated as Max Volume / Max Power)
+    - Initial SoC/Initial Volume -> state_of_charge_initial (in MWh)
+    - Min SoC/Min Volume -> state_of_charge_min
+    - Charge Efficiency -> efficiency_store
+    - Discharge Efficiency -> efficiency_dispatch
+    - Technical Life (preferred) / Economic Life -> lifetime
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to add batteries to.
+    db : PlexosDB
+        The Plexos database containing battery data.
+    timeslice_csv : str, optional
+        Path to timeslice CSV file (for future time-dependent properties).
+
+    Notes
+    -----
+    - Batteries without a connected bus will be skipped
+    - Missing properties will use reasonable defaults where possible
+    - Technical Life is preferred over Economic Life if both are available
+    """
+    print("Adding batteries to network...")
+
+    # Get all battery objects with their categories using SQL
+    battery_query = """
+        SELECT 
+            o.name AS battery_name,
+            o.object_id,
+            c.name AS category_name
+        FROM t_object o
+        JOIN t_class cl ON o.class_id = cl.class_id
+        LEFT JOIN t_category c ON o.category_id = c.category_id
+        WHERE cl.name = 'Battery'
+    """
+
+    battery_results = db.query(battery_query)
+    print(f"  Found {len(battery_results)} batteries in database")
+
+    if not battery_results:
+        print("  No batteries found in database")
+        return
+
+    # Collect unique battery categories for carrier validation
+    battery_carriers = set()
+    for battery_name, object_id, category_name in battery_results:
+        carrier = category_name if category_name else "battery"
+        battery_carriers.add(carrier)
+
+    print(f"  Battery carriers found: {sorted(battery_carriers)}")
+
+    # Ensure all battery carriers exist in the network
+    for carrier in battery_carriers:
+        if carrier not in network.carriers.index:
+            network.add("Carrier", name=carrier)
+            print(f"  Added carrier: {carrier}")
+
+    # Track skipped batteries for reporting
+    skipped_batteries = []
+    added_count = 0
+
+    def get_property_value(props, property_name, default=None):
+        """Helper function to extract property value by name."""
+        for prop in props:
+            if prop["property"] == property_name:
+                try:
+                    return (
+                        float(prop["value"]) if prop["value"] is not None else default
+                    )
+                except (ValueError, TypeError):
+                    return default
+        return default
+
+    for battery_name, object_id, category_name in battery_results:
+        try:
+            print(f"  Processing battery: {battery_name}")
+
+            # Determine the carrier from the category
+            carrier = category_name if category_name else "battery"
+
+            # Find the connected bus using find_bus_for_object
+            bus = find_bus_for_object(db, battery_name, ClassEnum.Battery)
+            if bus is None:
+                print(f"    Warning: No connected bus found for battery {battery_name}")
+                skipped_batteries.append(f"{battery_name} (no bus)")
+                continue
+
+            # Get all properties for this battery
+            # TODO: get_object_properties should handle both Battery and Generator classes
+            try:
+                props = db.get_object_properties(ClassEnum.Battery, battery_name)
+            except KeyError:
+                props = db.get_object_properties(ClassEnum.Generator, battery_name)
+
+            # Extract Max Power (required for p_nom)
+            max_power = get_property_value(props, "Max Power")
+            if max_power is None or max_power <= 0:
+                print(
+                    f"    Warning: No valid 'Max Power' found for battery {battery_name}"
+                )
+                skipped_batteries.append(f"{battery_name} (no Max Power)")
+                continue
+
+            # Extract volume properties (try different naming conventions)
+            max_volume = get_property_value(props, "Max Volume") or get_property_value(
+                props, "Max SoC"
+            )
+            initial_volume = get_property_value(
+                props, "Initial Volume"
+            ) or get_property_value(props, "Initial SoC", 0.0)
+            min_volume = get_property_value(props, "Min Volume") or get_property_value(
+                props, "Min SoC", 0.0
+            )
+
+            # Calculate max_hours (Max Volume / Max Power)
+            if max_volume is not None and max_volume > 0:
+                max_hours = max_volume / max_power
+            else:
+                print(
+                    f"    Warning: No valid 'Max Volume/SoC' found for battery {battery_name}, using default 4 hours"
+                )
+                max_hours = 4.0  # Default to 4-hour battery
+
+            # Extract efficiency properties
+            efficiency_store = get_property_value(
+                props, "Charge Efficiency", 0.9
+            )  # Default 90%
+            efficiency_dispatch = get_property_value(
+                props, "Discharge Efficiency", 0.9
+            )  # Default 90%
+
+            # Convert efficiencies from percentage to decimal if needed
+            if efficiency_store > 1.0:
+                efficiency_store = efficiency_store / 100.0
+            if efficiency_dispatch > 1.0:
+                efficiency_dispatch = efficiency_dispatch / 100.0
+
+            # Extract lifetime (prefer Technical Life over Economic Life)
+            lifetime = get_property_value(props, "Technical Life")
+            if lifetime is None:
+                lifetime = get_property_value(props, "Economic Life")
+
+            # Create the storage unit entry
+            storage_unit_data = {
+                "bus": bus,
+                "carrier": carrier,
+                "p_nom": max_power,
+                "max_hours": max_hours,
+                "efficiency_store": efficiency_store,
+                "efficiency_dispatch": efficiency_dispatch,
+                "state_of_charge_initial": initial_volume
+                if initial_volume is not None
+                else 0.0,
+                "state_of_charge_min": min_volume if min_volume is not None else 0.0,
+            }
+
+            # Add lifetime if available
+            if lifetime is not None:
+                storage_unit_data["lifetime"] = lifetime
+
+            # Add the battery to the network using PyPSA's add method
+            network.add("StorageUnit", battery_name, **storage_unit_data)
+            added_count += 1
+
+            print(
+                f"    Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}, carrier={carrier}"
+            )
+
+        except Exception as e:
+            print(f"    Error processing battery {battery_name}: {e}")
+            skipped_batteries.append(f"{battery_name} (error: {e})")
+
+    # Summary reporting
+    print("\nBattery processing complete:")
+    print(f"  Batteries added: {added_count}")
+    print(f"  Batteries skipped: {len(skipped_batteries)}")
+
+    if skipped_batteries:
+        print("  Skipped batteries:")
+        for skipped in skipped_batteries:
+            print(f"    - {skipped}")
+
+    # Set capital costs for all added batteries
+    if added_count > 0:
+        print("\nSetting battery capital costs...")
+        set_capital_costs_generic(network, db, "StorageUnit", ClassEnum.Battery)
+        
+        print("Setting battery marginal costs...")
+        set_battery_marginal_costs(network, db, timeslice_csv)
