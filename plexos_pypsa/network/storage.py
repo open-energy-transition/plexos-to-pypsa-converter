@@ -309,8 +309,8 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
             if lifetime is not None:
                 storage_unit_data["lifetime"] = lifetime
 
-            # Add the battery to the network
-            network.storage_units.loc[battery_name] = storage_unit_data
+            # Add the battery to the network using PyPSA's add method
+            network.add("StorageUnit", battery_name, **storage_unit_data)
             added_count += 1
 
             print(
