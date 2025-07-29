@@ -1523,9 +1523,21 @@ def setup_network(
         model_name=model_name,
     )
 
-    # Step 2: Add generators
+    # Step 2: Add batteries
     print("\n" + "=" * 60)
-    print("STEP 2: Adding generators")
+    print("STEP 2: Adding batteries")
+    print("=" * 60)
+    port_batteries(network, db, timeslice_csv=timeslice_csv)
+    
+    # For aggregation mode, reassign all batteries to the aggregate node
+    if mode == "aggregation":
+        print(f"Reassigning all batteries to aggregate node: {aggregate_node_name}")
+        for battery_name in network.storage_units.index:
+            network.storage_units.loc[battery_name, "bus"] = aggregate_node_name
+
+    # Step 3: Add generators
+    print("\n" + "=" * 60)
+    print("STEP 3: Adding generators")
     print("=" * 60)
     port_generators(
         network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
@@ -1537,9 +1549,9 @@ def setup_network(
         print(f"Reassigning all generators to aggregate node: {aggregate_node_name}")
         generator_summary = reassign_generators_to_node(network, aggregate_node_name)
 
-    # Step 3: Add links/lines
+    # Step 4: Add links/lines
     print("\n" + "=" * 60)
-    print("STEP 3: Adding links")
+    print("STEP 4: Adding links")
     print("=" * 60)
     port_links(network, db)
     
@@ -1549,17 +1561,6 @@ def setup_network(
         print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
         link_summary = reassign_links_to_node(network, aggregate_node_name)
 
-    # Step 4: Add batteries
-    print("\n" + "=" * 60)
-    print("STEP 4: Adding batteries")
-    print("=" * 60)
-    port_batteries(network, db, timeslice_csv=timeslice_csv)
-    
-    # For aggregation mode, reassign all batteries to the aggregate node
-    if mode == "aggregation":
-        print(f"Reassigning all batteries to aggregate node: {aggregate_node_name}")
-        for battery_name in network.storage_units.index:
-            network.storage_units.loc[battery_name, "bus"] = aggregate_node_name
 
     print("\n" + "=" * 60)
     print(f"NETWORK SETUP COMPLETE ({mode.upper()} MODE)")

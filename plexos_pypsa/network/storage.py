@@ -172,13 +172,38 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
     """
     print("Adding batteries to network...")
 
-    # Get all battery objects from the database
-    batteries = db.list_objects_by_class(ClassEnum.Battery)
-    print(f"  Found {len(batteries)} batteries in database")
+    # Get all battery objects with their categories using SQL
+    battery_query = """
+        SELECT 
+            o.name AS battery_name,
+            o.object_id,
+            c.name AS category_name
+        FROM t_object o
+        JOIN t_class cl ON o.class_id = cl.class_id
+        LEFT JOIN t_category c ON o.category_id = c.category_id
+        WHERE cl.name = 'Battery'
+    """
 
-    if not batteries:
+    battery_results = db.query(battery_query)
+    print(f"  Found {len(battery_results)} batteries in database")
+
+    if not battery_results:
         print("  No batteries found in database")
         return
+
+    # Collect unique battery categories for carrier validation
+    battery_carriers = set()
+    for battery_name, object_id, category_name in battery_results:
+        carrier = category_name if category_name else "battery"
+        battery_carriers.add(carrier)
+
+    print(f"  Battery carriers found: {sorted(battery_carriers)}")
+
+    # Ensure all battery carriers exist in the network
+    for carrier in battery_carriers:
+        if carrier not in network.carriers.index:
+            network.add("Carrier", name=carrier)
+            print(f"  Added carrier: {carrier}")
 
     # Track skipped batteries for reporting
     skipped_batteries = []
@@ -196,15 +221,18 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
                     return default
         return default
 
-    for battery in batteries:
+    for battery_name, object_id, category_name in battery_results:
         try:
-            print(f"  Processing battery: {battery}")
+            print(f"  Processing battery: {battery_name}")
+
+            # Determine the carrier from the category
+            carrier = category_name if category_name else "battery"
 
             # Find the connected bus using find_bus_for_object
-            bus = find_bus_for_object(db, battery, ClassEnum.Battery)
+            bus = find_bus_for_object(db, battery_name, ClassEnum.Battery)
             if bus is None:
-                print(f"    Warning: No connected bus found for battery {battery}")
-                skipped_batteries.append(f"{battery} (no bus)")
+                print(f"    Warning: No connected bus found for battery {battery_name}")
+                skipped_batteries.append(f"{battery_name} (no bus)")
                 continue
 
             # Get all properties for this battery
@@ -216,8 +244,10 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
             # Extract Max Power (required for p_nom)
             max_power = get_property_value(props, "Max Power")
             if max_power is None or max_power <= 0:
-                print(f"    Warning: No valid 'Max Power' found for battery {battery}")
-                skipped_batteries.append(f"{battery} (no Max Power)")
+                print(
+                    f"    Warning: No valid 'Max Power' found for battery {battery_name}"
+                )
+                skipped_batteries.append(f"{battery_name} (no Max Power)")
                 continue
 
             # Extract volume properties (try different naming conventions)
@@ -236,7 +266,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
                 max_hours = max_volume / max_power
             else:
                 print(
-                    f"    Warning: No valid 'Max Volume/SoC' found for battery {battery}, using default 4 hours"
+                    f"    Warning: No valid 'Max Volume/SoC' found for battery {battery_name}, using default 4 hours"
                 )
                 max_hours = 4.0  # Default to 4-hour battery
 
@@ -262,7 +292,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
             # Create the storage unit entry
             storage_unit_data = {
                 "bus": bus,
-                "carrier": "battery",
+                "carrier": carrier,
                 "p_nom": max_power,
                 "max_hours": max_hours,
                 "efficiency_store": efficiency_store,
@@ -278,16 +308,16 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
                 storage_unit_data["lifetime"] = lifetime
 
             # Add the battery to the network
-            network.storage_units.loc[battery] = storage_unit_data
+            network.storage_units.loc[battery_name] = storage_unit_data
             added_count += 1
 
             print(
-                f"    Added battery {battery}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}"
+                f"    Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}, carrier={carrier}"
             )
 
         except Exception as e:
-            print(f"    Error processing battery {battery}: {e}")
-            skipped_batteries.append(f"{battery} (error: {e})")
+            print(f"    Error processing battery {battery_name}: {e}")
+            skipped_batteries.append(f"{battery_name} (error: {e})")
 
     # Summary reporting
     print("\nBattery processing complete:")
