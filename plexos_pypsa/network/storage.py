@@ -236,10 +236,11 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
                 continue
 
             # Get all properties for this battery
+            # TODO: get_object_properties should handle both Battery and Generator classes
             try:
-                props = db.get_object_properties(ClassEnum.Battery, battery)
+                props = db.get_object_properties(ClassEnum.Battery, battery_name)
             except KeyError:
-                props = db.get_object_properties(ClassEnum.Generator, battery)
+                props = db.get_object_properties(ClassEnum.Generator, battery_name)
 
             # Extract Max Power (required for p_nom)
             max_power = get_property_value(props, "Max Power")
