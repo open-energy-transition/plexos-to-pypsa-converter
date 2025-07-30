@@ -1,3 +1,8 @@
+import os
+import re
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
@@ -7,9 +12,6 @@ from plexos_pypsa.network.core import setup_network
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
 file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
 file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
-
-
-db = PlexosDB.from_xml(file_xml)
 
 
 def create_aemo_model():
@@ -199,7 +201,16 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
 
     def build_generator_production_timeseries(merged, gen_df, snapshots):
         """
-        For each generator, create a time series for production rates using date logic only.
+        For each generator, create a time series for production rates using simplified date logic.
+
+        Logic:
+        - Single value: use across all snapshots
+        - Multiple values: sort by t_date_from, create sequential periods
+          - First value: start → first t_date_from
+          - Each subsequent: t_date_from → next t_date_from
+          - Last value: last t_date_from → end
+        - Ignore t_date_to completely
+
         Returns a DataFrame: index=snapshots, columns=generator names, values=production rates.
         """
         gen_series = {}
@@ -215,51 +226,69 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
                 gen_series[gen] = ts
                 continue
 
-            # Build property entries with date conversion
-            property_entries = []
+            # Extract unique production rate values with their t_date_from
+            unique_entries = []
             for _, p in props.iterrows():
-                entry = {
-                    "property": p["property"],
-                    "value": float(p["value"]) if p["value"] is not None else 0.0,
-                    "from": pd.to_datetime(p["t_date_from"])
+                value = float(p["value"]) if p["value"] is not None else 0.0
+                date_from = (
+                    pd.to_datetime(p["t_date_from"])
                     if pd.notnull(p["t_date_from"])
-                    else None,
-                    "to": pd.to_datetime(p["t_date_to"])
-                    if pd.notnull(p["t_date_to"])
-                    else None,
-                    "data_id": p["data_id"],
-                }
-                property_entries.append(entry)
+                    else None
+                )
 
-            # Sort by from date to handle overlapping periods correctly
-            property_entries.sort(
-                key=lambda x: x["from"] if x["from"] is not None else pd.Timestamp.min
+                # Add to unique entries if not already present
+                entry = {"value": value, "date_from": date_from}
+                if entry not in unique_entries:
+                    unique_entries.append(entry)
+
+            # Case 1: Single value - use across all snapshots
+            if len(unique_entries) == 1:
+                ts[:] = unique_entries[0]["value"]
+                gen_series[gen] = ts
+                continue
+
+            # Case 2: Multiple values - create sequential periods
+            # Sort by date_from (None/undated entries first, then by date)
+            unique_entries.sort(
+                key=lambda x: x["date_from"]
+                if x["date_from"] is not None
+                else pd.Timestamp.min
             )
 
-            # Track which snapshots have been set
-            already_set = pd.Series(False, index=snapshots)
+            # Create transition points from the dated entries
+            transition_dates = []
+            for entry in unique_entries:
+                if entry["date_from"] is not None:
+                    transition_dates.append(entry["date_from"])
 
-            for entry in property_entries:
-                # Create date mask
-                mask = pd.Series(True, index=snapshots)
+            transition_dates = sorted(
+                set(transition_dates)
+            )  # Remove duplicates and sort
 
-                # Apply date from constraint
-                if entry["from"] is not None:
-                    mask &= snapshots >= entry["from"]
-
-                # Apply date to constraint
-                if entry["to"] is not None:
-                    mask &= snapshots <= entry["to"]
-
-                # For date-specific entries, only set where not already set
-                # (later entries override earlier ones in overlapping periods)
-                if entry["from"] is not None or entry["to"] is not None:
-                    to_set = mask & ~already_set
-                    ts.loc[to_set] = entry["value"]
-                    already_set |= mask
+            # Apply values in sequential periods
+            for i, entry in enumerate(unique_entries):
+                if entry["date_from"] is None:
+                    # Undated entry: applies from start until first transition date (if any)
+                    if transition_dates:
+                        mask = snapshots < transition_dates[0]
+                        ts.loc[mask] = entry["value"]
+                    else:
+                        # No transition dates, applies to all snapshots
+                        ts[:] = entry["value"]
                 else:
-                    # Non-date-specific entries fill remaining unset values
-                    ts.loc[ts == 0.0] = entry["value"]
+                    # Dated entry: find its position in transition dates
+                    current_date = entry["date_from"]
+                    date_idx = transition_dates.index(current_date)
+
+                    if date_idx == len(transition_dates) - 1:
+                        # Last transition date: applies from this date to end
+                        mask = snapshots >= current_date
+                    else:
+                        # Not the last: applies from this date until next transition
+                        next_date = transition_dates[date_idx + 1]
+                        mask = (snapshots >= current_date) & (snapshots < next_date)
+
+                    ts.loc[mask] = entry["value"]
 
             gen_series[gen] = ts
 
@@ -282,8 +311,146 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
     return production_timeseries
 
 
-network = create_aemo_model()
+def plot_production_rates(
+    production_rates, output_dir="plexos_pypsa/figures/production-rates"
+):
+    """
+    Create individual plots for each generator showing production rate vs time.
 
-snapshots = network.snapshots
-generators = network.generators.index.tolist()
+    Parameters
+    ----------
+    production_rates : pd.DataFrame
+        DataFrame with index=snapshots, columns=generator names, values=production rates.
+    output_dir : str
+        Directory to save the plot files (relative to current working directory).
+
+    Returns
+    -------
+    dict
+        Summary of plotting results including counts of plots created and skipped.
+    """
+    print("Creating production rate plots...")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"  Output directory: {output_dir}")
+
+    # Track plotting results
+    plots_created = 0
+    plots_skipped = 0
+    skipped_generators = []
+
+    def clean_filename(name):
+        """Convert generator name to valid filename."""
+        # Replace special characters with underscores
+        cleaned = re.sub(r'[<>:"/\\|?*\s]', "_", name)
+        # Remove multiple consecutive underscores
+        cleaned = re.sub(r"_+", "_", cleaned)
+        # Remove leading/trailing underscores
+        cleaned = cleaned.strip("_")
+        return cleaned
+
+    # Plot each generator
+    for generator in production_rates.columns:
+        try:
+            # Get the time series for this generator
+            ts = production_rates[generator]
+
+            # Skip generators with all-zero production rates
+            if (ts == 0.0).all():
+                plots_skipped += 1
+                skipped_generators.append(generator)
+                continue
+
+            # Create the plot
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            # Plot the time series
+            ax.plot(ts.index, ts.values, linewidth=1.5, color="blue")
+
+            # Formatting
+            ax.set_title(
+                f"Production Rate - {generator}", fontsize=14, fontweight="bold"
+            )
+            ax.set_xlabel("Time", fontsize=12)
+            ax.set_ylabel("Production Rate (kg/MWh)", fontsize=12)
+            ax.grid(True, alpha=0.3)
+
+            # Format x-axis dates
+            if len(ts.index) > 1:
+                # Determine appropriate date formatting based on time range
+                time_range = ts.index[-1] - ts.index[0]
+                if time_range.days <= 1:
+                    # For daily or shorter ranges, show hours
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+                    ax.xaxis.set_major_locator(
+                        mdates.HourLocator(interval=max(1, len(ts) // 10))
+                    )
+                elif time_range.days <= 7:
+                    # For weekly ranges, show days
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+                    ax.xaxis.set_major_locator(mdates.DayLocator())
+                else:
+                    # For longer ranges, show months/days
+                    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                    ax.xaxis.set_major_locator(mdates.MonthLocator())
+
+                # Rotate x-axis labels for better readability
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+
+            # Tight layout to prevent label cutoff
+            plt.tight_layout()
+
+            # Save the plot
+            filename = clean_filename(generator) + ".png"
+            filepath = os.path.join(output_dir, filename)
+            plt.savefig(filepath, dpi=300, bbox_inches="tight")
+            plt.close()  # Close the figure to free memory
+
+            plots_created += 1
+
+            # Print progress every 50 plots
+            if plots_created % 50 == 0:
+                print(f"  Created {plots_created} plots so far...")
+
+        except Exception as e:
+            print(f"  Error plotting {generator}: {e}")
+            plots_skipped += 1
+            skipped_generators.append(generator)
+
+    # Summary
+    total_generators = len(production_rates.columns)
+    print("\nPlotting complete:")
+    print(f"  Total generators: {total_generators}")
+    print(f"  Plots created: {plots_created}")
+    print(f"  Plots skipped: {plots_skipped}")
+
+    if skipped_generators:
+        print(f"  Skipped generators (first 10): {skipped_generators[:10]}")
+        if len(skipped_generators) > 10:
+            print(f"  ... and {len(skipped_generators) - 10} more")
+
+    return {
+        "total_generators": total_generators,
+        "plots_created": plots_created,
+        "plots_skipped": plots_skipped,
+        "skipped_generators": skipped_generators,
+    }
+
+
+# Load the PlexosDB from XML file
+db = PlexosDB.from_xml(file_xml)
+
+# Run full AEMO model
+n = create_aemo_model()
+snapshots = n.snapshots
+generators = n.generators.index.tolist()
 production_rates = parse_generator_production_rates(db, snapshots, generators)
+plot_summary = plot_production_rates(
+    production_rates, "plexos_pypsa/figures/production-rates"
+)
+
+print("\nPlot summary:")
+print(f"  Total generators processed: {plot_summary['total_generators']}")
+print(f"  Plots successfully created: {plot_summary['plots_created']}")
+print(f"  Plots skipped (no data): {plot_summary['plots_skipped']}")
