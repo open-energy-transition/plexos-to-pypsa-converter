@@ -14,6 +14,7 @@ file_timeslice = None
 # specify renewables profiles and demand paths
 path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
 path_demand = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/LoadProfile"
+path_hydro_inflows = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/hydro"
 
 # load PlexosDB from XML file
 plexos_db = PlexosDB.from_xml(file_xml)
@@ -32,6 +33,7 @@ setup_summary = setup_network(
     model_name="M01Y2024 PSP23_25MMT",
     timeslice_csv=file_timeslice,
     vre_profiles_path=path_ren,
+    inflow_path=path_hydro_inflows,
 )
 
 print("\nSetup Summary:")
@@ -50,6 +52,9 @@ print(
     f"  Generators reassigned: {setup_summary['generator_summary']['reassigned_count']}"
 )
 print(f"  Links reassigned: {setup_summary['link_summary']['reassigned_count']}")
+print(f"  Total storage units: {len(n.storage_units)}")
+if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+    print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
 
 # run consistency check on network
 n.consistency_check()

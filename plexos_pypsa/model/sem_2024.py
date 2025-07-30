@@ -15,6 +15,7 @@ file_timeslice = None
 # specify renewables profiles and demand paths
 path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
 path_demand = f"{path_root}/SEM/SEM 2024-2032/demand"
+path_hydro_inflows = f"{path_root}/SEM/SEM 2024-2032/hydro"
 
 # load PlexosDB from XML file
 plexos_db = PlexosDB.from_xml(file_xml)
@@ -33,6 +34,7 @@ setup_summary = setup_network(
     model_name="Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
     timeslice_csv=file_timeslice,
     vre_profiles_path=path_ren,
+    inflow_path=path_hydro_inflows,
 )
 
 print("\nSetup Summary:")
@@ -51,6 +53,9 @@ else:
 print(f"  Peak demand: {setup_summary['peak_demand']:.2f} MW")
 print(f"  Total buses: {len(n.buses)}")
 print(f"  Total generators: {len(n.generators)}")
+print(f"  Total storage units: {len(n.storage_units)}")
+if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+    print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
 
 # run consistency check on network
 n.consistency_check()
