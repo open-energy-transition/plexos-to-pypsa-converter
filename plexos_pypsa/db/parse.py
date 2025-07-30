@@ -44,18 +44,91 @@ def find_bus_for_object(db, object_name, object_class):
             return m.get("name")
 
     # Third pass: check child memberships if available (less common)
-    try:
-        child_memberships = db.get_child_memberships(
-            object_name, object_class=object_class
-        )
-        for cm in child_memberships:
-            if cm.get("class") == "Node":
-                return cm.get("name")
-    except Exception as e:
-        print(f"Error finding child memberships for {object_name}: {e}")
+    # try:
+    #     child_memberships = db.get_child_memberships(
+    #         object_name, object_class=object_class
+    #     )
+    #     for cm in child_memberships:
+    #         if cm.get("class") == "Node":
+    #             return cm.get("name")
+    # except Exception as e:
+    #     print(f"Error finding child memberships for {object_name}: {e}")
 
     print(f"No associated bus found for {object_name}")
     return None
+
+
+def find_bus_for_storage_via_generators(db, storage_name):
+    """
+    Find bus for storage unit by checking connected generators.
+    
+    PLEXOS storage units are often connected to generators as "Head Storage" or "Tail Storage"
+    rather than directly to nodes. This function finds the bus by looking up connected generators.
+    
+    Parameters
+    ----------
+    db : PlexosDB
+        PlexosDB instance
+    storage_name : str
+        Name of the storage unit
+        
+    Returns
+    -------
+    tuple
+        (bus_name, primary_generator_name) or (None, None) if not found
+    """
+    # Query database directly for generator-storage relationships
+    # Based on earlier analysis: generators are parents, storage are children
+    query = """
+        SELECT 
+            po.name as parent_object_name,
+            pc.name as parent_class_name,
+            co.name as child_object_name, 
+            cc.name as child_class_name,
+            col.name as collection_name
+        FROM t_membership m
+        JOIN t_object po ON m.parent_object_id = po.object_id
+        JOIN t_class pc ON po.class_id = pc.class_id
+        JOIN t_object co ON m.child_object_id = co.object_id
+        JOIN t_class cc ON co.class_id = cc.class_id
+        JOIN t_collection col ON m.collection_id = col.collection_id
+        WHERE (pc.name = 'Generator' AND co.name = ? AND cc.name = 'Storage' AND col.name LIKE '%Storage%')
+    """
+    
+    try:
+        # Look for generators that have this storage unit as Head/Tail Storage
+        rows = db.query(query, [storage_name])
+        connected_generators = []
+        for row in rows:
+            gen_name = row[0]  # parent_object_name (the generator)
+            collection_name = row[4]  # collection_name
+            connected_generators.append((gen_name, collection_name))
+                
+    except Exception as e:
+        print(f"Error querying generator-storage relationships for {storage_name}: {e}")
+        return None, None
+    
+    if not connected_generators:
+        print(f"No connected generators found for storage {storage_name}")
+        return None, None
+    
+    print(f"Storage {storage_name} connected to generators: {[gen for gen, _ in connected_generators]}")
+    
+    # Find bus for connected generators (try in order)
+    for gen_name, collection_name in connected_generators:
+        try:
+            gen_bus = find_bus_for_object(db, gen_name, ClassEnum.Generator)
+            if gen_bus:
+                print(f"Storage {storage_name}: found bus '{gen_bus}' via generator '{gen_name}' ({collection_name})")
+                return gen_bus, gen_name
+        except Exception as e:
+            print(f"Error finding bus for generator {gen_name}: {e}")
+            continue
+    
+    # No successful bus connection found
+    generator_names = [gen for gen, _ in connected_generators]
+    print(f"Could not find bus for storage {storage_name} via any of its generators: {generator_names}")
+    return None, None
 
 
 def get_emission_rates(db, generator_name):

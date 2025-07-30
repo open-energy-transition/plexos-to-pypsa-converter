@@ -7,7 +7,7 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import find_bus_for_object
+from plexos_pypsa.db.parse import find_bus_for_object, find_bus_for_storage_via_generators
 from plexos_pypsa.network.costs import set_capital_costs_generic, set_battery_marginal_costs
 
 logger = logging.getLogger(__name__)
@@ -92,13 +92,30 @@ def get_end_effects_method(props: list) -> str:
     """Extract End Effects Method from storage properties."""
     for p in props:
         if p.get("property") == "End Effects Method":
-            value = p.get("value", "").lower()
-            if "free" in value:
-                return "free"
-            elif "recycle" in value:
-                return "recycle"
-            elif "automatic" in value or "auto" in value:
-                return "automatic"
+            value = p.get("value")
+            
+            # Handle numeric values (PLEXOS enum)
+            if isinstance(value, (int, float)):
+                value = int(value)
+                if value == 0:
+                    return "free"
+                elif value == 1:
+                    return "recycle"
+                elif value == 2:
+                    return "automatic"
+                else:
+                    return "automatic"  # Default for unknown numeric values
+            
+            # Handle string values  
+            elif isinstance(value, str):
+                value_lower = value.lower()
+                if "free" in value_lower:
+                    return "free"
+                elif "recycle" in value_lower:
+                    return "recycle"
+                elif "automatic" in value_lower or "auto" in value_lower:
+                    return "automatic"
+                    
     return "automatic"  # Default
 
 
@@ -304,10 +321,18 @@ def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -
         model_type = detect_storage_model_type(props)
         logger.info(f"Detected model type '{model_type}' for storage {storage_name}")
         
-        # Find connected bus
+        # Find connected bus - try direct connection first, then via generators
         bus = find_bus_for_object(db, storage_name, ClassEnum.Storage)
+        connection_method = "direct"
+        primary_generator = None
+        
         if bus is None:
-            logger.warning(f"No connected bus found for storage {storage_name}")
+            # Try finding bus via connected generators (common for hydro storage)
+            bus, primary_generator = find_bus_for_storage_via_generators(db, storage_name)
+            connection_method = "via_generator"
+        
+        if bus is None:
+            logger.warning(f"No connected bus found for storage {storage_name} (tried direct and generator connections)")
             return False
         
         # Extract basic properties
@@ -365,7 +390,14 @@ def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -
             # This would require using Store + Link for more complex constraints
             logger.info(f"Storage {storage_name} has minimum state of charge {state_of_charge_min:.2%}, but StorageUnit doesn't support this constraint directly")
         
-        logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, method={max_method}")
+        # Enhanced logging with connection information
+        if connection_method == "via_generator":
+            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, method={max_method}")
+            logger.info(f"  Connection: via generator '{primary_generator}' to bus '{bus}'")
+        else:
+            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, method={max_method}")
+            logger.info(f"  Connection: direct to bus '{bus}'")
+        
         return True
         
     except Exception as e:
@@ -394,14 +426,27 @@ def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_
                         pass
             return None
         
-        # Find connected bus (should be same for both or use head)
-        head_bus = find_bus_for_object(db, head_name, ClassEnum.Storage)  
+        # Find connected bus (try direct first, then via generators)
+        head_bus = find_bus_for_object(db, head_name, ClassEnum.Storage)
         tail_bus = find_bus_for_object(db, tail_name, ClassEnum.Storage)
+        primary_generator = None
+        connection_method = "direct"
         
         # Use head bus as primary, or tail if head not found
         bus = head_bus or tail_bus
+        
         if bus is None:
-            logger.warning(f"No connected bus found for pumped hydro pair {head_name}/{tail_name}")
+            # Try finding bus via connected generators for head storage
+            bus, primary_generator = find_bus_for_storage_via_generators(db, head_name)
+            connection_method = "via_generator"
+            
+            if bus is None:
+                # Try finding bus via connected generators for tail storage
+                bus, primary_generator = find_bus_for_storage_via_generators(db, tail_name)
+                connection_method = "via_generator"
+        
+        if bus is None:
+            logger.warning(f"No connected bus found for pumped hydro pair {head_name}/{tail_name} (tried direct and generator connections)")
             return False
         
         # Get volumes for both reservoirs
@@ -453,6 +498,10 @@ def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_
         
         logger.info(f"Added pumped hydro system {system_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, efficiency={efficiency:.1%}")
         logger.info(f"  Combined from HEAD: {head_name} ({head_max:.1f}) + TAIL: {tail_name} ({tail_max:.1f})")
+        if connection_method == "via_generator":
+            logger.info(f"  Connection: via generator '{primary_generator}' to bus '{bus}'")
+        else:
+            logger.info(f"  Connection: direct to bus '{bus}'")
         
         return True
         
