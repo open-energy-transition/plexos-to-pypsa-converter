@@ -24,11 +24,13 @@ def create_aemo_model():
     # specify renewables profiles and demand paths
     path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
     path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
+    path_hydro_inflows = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/hydro"
 
     print("Creating AEMO PyPSA Model...")
     print(f"XML file: {file_xml}")
     print(f"Demand path: {path_demand}")
     print(f"VRE profiles path: {path_ren}")
+    print(f"Hydro inflows path: {path_hydro_inflows}")
 
     # load PlexosDB from XML file
     print("\nLoading Plexos database...")
@@ -47,6 +49,7 @@ def create_aemo_model():
         demand_source=path_demand,
         timeslice_csv=file_timeslice,
         vre_profiles_path=path_ren,
+        inflow_path=path_hydro_inflows,
     )
 
     print("\nNetwork Setup Complete:")
@@ -67,7 +70,9 @@ def create_aemo_model():
     print(f"  Total buses: {len(n.buses)}")
     print(f"  Total generators: {len(n.generators)}")
     print(f"  Total links: {len(n.links)}")
-    print(f"  Total batteries: {len(n.storage_units)}")
+    print(f"  Total storage units: {len(n.storage_units)}")
+    if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+        print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
 
     # # run consistency check on network

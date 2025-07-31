@@ -1402,6 +1402,7 @@ def setup_network(
     timeslice_csv=None,
     vre_profiles_path=None,
     model_name=None,
+    inflow_path=None,
 ):
     """
     Unified network setup function that automatically detects the appropriate mode.
@@ -1436,6 +1437,9 @@ def setup_network(
     model_name : str, optional
         Name of the specific model to use when multiple models exist in the XML file.
         If None and multiple models exist, an error will be raised.
+    inflow_path : str, optional
+        Path to the folder containing hydro inflow data files for storage units.
+        If provided, natural inflows will be processed and added to hydro storage.
 
     Returns
     -------
@@ -1506,7 +1510,7 @@ def setup_network(
     # Import required modules (avoid circular imports)
     from plexos_pypsa.network.generators import port_generators, reassign_generators_to_node
     from plexos_pypsa.network.links import port_links, reassign_links_to_node
-    from plexos_pypsa.network.storage import port_batteries
+    from plexos_pypsa.network.storage import add_storage, add_hydro_inflows
 
     # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
@@ -1523,17 +1527,29 @@ def setup_network(
         model_name=model_name,
     )
 
-    # Step 2: Add batteries
+    # Step 2: Add storage (batteries, hydro, pumped hydro)
     print("\n" + "=" * 60)
-    print("STEP 2: Adding batteries")
+    print("STEP 2: Adding storage units")
     print("=" * 60)
-    port_batteries(network, db, timeslice_csv=timeslice_csv)
+    add_storage(network, db, timeslice_csv)
     
-    # For aggregation mode, reassign all batteries to the aggregate node
+    # For aggregation mode, reassign all storage units to the aggregate node
     if mode == "aggregation":
-        print(f"Reassigning all batteries to aggregate node: {aggregate_node_name}")
-        for battery_name in network.storage_units.index:
-            network.storage_units.loc[battery_name, "bus"] = aggregate_node_name
+        print(f"Reassigning all storage units to aggregate node: {aggregate_node_name}")
+        for storage_name in network.storage_units.index:
+            network.storage_units.loc[storage_name, "bus"] = aggregate_node_name
+
+    # Step 2b: Add hydro inflows if path provided
+    if inflow_path and os.path.exists(inflow_path):
+        print("\n" + "=" * 60)
+        print("STEP 2b: Adding hydro inflows")
+        print("=" * 60)
+        add_hydro_inflows(network, db, inflow_path)
+    elif inflow_path:
+        print(f"\nWarning: Inflow path specified but not found: {inflow_path}")
+        print("Skipping hydro inflow processing")
+    else:
+        print("\nNo inflow path specified - storage units will not have natural inflows")
 
     # Step 3: Add generators
     print("\n" + "=" * 60)
