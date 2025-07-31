@@ -44,7 +44,7 @@ def extract_file_paths_from_property(prop: dict) -> List[str]:
     if not texts:
         return file_paths
     
-    # Pattern used in existing storage.py: split on "Data File."
+    # Pattern 1: Storage/Generator style with "Data File." prefix
     if "Data File." in texts:
         try:
             # Extract path after "Data File."
@@ -54,6 +54,17 @@ def extract_file_paths_from_property(prop: dict) -> List[str]:
             # Remove any trailing characters or additional formatting  
             path = path.split('\n')[0].split('\t')[0].split(',')[0].strip()
             if path:
+                file_paths.append(path)
+        except (IndexError, AttributeError):
+            pass
+    
+    # Pattern 2: Node "Filename" properties - direct file path in texts field
+    elif prop.get("property") == "Filename" and texts.strip():
+        try:
+            # Direct file path, just clean it up
+            path = texts.strip()
+            path = path.split('\n')[0].split('\t')[0].split(',')[0].strip()
+            if path and ('\\' in path or '/' in path):  # Ensure it looks like a file path
                 file_paths.append(path)
         except (IndexError, AttributeError):
             pass
@@ -110,7 +121,7 @@ def discover_data_files_for_class(db, class_enum: ClassEnum) -> List[DataFileInf
     
     try:
         # Get all objects of this class
-        objects = db.get_objects(class_enum)
+        objects = db.list_objects_by_class(class_enum)
         
         for obj_name in objects:
             try:
@@ -163,21 +174,23 @@ def discover_all_model_data_files(db) -> Dict[str, List[DataFileInfo]]:
     relevant_classes = [
         ClassEnum.Generator,
         ClassEnum.Storage,
-        ClassEnum.Load,
-        ClassEnum.Node,
+        ClassEnum.Node,  # Demand files are found as Node properties, not separate Load class
         ClassEnum.Region,
     ]
     
-    # Also check for DataFile class objects directly
-    try:
-        relevant_classes.append(ClassEnum.DataFile)
-    except AttributeError:
-        # DataFile class might not exist in all PLEXOS versions
-        pass
+    # Note: DataFile class objects don't have proper property structure for file discovery
+    # File references are found through other object classes' properties instead
     
     for class_enum in relevant_classes:
-        class_files = discover_data_files_for_class(db, class_enum)
-        all_files.extend(class_files)
+        try:
+            class_files = discover_data_files_for_class(db, class_enum)
+            all_files.extend(class_files)
+        except AttributeError as e:
+            print(f"Warning: ClassEnum.{class_enum.name} not available in this PLEXOS version: {e}")
+            continue
+        except Exception as e:
+            print(f"Error discovering data files for class {class_enum.name}: {e}")
+            continue
     
     # Group by file type
     files_by_type = {
