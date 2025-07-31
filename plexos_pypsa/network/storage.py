@@ -259,8 +259,44 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
     # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
     logger.info("Processing PLEXOS Storage class objects...")
     
-    storage_units = db.list_objects_by_class(ClassEnum.Storage)
-    logger.info(f"Found {len(storage_units)} PLEXOS storage units")
+    # Get all storage objects with their categories using SQL
+    storage_query = """
+        SELECT 
+            o.name AS storage_name,
+            o.object_id,
+            c.name AS category_name
+        FROM t_object o
+        JOIN t_class cl ON o.class_id = cl.class_id
+        LEFT JOIN t_category c ON o.category_id = c.category_id
+        WHERE cl.name = 'Storage'
+    """
+    
+    storage_results = db.query(storage_query)
+    logger.info(f"Found {len(storage_results)} PLEXOS storage units")
+    
+    # Create mapping of storage names to categories for later use
+    storage_categories = {}
+    unique_storage_carriers = set()
+    
+    if not storage_results:
+        logger.info("No PLEXOS Storage units found in database")
+        storage_units = []
+    else:
+        for storage_name, object_id, category_name in storage_results:
+            carrier = category_name if category_name else "hydro"
+            storage_categories[storage_name] = carrier
+            unique_storage_carriers.add(carrier)
+        
+        logger.info(f"Storage carriers found: {sorted(unique_storage_carriers)}")
+        
+        # Ensure all storage carriers exist in the network
+        for carrier in unique_storage_carriers:
+            if carrier not in network.carriers.index:
+                network.add("Carrier", name=carrier)
+                logger.info(f"Added storage carrier: {carrier}")
+        
+        # Get list of storage unit names for further processing
+        storage_units = [row[0] for row in storage_results]  # Extract storage names
     
     # Detect pumped hydro pairs
     storage_pairs = detect_pumped_hydro_pairs(storage_units, db)
@@ -274,7 +310,9 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
         try:
             if config["type"] == "pumped_hydro_pair":
                 # Handle pumped hydro HEAD/TAIL pair
-                success = port_pumped_hydro_pair(network, db, config["head"], config["tail"])
+                head_carrier = storage_categories.get(config["head"], "pumped_hydro")
+                tail_carrier = storage_categories.get(config["tail"], "pumped_hydro")
+                success = port_pumped_hydro_pair(network, db, config["head"], config["tail"], head_carrier, tail_carrier)
                 if success:
                     added_storage_units += 1
                     logger.info(f"Added pumped hydro pair: {config['head']} + {config['tail']}")
@@ -283,7 +321,8 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
                     
             elif config["type"] == "standalone_storage":
                 # Handle standalone storage unit
-                success = port_standalone_storage(network, db, config_name)
+                storage_carrier = storage_categories.get(config_name, "hydro")
+                success = port_standalone_storage(network, db, config_name, storage_carrier)
                 if success:
                     added_storage_units += 1
                     logger.info(f"Added standalone storage: {config_name}")
@@ -322,11 +361,25 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
     logger.info(f"Total storage units added to network: {total_added} ({added_storage_units} Storage class + {added_battery_units} Battery class)")
 
 
-def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -> bool:
+def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str, carrier: str = "hydro") -> bool:
     """
     Port a standalone PLEXOS storage unit to PyPSA StorageUnit.
     
-    Returns True if successful, False otherwise.
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to add storage to
+    db : PlexosDB
+        The PLEXOS database
+    storage_name : str
+        Name of the storage unit
+    carrier : str, optional
+        Carrier type for the storage unit (from PLEXOS category), defaults to "hydro"
+    
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
     """
     try:
         props = db.get_object_properties(ClassEnum.Storage, storage_name)
@@ -380,9 +433,10 @@ def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -
         end_effects = get_end_effects_method(props)
         cyclic_state_of_charge = (end_effects == "recycle")
         
-        # Determine carrier type
-        carrier = "hydro"  # Default
-        if model_type == "battery":
+        # Use the passed carrier (from PLEXOS category)
+        # Note: carrier parameter already contains the category-based carrier
+        # Only override if model_type suggests it's a battery
+        if model_type == "battery" and carrier == "hydro":
             carrier = "battery"
         
         # Calculate power capacity (assume reasonable power/energy ratio if not specified)
@@ -422,10 +476,10 @@ def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -
         
         # Enhanced logging with connection information
         if connection_method == "via_generator":
-            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, method={max_method}")
+            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, carrier={carrier}")
             logger.info(f"  Connection: via generator '{primary_generator}' to bus '{bus}'")
         else:
-            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, method={max_method}")
+            logger.info(f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, carrier={carrier}")
             logger.info(f"  Connection: direct to bus '{bus}'")
         
         return True
@@ -435,12 +489,31 @@ def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -
         return False
 
 
-def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_name: str) -> bool:
+def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_name: str, head_carrier: str = "pumped_hydro", tail_carrier: str = "pumped_hydro") -> bool:
     """
     Port a PLEXOS pumped hydro HEAD/TAIL pair to PyPSA StorageUnit.
     
     Combines the two reservoirs into a single StorageUnit representing the system.
-    Returns True if successful, False otherwise.
+    
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to add storage to
+    db : PlexosDB
+        The PLEXOS database
+    head_name : str
+        Name of the HEAD storage unit
+    tail_name : str
+        Name of the TAIL storage unit
+    head_carrier : str, optional
+        Carrier for HEAD storage (from PLEXOS category), defaults to "pumped_hydro"
+    tail_carrier : str, optional
+        Carrier for TAIL storage (from PLEXOS category), defaults to "pumped_hydro"
+    
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
     """
     try:
         # Get properties for both head and tail
@@ -510,6 +583,9 @@ def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_
         # Pumped hydro typically has high efficiency (80-90%)
         efficiency = 0.85  # Round-trip efficiency ~85%
         
+        # Determine carrier type: prefer HEAD carrier, fallback to TAIL, then default
+        carrier = head_carrier if head_carrier != "pumped_hydro" else (tail_carrier if tail_carrier != "pumped_hydro" else "pumped_hydro")
+        
         # Create combined name for the pumped hydro system  
         system_name = f"{head_name.replace('HEAD', '').replace('Upper', '').strip('_- ')}_PumpedHydro"
         if not system_name or system_name == "_PumpedHydro":
@@ -518,7 +594,7 @@ def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_
         # Add as single StorageUnit representing the pumped hydro system
         network.add("StorageUnit", system_name,
                    bus=bus,
-                   carrier="pumped_hydro",
+                   carrier=carrier,
                    p_nom=p_nom,
                    max_hours=max_hours,
                    efficiency_store=efficiency,
@@ -526,8 +602,8 @@ def port_pumped_hydro_pair(network: Network, db: PlexosDB, head_name: str, tail_
                    state_of_charge_initial=state_of_charge_initial,
                    cyclic_state_of_charge=True)  # Pumped hydro typically cyclic
         
-        logger.info(f"Added pumped hydro system {system_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, efficiency={efficiency:.1%}")
-        logger.info(f"  Combined from HEAD: {head_name} ({head_max:.1f}) + TAIL: {tail_name} ({tail_max:.1f})")
+        logger.info(f"Added pumped hydro system {system_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, efficiency={efficiency:.1%}, carrier={carrier}")
+        logger.info(f"  Combined from HEAD: {head_name} ({head_max:.1f}, {head_carrier}) + TAIL: {tail_name} ({tail_max:.1f}, {tail_carrier})")
         if connection_method == "via_generator":
             logger.info(f"  Connection: via generator '{primary_generator}' to bus '{bus}'")
         else:
