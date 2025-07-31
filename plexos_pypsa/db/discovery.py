@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
 
 from plexosdb.enums import ClassEnum  # type: ignore
+from plexos_pypsa.utils.paths import normalize_path, resolve_relative_path
 
 
 @dataclass
@@ -257,16 +258,15 @@ def resolve_relative_paths(files_by_type: Dict[str, List[DataFileInfo]],
         missing_files = []
         
         for file_info in file_infos:
-            # Convert backslashes to forward slashes for cross-platform compatibility
-            relative_path = file_info.file_path.replace('\\', os.sep)
-            absolute_path = main_path / relative_path
+            # Use cross-platform path resolution
+            absolute_path = resolve_relative_path(main_directory, file_info.file_path)
             
             # Check if file exists, especially important for demand files
-            if absolute_path.exists():
-                existing_files.append(str(absolute_path))
+            if os.path.exists(absolute_path):
+                existing_files.append(absolute_path)
             else:
                 missing_files.append({
-                    'path': str(absolute_path),
+                    'path': absolute_path,
                     'object': file_info.object_name,
                     'class': file_info.object_class,
                     'property': file_info.property_name
@@ -382,9 +382,12 @@ def discover_model_paths(db, main_directory: str) -> Dict[str, any]:
     if resolved_paths['vre']:
         setup_paths['vre_profiles_path'] = main_directory
     
-    # Hydro inflows path - use main directory to access hydro files
+    # Hydro inflows path - use the directory containing the actual hydro files
     if resolved_paths['hydro']:
-        setup_paths['inflow_path'] = main_directory
+        # Get the parent directory of the first hydro file (they should all be in the same directory)
+        first_hydro_file = Path(resolved_paths['hydro'][0])
+        hydro_dir = str(first_hydro_file.parent)
+        setup_paths['inflow_path'] = hydro_dir
     
     # Timeslice CSV - use first timeslice file (absolute path)
     if resolved_paths['timeslice']:
