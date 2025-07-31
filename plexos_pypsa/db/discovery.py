@@ -72,14 +72,18 @@ def extract_file_paths_from_property(prop: dict) -> List[str]:
     return file_paths
 
 
-def categorize_file_by_path(file_path: str) -> str:
+def categorize_file_by_path(file_path: str, object_class: str = "", property_name: str = "") -> str:
     """
-    Categorize a file by its path pattern.
+    Categorize a file by its path pattern and source object context.
     
     Parameters
     ----------
     file_path : str
         The file path to categorize
+    object_class : str, optional
+        The PLEXOS object class that references this file
+    property_name : str, optional
+        The property name that contains this file reference
         
     Returns
     -------
@@ -88,9 +92,19 @@ def categorize_file_by_path(file_path: str) -> str:
     """
     path_lower = file_path.lower()
     
-    # Check for common path patterns
+    # For demand files, prioritize Node objects and filter out load_subtractor files
     if any(pattern in path_lower for pattern in ['demand', 'load']):
-        return 'demand'
+        # Skip Generator-sourced demand files (typically load_subtractor files that don't exist)
+        if object_class == "Generator":
+            return 'other'  # Treat as 'other' to exclude from demand category
+        # Prioritize Node Filename properties (actual demand files)
+        elif object_class == "Node" and property_name == "Filename":
+            return 'demand'
+        # Other demand-like files
+        elif any(pattern in path_lower for pattern in ['demand']):
+            return 'demand'
+        else:
+            return 'other'
     elif any(pattern in path_lower for pattern in ['solar', 'wind', 'vre']):
         return 'vre'  
     elif any(pattern in path_lower for pattern in ['hydro', 'inflow']):
@@ -133,7 +147,11 @@ def discover_data_files_for_class(db, class_enum: ClassEnum) -> List[DataFileInf
                     file_paths = extract_file_paths_from_property(prop)
                     
                     for file_path in file_paths:
-                        file_type = categorize_file_by_path(file_path)
+                        file_type = categorize_file_by_path(
+                            file_path, 
+                            object_class=class_enum.name,
+                            property_name=prop.get("property", "")
+                        )
                         
                         data_file_info = DataFileInfo(
                             object_name=obj_name,
@@ -210,7 +228,7 @@ def discover_all_model_data_files(db) -> Dict[str, List[DataFileInfo]]:
 def resolve_relative_paths(files_by_type: Dict[str, List[DataFileInfo]], 
                           main_directory: str) -> Dict[str, List[str]]:
     """
-    Resolve relative file paths against a main directory.
+    Resolve relative file paths against a main directory and validate file existence.
     
     Parameters
     ----------
@@ -222,7 +240,7 @@ def resolve_relative_paths(files_by_type: Dict[str, List[DataFileInfo]],
     Returns
     -------
     Dict[str, List[str]]
-        Dictionary mapping file types to lists of absolute paths
+        Dictionary mapping file types to lists of absolute paths (existing files only)
     """
     resolved_paths = {
         'demand': [],
@@ -235,11 +253,35 @@ def resolve_relative_paths(files_by_type: Dict[str, List[DataFileInfo]],
     main_path = Path(main_directory)
     
     for file_type, file_infos in files_by_type.items():
+        existing_files = []
+        missing_files = []
+        
         for file_info in file_infos:
             # Convert backslashes to forward slashes for cross-platform compatibility
             relative_path = file_info.file_path.replace('\\', os.sep)
             absolute_path = main_path / relative_path
-            resolved_paths[file_type].append(str(absolute_path))
+            
+            # Check if file exists, especially important for demand files
+            if absolute_path.exists():
+                existing_files.append(str(absolute_path))
+            else:
+                missing_files.append({
+                    'path': str(absolute_path),
+                    'object': file_info.object_name,
+                    'class': file_info.object_class,
+                    'property': file_info.property_name
+                })
+        
+        resolved_paths[file_type] = existing_files
+        
+        # Report missing files for demand category (most critical)
+        if file_type == 'demand' and missing_files:
+            print(f"Warning: {len(missing_files)} demand files not found on disk:")
+            for missing in missing_files[:5]:  # Show first 5 missing files
+                print(f"  {missing['class']} '{missing['object']}' -> {missing['path']}")
+            if len(missing_files) > 5:
+                print(f"  ... and {len(missing_files) - 5} more")
+            print(f"Found {len(existing_files)} valid demand files")
     
     return resolved_paths
 
@@ -328,23 +370,23 @@ def discover_model_paths(db, main_directory: str) -> Dict[str, any]:
     # Determine appropriate paths for setup_network
     setup_paths = {}
     
-    # Demand path - use directory containing demand files or first demand file's directory
+    # Demand path - use the directory containing the actual demand files
     if resolved_paths['demand']:
-        first_demand_path = Path(resolved_paths['demand'][0])
-        setup_paths['demand_source'] = str(first_demand_path.parent)
-        setup_paths['snapshots_source'] = str(first_demand_path.parent)
+        # Get the parent directory of the first demand file (they should all be in the same directory)
+        first_demand_file = Path(resolved_paths['demand'][0])
+        demand_dir = str(first_demand_file.parent)
+        setup_paths['demand_source'] = demand_dir
+        setup_paths['snapshots_source'] = demand_dir
     
-    # VRE profiles path - use directory containing VRE files
+    # VRE profiles path - use main directory to access both solar and wind subdirectories
     if resolved_paths['vre']:
-        first_vre_path = Path(resolved_paths['vre'][0])
-        setup_paths['vre_profiles_path'] = str(first_vre_path.parent)
+        setup_paths['vre_profiles_path'] = main_directory
     
-    # Hydro inflows path - use directory containing hydro files
+    # Hydro inflows path - use main directory to access hydro files
     if resolved_paths['hydro']:
-        first_hydro_path = Path(resolved_paths['hydro'][0])
-        setup_paths['inflow_path'] = str(first_hydro_path.parent)
+        setup_paths['inflow_path'] = main_directory
     
-    # Timeslice CSV - use first timeslice file
+    # Timeslice CSV - use first timeslice file (absolute path)
     if resolved_paths['timeslice']:
         setup_paths['timeslice_csv'] = resolved_paths['timeslice'][0]
     
