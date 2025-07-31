@@ -238,17 +238,27 @@ def detect_pumped_hydro_pairs(storage_units: list, db: PlexosDB) -> Dict[str, Di
     return pumped_hydro_pairs
 
 
-def add_storage(network: Network, db: PlexosDB) -> None:
+def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
     """
-    Enhanced function to add PLEXOS storage units to PyPSA network.
+    Enhanced function to add PLEXOS storage units and batteries to PyPSA network.
     
     Supports different PLEXOS storage representations:
-    - Energy-based (GWh/MWh)  
-    - Volume-based (CMD/AF)
-    - Level-based (height)
-    - Battery storage
-    - Pumped hydro (HEAD/TAIL pairs)
+    - PLEXOS Storage class: Energy-based (GWh/MWh), Volume-based (CMD/AF), Level-based (height), Pumped hydro (HEAD/TAIL pairs)
+    - PLEXOS Battery class: Battery storage systems with charge/discharge properties
+    
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network to add storage to
+    db : PlexosDB  
+        The PLEXOS database
+    timeslice_csv : str, optional
+        Path to timeslice CSV file for time-dependent properties
     """
+    
+    # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
+    logger.info("Processing PLEXOS Storage class objects...")
+    
     storage_units = db.list_objects_by_class(ClassEnum.Storage)
     logger.info(f"Found {len(storage_units)} PLEXOS storage units")
     
@@ -256,8 +266,8 @@ def add_storage(network: Network, db: PlexosDB) -> None:
     storage_pairs = detect_pumped_hydro_pairs(storage_units, db)
     logger.info(f"Detected storage configuration: {len([p for p in storage_pairs.values() if p['type'] == 'pumped_hydro_pair'])} pumped hydro pairs, {len([p for p in storage_pairs.values() if p['type'] == 'standalone_storage'])} standalone units")
     
-    added_units = 0
-    skipped_units = []
+    added_storage_units = 0
+    skipped_storage_units = []
     
     # Process each storage configuration
     for config_name, config in storage_pairs.items():
@@ -266,30 +276,50 @@ def add_storage(network: Network, db: PlexosDB) -> None:
                 # Handle pumped hydro HEAD/TAIL pair
                 success = port_pumped_hydro_pair(network, db, config["head"], config["tail"])
                 if success:
-                    added_units += 1
+                    added_storage_units += 1
                     logger.info(f"Added pumped hydro pair: {config['head']} + {config['tail']}")
                 else:
-                    skipped_units.extend([config["head"], config["tail"]])
+                    skipped_storage_units.extend([config["head"], config["tail"]])
                     
             elif config["type"] == "standalone_storage":
                 # Handle standalone storage unit
                 success = port_standalone_storage(network, db, config_name)
                 if success:
-                    added_units += 1
+                    added_storage_units += 1
                     logger.info(f"Added standalone storage: {config_name}")
                 else:
-                    skipped_units.append(config_name)
+                    skipped_storage_units.append(config_name)
                     
         except Exception as e:
             logger.error(f"Error processing storage configuration {config_name}: {e}")
             if config["type"] == "pumped_hydro_pair":
-                skipped_units.extend([config["head"], config["tail"]])
+                skipped_storage_units.extend([config["head"], config["tail"]])
             else:
-                skipped_units.append(config_name)
+                skipped_storage_units.append(config_name)
     
-    logger.info(f"Successfully added {added_units} storage configurations to network")
-    if skipped_units:
-        logger.warning(f"Skipped {len(skipped_units)} storage units: {skipped_units[:10]}{'...' if len(skipped_units) > 10 else ''}")
+    logger.info(f"Successfully added {added_storage_units} PLEXOS Storage configurations to network")
+    if skipped_storage_units:
+        logger.warning(f"Skipped {len(skipped_storage_units)} PLEXOS Storage units: {skipped_storage_units[:10]}{'...' if len(skipped_storage_units) > 10 else ''}")
+    
+    
+    # ===== PROCESS PLEXOS BATTERY CLASS OBJECTS =====
+    logger.info("Processing PLEXOS Battery class objects...")
+    
+    # Store initial battery count to track what was added
+    initial_storage_count = len(network.storage_units)
+    
+    # Call the existing port_batteries function
+    port_batteries(network, db, timeslice_csv)
+    
+    # Calculate batteries added
+    final_storage_count = len(network.storage_units)
+    added_battery_units = final_storage_count - initial_storage_count - added_storage_units
+    
+    logger.info(f"Successfully added {added_battery_units} PLEXOS Battery units to network")
+    
+    # ===== SUMMARY =====
+    total_added = added_storage_units + added_battery_units
+    logger.info(f"Total storage units added to network: {total_added} ({added_storage_units} Storage class + {added_battery_units} Battery class)")
 
 
 def port_standalone_storage(network: Network, db: PlexosDB, storage_name: str) -> bool:
@@ -556,16 +586,28 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
             inflow_added = False
             for orig_name in original_names:
                 try:
-                    props = db.get_object_properties(ClassEnum.Storage, orig_name)
-                    inflow_data = process_storage_inflows(props, path, network.snapshots)
+                    # Try Storage class first, then Battery class
+                    props = None
+                    try:
+                        props = db.get_object_properties(ClassEnum.Storage, orig_name)
+                        object_class = "Storage"
+                    except:
+                        try:
+                            props = db.get_object_properties(ClassEnum.Battery, orig_name)
+                            object_class = "Battery"
+                        except:
+                            continue
                     
-                    if inflow_data is not None:
-                        # Add inflows to the PyPSA storage unit
-                        network.storage_units_t.inflow[storage_unit] = inflow_data
-                        logger.info(f"Added inflow data for storage {storage_unit} from {orig_name}")
-                        added_inflows += 1
-                        inflow_added = True
-                        break  # Use first successful inflow data
+                    if props:
+                        inflow_data = process_storage_inflows(props, path, network.snapshots)
+                        
+                        if inflow_data is not None:
+                            # Add inflows to the PyPSA storage unit
+                            network.storage_units_t.inflow[storage_unit] = inflow_data
+                            logger.info(f"Added inflow data for storage {storage_unit} from {orig_name} ({object_class} class)")
+                            added_inflows += 1
+                            inflow_added = True
+                            break  # Use first successful inflow data
                         
                 except Exception as e:
                     logger.warning(f"Error processing inflows for {orig_name}: {e}")
@@ -793,8 +835,16 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
 
             # Find the connected bus using find_bus_for_object
             bus = find_bus_for_object(db, battery_name, ClassEnum.Battery)
+            primary_generator = None
+            connection_method = "direct"
+            
             if bus is None:
-                print(f"    Warning: No connected bus found for battery {battery_name}")
+                # Try finding bus via connected generators (similar to storage units)
+                bus, primary_generator = find_bus_for_storage_via_generators(db, battery_name)
+                connection_method = "via_generator"
+            
+            if bus is None:
+                print(f"    Warning: No connected bus found for battery {battery_name} (tried direct and generator connections)")
                 skipped_batteries.append(f"{battery_name} (no bus)")
                 continue
 
@@ -875,9 +925,12 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
             network.add("StorageUnit", battery_name, **storage_unit_data)
             added_count += 1
 
-            print(
-                f"    Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}, carrier={carrier}"
-            )
+            # Enhanced logging with connection information
+            if connection_method == "via_generator":
+                print(f"    Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}, carrier={carrier}")
+                print(f"      Connection: via generator '{primary_generator}' to bus '{bus}'")
+            else:
+                print(f"    Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, bus={bus}, carrier={carrier}")
 
         except Exception as e:
             print(f"    Error processing battery {battery_name}: {e}")

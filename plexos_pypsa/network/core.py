@@ -1531,7 +1531,7 @@ def setup_network(
     print("\n" + "=" * 60)
     print("STEP 2: Adding storage units")
     print("=" * 60)
-    add_storage(network, db)
+    add_storage(network, db, timeslice_csv)
     
     # For aggregation mode, reassign all storage units to the aggregate node
     if mode == "aggregation":
