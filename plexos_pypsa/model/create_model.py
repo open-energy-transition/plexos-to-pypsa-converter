@@ -5,21 +5,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.model.data_driven import (
-    create_aemo_model_data_driven,
-    create_model_from_xml,
-)
+from plexos_pypsa.model.data_driven import create_aemo_model_data_driven
 from plexos_pypsa.network.core import setup_network
-
-path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
-main_dir = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-xml_file = f"{main_dir}/2024 ISP Progressive Change Model.xml"
-
-create_model_from_xml(
-    xml_file_path=xml_file,
-    main_directory=main_dir,
-    demand_assignment_strategy="per_node",  # AEMO uses traditional per-node assignment
-)
 
 
 def create_aemo_model(use_data_driven: bool = False):
