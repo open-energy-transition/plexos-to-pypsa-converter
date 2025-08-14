@@ -1,3 +1,5 @@
+from typing import Optional
+
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
 from plexos_pypsa.db.models import INPUT_XMLS
@@ -11,7 +13,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-file_xml = INPUT_XMLS["caiso-irp23"]
+file_xml = INPUT_XMLS["aemo-2024-green"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -22,6 +24,89 @@ mod_classes.sort()
 print("\nAvailable classes:")
 for cls in mod_classes:
     print(f"  - {cls}")
+
+
+mod_storage = list_and_print_objects(mod_db, ClassEnum.Storage, "storage")
+print_properties(mod_db, ClassEnum.Storage, "Anthony Pieman", detailed=False)
+print_memberships(
+    mod_db.get_memberships_system("Anthony Pieman", object_class=ClassEnum.Storage)
+)
+print_memberships(
+    mod_db.get_memberships_system("Bendeela Pondage", object_class=ClassEnum.Storage)
+)
+
+
+print_properties(mod_db, ClassEnum.Storage, "Bendeela Pondage", detailed=False)
+
+
+print_properties(mod_db, ClassEnum.Storage, "EASTWOOD_1_H", detailed=False)
+print_memberships(
+    mod_db.get_memberships_system("EASTWOOD_1_H", object_class=ClassEnum.Storage)
+)
+print_properties(mod_db, ClassEnum.Generator, "EASTWOOD_1", detailed=False)
+print_memberships(
+    mod_db.get_memberships_system("EASTWOOD_1", object_class=ClassEnum.Generator)
+)
+
+
+print_properties(mod_db, ClassEnum.Generator, "EASTWOOD_1_H", detailed=False)
+print_properties(mod_db, ClassEnum.Node, "NQ", detailed=True)
+
+print_properties(mod_db, ClassEnum.Generator, "ADPPV1", detailed=True)
+print_properties(mod_db, ClassEnum.Storage, "Bendeela Pondage", detailed=False)
+print_properties(mod_db, ClassEnum.DataFile, "Anthony Pieman", detailed=False)
+mod_db.get_object_properties(ClassEnum.DataFile, "Anthony Pieman")
+
+print_properties(mod_db, ClassEnum.Generator, "BASTYAN", detailed=False)
+
+props = mod_db.get_object_properties(ClassEnum.Storage, "Anthony Pieman")
+
+
+def get_prop_value(name: str) -> Optional[str]:
+    for p in props:
+        if p.get("property") == name:
+            return p.get("value")
+    return None
+
+
+model_value = get_prop_value("Model")
+units = get_prop_value("unit")
+max_volume = get_prop_value("Max Volume")
+if max_volume:
+    try:
+        max_val = float(max_volume)
+        if max_val < 10000:  # Likely energy in GWh
+            return "energy"
+        else:  # Likely volume in CMD/AF
+            return "volume"
+    except (ValueError, TypeError):
+        pass
+
+
+def find_node_from_memberships(memberships):
+    """
+    Given a list of membership dicts, return the child_object_name of the first Node found.
+    """
+    for m in memberships:
+        # Check if the child is a Node
+        if m.get("child_class_name") == "Node":
+            return m.get("child_object_name")
+        # Or if the parent is a Node (less common, but possible)
+        if m.get("parent_class_name") == "Node":
+            return m.get("parent_object_name")
+    return None
+
+
+# First pass: direct relationship to Node
+node_name = find_node_from_memberships(memberships)
+if node_name:
+    return node_name
+
+# Second pass: indirect match via collection name (common for Storage)
+for m in memberships:
+    if "node" in m.get("collection_name", "").lower():
+        return m.get("name")
+
 
 # going through classes
 # mod_db.list_objects_by_class(ClassEnum.System)
@@ -36,7 +121,9 @@ for cls in mod_classes:
 # mod_db.list_objects_by_class(ClassEnum.Scenario)
 # mod_db.list_objects_by_class(ClassEnum.Load)
 
-mod_db.list_objects_by_class(ClassEnum.STSchedule)
+mod_db.list_objects_by_class(ClassEnum.DataFile)
+mod_db.list_objects_by_class(ClassEnum.Text)
+
 mod_db.list_objects_by_class(ClassEnum.MTSchedule)
 mod_db.list_objects_by_class(ClassEnum.Horizon)
 mod_db.list_objects_by_class(ClassEnum.Scenario)
@@ -75,7 +162,6 @@ print_properties(mod_db, ClassEnum.Generator, "YSWF1", detailed=False)
 print_properties(mod_db, ClassEnum.Fuel, "New OCGT NSW", detailed=False)
 print_properties(mod_db, ClassEnum.Fuel, "New OCGT NSW", detailed=True)
 
-print_properties(mod_db, ClassEnum.Storage, "Kidston Lower", detailed=False)
 print_properties(mod_db, ClassEnum.Line, "SESA-CSA", detailed=False)
 save_properties(
     mod_db,
@@ -84,7 +170,6 @@ save_properties(
     "plexos_pypsa/data/scratch/properties_line_CNSW-NNSW.csv",
 )
 
-mod_db.get_object_properties(ClassEnum.Storage, "Anthony Pieman")
 
 print_properties(mod_db, ClassEnum.Constraint, "Basslink Daily Energy Limit")
 print_properties(mod_db, ClassEnum.Storage, "Anthony Pieman")
