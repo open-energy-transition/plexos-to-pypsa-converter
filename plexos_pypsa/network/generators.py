@@ -487,19 +487,24 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         props = db.get_object_properties(ClassEnum.Generator, gen)
 
         # Check if the generator has a solar or wind profile
+        from plexos_pypsa.utils.paths import contains_path_pattern, safe_join, extract_filename
+        
         filename = next(
             (
                 p["texts"]
                 for p in props
-                if "Traces\\solar\\" in p["texts"] or "Traces\\wind\\" in p["texts"]
+                if contains_path_pattern(p["texts"], "Traces/solar/") or 
+                   contains_path_pattern(p["texts"], "Traces/wind/")
             ),
             None,
         )
 
         if filename:
             # print(f"Found profile for generator {gen}: {filename}")
-            profile_type = "solar" if "Traces\\solar\\" in filename else "wind"
-            file_path = os.path.join(path, filename.replace("\\", os.sep))
+            profile_type = "solar" if contains_path_pattern(filename, "Traces/solar/") else "wind"
+            # Extract just the filename to avoid path concatenation issues
+            clean_filename = extract_filename(filename.strip())
+            file_path = safe_join(path, "Traces", profile_type, clean_filename)
 
             # Set carrier to "Solar" or "Wind"
             carrier_value = "Solar" if profile_type == "solar" else "Wind"

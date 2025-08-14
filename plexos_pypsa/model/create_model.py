@@ -5,28 +5,53 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
+from plexos_pypsa.model.data_driven import create_aemo_model_data_driven
 from plexos_pypsa.network.core import setup_network
 
 
-def create_aemo_model():
+def create_aemo_model(use_data_driven: bool = False):
     """
+    Create AEMO PyPSA model using traditional or data-driven approach.
+
+    Parameters
+    ----------
+    use_data_driven : bool, default False
+        If True, uses automatic path discovery from database.
+        If False, uses hardcoded paths (legacy behavior).
+
     Examples
     --------
+    Traditional approach:
     >>> network = create_aemo_model()
+
+    Data-driven approach:
+    >>> network = create_aemo_model(use_data_driven=True)
+
     >>> print(f"Network has {len(network.buses)} buses and {len(network.loads)} loads")
     >>> network.optimize(solver_name="highs")
     """
-    # list XML file
+    # Define XML file path
     path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
     file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+
+    if use_data_driven:
+        print("Creating AEMO PyPSA Model using data-driven approach...")
+        return create_aemo_model_data_driven(
+            xml_file_path=file_xml,
+            main_directory=f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change",
+        )
+
+    # Legacy approach with hardcoded paths
     file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
 
     # specify renewables profiles and demand paths
     path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
     path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
-    path_hydro_inflows = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/hydro"
+    path_hydro_inflows = (
+        f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/hydro"
+    )
 
-    print("Creating AEMO PyPSA Model...")
+    print("Creating AEMO PyPSA Model using traditional approach...")
     print(f"XML file: {file_xml}")
     print(f"Demand path: {path_demand}")
     print(f"VRE profiles path: {path_ren}")
@@ -71,7 +96,10 @@ def create_aemo_model():
     print(f"  Total generators: {len(n.generators)}")
     print(f"  Total links: {len(n.links)}")
     print(f"  Total storage units: {len(n.storage_units)}")
-    if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+    if (
+        hasattr(n.storage_units_t, "inflow")
+        and len(n.storage_units_t.inflow.columns) > 0
+    ):
         print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
 
