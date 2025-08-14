@@ -5,7 +5,7 @@ from coad.export_plexos_model import get_all_objects, write_object_report
 
 from plexos_pypsa.db.models import INPUT_XMLS
 
-sel_model = "sem-2024-2032"
+sel_model = "plexos-world-spatial"
 file_xml = INPUT_XMLS[sel_model]
 save_folder = "plexos_pypsa/data/models/coad/" + sel_model
 
