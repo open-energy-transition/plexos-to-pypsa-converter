@@ -5,19 +5,20 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.network.core import setup_network
 from plexos_pypsa.model.data_driven import create_caiso_model_data_driven
+from plexos_pypsa.network.core import setup_network
+
 
 def create_caiso_model(use_data_driven: bool = False):
     """
     Create CAISO PyPSA model using traditional or data-driven approach.
-    
+
     Parameters
     ----------
     use_data_driven : bool, default False
         If True, uses automatic path discovery from database.
         If False, uses hardcoded paths (legacy behavior).
-        
+
     Returns
     -------
     pypsa.Network
@@ -26,14 +27,14 @@ def create_caiso_model(use_data_driven: bool = False):
     # Define XML file path
     path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
     file_xml = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
-    
+
     if use_data_driven:
         print("Creating CAISO PyPSA Model using data-driven approach...")
         return create_caiso_model_data_driven(
             xml_file_path=file_xml,
-            main_directory=f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517"
+            main_directory=f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517",
         )
-    
+
     # Legacy approach with hardcoded paths
     file_timeslice = None
     # specify renewables profiles and demand paths
@@ -68,7 +69,7 @@ def create_caiso_model(use_data_driven: bool = False):
         vre_profiles_path=path_ren,
         inflow_path=path_hydro_inflows,
     )
-    
+
     return n, setup_summary
 
 
@@ -92,7 +93,7 @@ print(
 )
 print(f"  Links reassigned: {setup_summary['link_summary']['reassigned_count']}")
 print(f"  Total storage units: {len(n.storage_units)}")
-if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+if hasattr(n.storage_units_t, "inflow") and len(n.storage_units_t.inflow.columns) > 0:
     print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
 
 # run consistency check on network
