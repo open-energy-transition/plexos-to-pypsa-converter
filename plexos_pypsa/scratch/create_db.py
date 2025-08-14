@@ -3,7 +3,7 @@ from plexos_pypsa.db.models import INPUT_XMLS
 from plexosdb.enums import ClassEnum  # type: ignore
 from plexos_pypsa.db.plexosdb import PlexosDB  # type: ignore
 
-file_xml = INPUT_XMLS["plexos-world-2015"]
+file_xml = INPUT_XMLS["caiso-irp23"]
 
 # this automatically creates a sqlite database from the xml file in the same directory
 coad = COAD(file_xml)
