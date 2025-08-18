@@ -443,8 +443,7 @@ def setup_flow_network_db(network: Network, db: PlexosDB) -> Dict[str, Any]:
             if 'node' in flow_class.lower():
                 flow_objects = get_objects_by_class_name(db, flow_class)
                 
-                for flow_obj in flow_objects:
-                    node_name = flow_obj['name']
+                for node_name in flow_objects:
                     
                     # Determine sector from node name
                     if node_name.startswith('Elec_'):
@@ -486,22 +485,26 @@ def setup_flow_network_db(network: Network, db: PlexosDB) -> Dict[str, Any]:
             if 'path' in flow_class.lower():
                 path_objects = get_objects_by_class_name(db, flow_class)
                 
-                for path_obj in path_objects:
-                    path_name = path_obj['name']
-                    path_id = path_obj['object_id']
+                for path_name in path_objects:
                     
                     # Get connected flow nodes
-                    memberships = get_object_memberships(db, path_id)
-                    flow_nodes = [m['name'] for m in memberships if 'flow' in m['class'].lower() and 'node' in m['class'].lower()]
+                    memberships = get_object_memberships(db, flow_class, path_name)
+                    flow_nodes = [m['name'] for m in memberships if 'flow' in m.get('class', '').lower() and 'node' in m.get('class', '').lower()]
                     
                     if len(flow_nodes) >= 2:
                         bus0, bus1 = flow_nodes[0], flow_nodes[1]
                         
                         if bus0 in network.buses.index and bus1 in network.buses.index:
                             # Get path properties
-                            props = get_object_properties_by_id(db, path_id)
-                            max_flow = props.get('Max Flow', 1000)
-                            efficiency = props.get('Efficiency', 1.0)
+                            props = get_object_properties_by_name(db, flow_class, path_name)
+                            max_flow = 1000  # Default
+                            efficiency = 1.0  # Default
+                            
+                            for prop in props:
+                                if prop.get('property') == 'Max Flow':
+                                    max_flow = prop.get('value', 1000)
+                                elif prop.get('property') == 'Efficiency':
+                                    efficiency = prop.get('value', 1.0)
                             
                             try:
                                 p_nom = float(max_flow) if max_flow else 1000.0
@@ -553,13 +556,14 @@ def add_processes_db(network: Network, db: PlexosDB, multi_sector_classes: Dict[
         for process_class in multi_sector_classes['process']:
             process_objects = get_objects_by_class_name(db, process_class)
             
-            for process_obj in process_objects:
-                process_name = process_obj['name']
-                process_id = process_obj['object_id']
-                
+            for process_name in process_objects:
                 # Get process properties
-                props = get_object_properties_by_id(db, process_id)
-                efficiency = props.get('Efficiency', 70.0)
+                props = get_object_properties_by_name(db, process_class, process_name)
+                efficiency = 70.0  # Default
+                for prop in props:
+                    if prop.get('property') == 'Efficiency':
+                        efficiency = prop.get('value', 70.0)
+                        break
                 
                 try:
                     eff = float(efficiency) / 100.0 if efficiency else 0.7
@@ -638,7 +642,7 @@ def add_flow_demand_db(network: Network, sector: str) -> None:
                 
                 # Create demand profile with daily variation
                 demand_profile = pd.Series(
-                    base_demand * (1 + 0.3 * pd.np.sin(pd.np.arange(len(network.snapshots)) * 2 * pd.np.pi / 24)),
+                    base_demand * (1 + 0.3 * np.sin(np.arange(len(network.snapshots)) * 2 * np.pi / 24)),
                     index=network.snapshots
                 )
                 
