@@ -12,9 +12,72 @@ from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
 from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
 from pypsa import Network
 
 logger = logging.getLogger(__name__)
+
+
+def get_class_enum_from_string(class_name: str) -> Optional[ClassEnum]:
+    """
+    Convert a string class name to the corresponding ClassEnum value.
+    
+    Parameters
+    ----------
+    class_name : str
+        Name of the PLEXOS class as a string
+        
+    Returns
+    -------
+    Optional[ClassEnum]
+        Corresponding ClassEnum value, or None if not found
+    """
+    # Create mapping of string names to ClassEnum values
+    class_mapping = {
+        # Standard classes
+        'Generator': ClassEnum.Generator,
+        'Node': ClassEnum.Node,
+        'Line': ClassEnum.Line,
+        'Storage': ClassEnum.Storage,
+        'Battery': ClassEnum.Battery,
+        'Constraint': ClassEnum.Constraint,
+        'Fuel': ClassEnum.Fuel,
+        'Emission': ClassEnum.Emission,
+        'DataFile': ClassEnum.DataFile,
+        
+        # Gas classes
+        'Gas Field': ClassEnum.Gas_Field,
+        'Gas Plant': ClassEnum.Gas_Plant,
+        'Gas Pipeline': ClassEnum.Gas_Pipeline,
+        'Gas Node': ClassEnum.Gas_Node,
+        'Gas Storage': ClassEnum.Gas_Storage,
+        'Gas Demand': ClassEnum.Gas_Demand,
+        'Gas DSM Program': ClassEnum.Gas_DSM_Program,
+        'Gas Basin': ClassEnum.Gas_Basin,
+        'Gas Zone': ClassEnum.Gas_Zone,
+        'Gas Contract': ClassEnum.Gas_Contract,
+        'Gas Transport': ClassEnum.Gas_Transport,
+        'Gas Path': ClassEnum.Gas_Path,
+        'Gas Capacity Release Offer': ClassEnum.Gas_Capacity_Release_Offer,
+        
+        # Flow classes (if they exist in ClassEnum)
+        'Flow Control': getattr(ClassEnum, 'Flow_Control', None),
+        'Flow Network': getattr(ClassEnum, 'Flow_Network', None),
+        'Flow Node': getattr(ClassEnum, 'Flow_Node', None),
+        'Flow Path': getattr(ClassEnum, 'Flow_Path', None),
+        'Flow Storage': getattr(ClassEnum, 'Flow_Storage', None),
+        
+        # Process classes (if they exist)
+        'Process': getattr(ClassEnum, 'Process', None),
+        
+        # Facility classes (if they exist)
+        'Facility': getattr(ClassEnum, 'Facility', None),
+    }
+    
+    # Remove None values (classes that don't exist in ClassEnum)
+    class_mapping = {k: v for k, v in class_mapping.items() if v is not None}
+    
+    return class_mapping.get(class_name)
 
 
 def discover_multi_sector_classes(db: PlexosDB) -> Dict[str, List[str]]:
@@ -111,12 +174,19 @@ def get_object_properties_by_name(db: PlexosDB, class_name: str, object_name: st
     properties = []
     
     try:
-        # Use the built-in PlexosDB method
-        properties = db.get_object_properties(class_name, object_name)
-        logger.debug(f"Found {len(properties)} properties for object {object_name}")
+        # Convert string class name to ClassEnum
+        class_enum = get_class_enum_from_string(class_name)
+        
+        if class_enum is None:
+            logger.debug(f"No ClassEnum mapping found for class '{class_name}', skipping properties for {object_name}")
+            return properties
+        
+        # Use the built-in PlexosDB method with ClassEnum
+        properties = db.get_object_properties(class_enum, object_name)
+        logger.debug(f"Found {len(properties)} properties for object {object_name} (class: {class_name})")
         
     except Exception as e:
-        logger.warning(f"Failed to get properties for object {object_name}: {e}")
+        logger.debug(f"Failed to get properties for object {object_name} (class: {class_name}): {e}")
     
     return properties
 
