@@ -5,7 +5,7 @@ import pandas as pd
 
 from plexos_pypsa.model.data_driven import create_model_from_xml
 
-path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
+path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
 main_dir = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
 xml_file = f"{main_dir}/2024 ISP Progressive Change Model.xml"
 
@@ -18,7 +18,7 @@ network = create_model_from_xml(
 network.consistency_check()
 
 # select a subset of snapshots for optimization
-x = 50  # number of snapshots to select per year
+x = 500  # number of snapshots to select per year
 snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
 for snap in network.snapshots:
     year = pd.Timestamp(snap).year
@@ -27,7 +27,42 @@ for snap in network.snapshots:
 
 subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
+# Configuration
+use_subset = True  # Set to True to optimize on subset, False for full network
+
 # solve the network
-print(f"\nOptimizing network with {len(subset)} snapshots...")
-network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+if use_subset:
+    print(f"\nOptimizing network with {len(subset)} snapshots...")
+    network.optimize(
+        solver_name="gurobi",
+        snapshots=subset,
+        solver_options={
+            "Method": 2,  # Use barrier method (more memory efficient)
+            "Crossover": 0,  # Skip crossover to save memory
+            "OutputFlag": 1,  # Enable output
+            "Threads": 4,  # Limit threads to reduce memory usage
+            "BarHomogeneous": 1,  # Use homogeneous barrier (can be more stable)
+            "NumericFocus": 1,  # Focus on numerical stability
+        },
+    )  # type: ignore
+else:
+    print(f"\nOptimizing network with {len(network.snapshots)} snapshots...")
+    network.optimize(
+        solver_name="gurobi",
+        solver_options={
+            "Method": 2,  # Use barrier method (more memory efficient)
+            "Crossover": 0,  # Skip crossover to save memory
+            "OutputFlag": 1,  # Enable output
+            "Threads": 4,  # Limit threads to reduce memory usage
+            "BarHomogeneous": 1,  # Use homogeneous barrier (can be more stable)
+            "NumericFocus": 1,  # Focus on numerical stability
+        },
+    )  # type: ignore
+
 print("  Optimization complete!")
+
+# Save results
+output_file = "aemo_2024_results.nc"
+print(f"Saving results to {output_file}...")
+network.export_to_netcdf(output_file)
+print("  Results saved!")
