@@ -28,7 +28,7 @@ for snap in network.snapshots:
 subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
 # Configuration
-use_subset = True  # Set to True to optimize on subset, False for full network
+use_subset = False  # Set to True to optimize on subset, False for full network
 
 # solve the network
 if use_subset:
@@ -37,12 +37,14 @@ if use_subset:
         solver_name="gurobi",
         snapshots=subset,
         solver_options={
-            "Method": 2,  # Use barrier method (more memory efficient)
-            "Crossover": 0,  # Skip crossover to save memory
-            "OutputFlag": 1,  # Enable output
-            "Threads": 4,  # Limit threads to reduce memory usage
-            "BarHomogeneous": 1,  # Use homogeneous barrier (can be more stable)
-            "NumericFocus": 1,  # Focus on numerical stability
+            "Threads": 6,
+            "Method": 2,  # barrier
+            "Crossover": 0,
+            "BarConvTol": 1.0e-5,
+            "Seed": 123,
+            "AggFill": 0,
+            "PreDual": 0,
+            "GURO_PAR_BARDENSETHRESH": 200,
         },
     )  # type: ignore
 else:
@@ -50,12 +52,14 @@ else:
     network.optimize(
         solver_name="gurobi",
         solver_options={
-            "Method": 2,  # Use barrier method (more memory efficient)
-            "Crossover": 0,  # Skip crossover to save memory
-            "OutputFlag": 1,  # Enable output
-            "Threads": 4,  # Limit threads to reduce memory usage
-            "BarHomogeneous": 1,  # Use homogeneous barrier (can be more stable)
-            "NumericFocus": 1,  # Focus on numerical stability
+            "Threads": 6,
+            "Method": 2,  # barrier
+            "Crossover": 0,
+            "BarConvTol": 1.0e-5,
+            "Seed": 123,
+            "AggFill": 0,
+            "PreDual": 0,
+            "GURO_PAR_BARDENSETHRESH": 200,
         },
     )  # type: ignore
 

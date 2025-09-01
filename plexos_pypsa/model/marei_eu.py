@@ -113,10 +113,43 @@ if __name__ == "__main__":
 
     subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
-    # Optimize the network
-    print(f"\nOptimizing network with {len(subset)} snapshots...")
+    # Configuration
+    use_subset = True  # Set to True to optimize on subset, False for full network
+
+    # solve the network
     try:
-        network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+        if use_subset:
+            print(f"\nOptimizing network with {len(subset)} snapshots...")
+            network.optimize(
+                solver_name="gurobi",
+                snapshots=subset,
+                solver_options={
+                    "Threads": 6,
+                    "Method": 2,  # barrier
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            )  # type: ignore
+        else:
+            print(f"\nOptimizing network with {len(network.snapshots)} snapshots...")
+            network.optimize(
+                solver_name="gurobi",
+                solver_options={
+                    "Threads": 6,
+                    "Method": 2,  # barrier
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            )  # type: ignore
+
         print("✓ Optimization complete!")
 
         # Print optimization results summary
@@ -136,6 +169,12 @@ if __name__ == "__main__":
                 .sum()
             )
             print(f"  Gas-to-electric conversion: {total_gas_elec:.2f} MWh")
+
+        # Save results
+        output_file = "marei_eu_results.nc"
+        print(f"\nSaving results to {output_file}...")
+        network.export_to_netcdf(output_file)
+        print("  Results saved!")
 
     except Exception as e:
         print(f"⚠ Optimization failed: {e}")
