@@ -50,15 +50,10 @@ def create_marei_eu_model():
     print("   Using direct database queries to discover gas and electricity components")
     print("   Representing gas sector through Links and Nodes for sector coupling")
 
-    setup_summary = setup_gas_electric_network_db(
-        network=network,
-        db=plexos_db
-    )
+    setup_summary = setup_gas_electric_network_db(network=network, db=plexos_db)
 
     return network, setup_summary
 
-
-network, setup_summary = create_marei_eu_model()
 
 if __name__ == "__main__":
     # Create the multi-sector model
