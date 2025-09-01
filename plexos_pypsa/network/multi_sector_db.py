@@ -451,30 +451,55 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB) -> Dict[str, A
         
         setup_summary['electricity']['loads'] = len([l for l in network.loads.index if 'elec_load' in l])
         
-        # Add basic transmission lines between electricity buses to enable power flow
-        print("   Adding basic transmission lines...")
+        # Add real transmission lines from PLEXOS Line objects
+        print("   Adding real transmission lines from PLEXOS model...")
         lines_added = 0
-        for i in range(len(elec_bus_list) - 1):
-            bus0 = elec_bus_list[i]
-            bus1 = elec_bus_list[i + 1]
-            line_name = f"line_{bus0}_{bus1}"
-            if line_name not in network.lines.index:
-                network.add('Line', line_name, bus0=bus0, bus1=bus1, s_nom=5000, x=0.01)
-                lines_added += 1
         
-        # Add some ring connections for better connectivity
-        if len(elec_bus_list) > 3:
-            for i in range(0, min(len(elec_bus_list), 10), 3):
-                if i + 3 < len(elec_bus_list):
-                    bus0 = elec_bus_list[i]
-                    bus1 = elec_bus_list[i + 3]
-                    line_name = f"ring_{bus0}_{bus1}"
-                    if line_name not in network.lines.index:
-                        network.add('Line', line_name, bus0=bus0, bus1=bus1, s_nom=3000, x=0.02)
-                        lines_added += 1
+        # Get PLEXOS Line objects
+        line_objects = get_objects_by_class_name(db, 'Line')
+        
+        for line_name in line_objects:
+            # Get line properties
+            props = get_object_properties_by_name(db, 'Line', line_name)
+            
+            # Get connected nodes
+            memberships = get_object_memberships(db, 'Line', line_name)
+            
+            node_from = None
+            node_to = None
+            for membership in memberships:
+                if membership.get('collection_name') == 'Node From':
+                    node_from = membership.get('name')
+                elif membership.get('collection_name') == 'Node To':
+                    node_to = membership.get('name')
+            
+            # Only add line if both nodes exist in the network
+            if node_from and node_to and node_from in network.buses.index and node_to in network.buses.index:
+                # Extract capacity from Max Flow property
+                s_nom = 1000  # Default capacity (MW)
+                for prop in props:
+                    if prop.get('property') == 'Max Flow':
+                        try:
+                            s_nom = float(prop.get('value', 1000))
+                        except:
+                            s_nom = 1000
+                        break
+                
+                # Add realistic impedance values for transmission lines
+                # Typical transmission line R/X ratio ≈ 0.1-0.3
+                # Using conservative values for stability
+                line_length_factor = 1.0  # Could be refined based on geography
+                r = 0.01 * line_length_factor  # Resistance
+                x = 0.03 * line_length_factor  # Reactance (higher X/R for transmission)
+                
+                if line_name not in network.lines.index:
+                    network.add('Line', line_name, 
+                              bus0=node_from, bus1=node_to, 
+                              s_nom=abs(s_nom), r=r, x=x)
+                    lines_added += 1
         
         setup_summary['electricity']['lines'] = lines_added
-        print(f"   Added {lines_added} transmission lines")
+        print(f"   Added {lines_added} real transmission lines from PLEXOS model")
         
     except Exception as e:
         logger.error(f"Error setting up gas-electric network: {e}")
