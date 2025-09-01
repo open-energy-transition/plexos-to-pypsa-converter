@@ -16,7 +16,7 @@ from plexos_pypsa.db.models import INPUT_XMLS
 from plexos_pypsa.network.multi_sector_db import setup_flow_network_db
 
 
-def create_plexos_message_model():
+def create_plexos_message_model(testing_mode: bool = False):
     """
     Create PLEXOS-MESSAGE PyPSA model with electricity, hydrogen, and ammonia sectors.
 
@@ -24,6 +24,12 @@ def create_plexos_message_model():
     - Flow Network represented as PyPSA Nodes and Links
     - Process-based conversions as PyPSA Links for sector coupling
     - Multi-sector representation (Electricity, Hydrogen, Ammonia)
+
+    Parameters
+    ----------
+    testing_mode : bool, optional
+        If True, process only limited subsets of components for faster testing.
+        Default False creates complete model.
 
     Returns
     -------
@@ -52,16 +58,20 @@ def create_plexos_message_model():
     print("   Using direct database queries to discover Flow Network components")
     print("   Representing all sectors through PyPSA Links and Nodes")
 
-    setup_summary = setup_flow_network_db(network=network, db=plexos_db)
+    setup_summary = setup_flow_network_db(
+        network=network, db=plexos_db, testing_mode=testing_mode
+    )
 
     return network, setup_summary
 
 
-n, s = create_plexos_message_model()
+# n, s = create_plexos_message_model()  # Disabled to avoid double execution
 
 if __name__ == "__main__":
     # Create the multi-sector model
-    network, setup_summary = create_plexos_message_model()
+    # Set testing_mode=True for faster development, False for complete model
+    testing_mode = False  # Change to True for testing
+    network, setup_summary = create_plexos_message_model(testing_mode=testing_mode)
 
     # Print setup summary
     print("\n" + "=" * 60)
@@ -131,7 +141,7 @@ if __name__ == "__main__":
         # Optimize the network
         print(f"\nOptimizing network with {len(subset)} snapshots...")
         try:
-            network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+            network.optimize(solver_name="gurobi", snapshots=subset)  # type: ignore
             print("✓ Optimization complete!")
 
             # Print optimization results summary
