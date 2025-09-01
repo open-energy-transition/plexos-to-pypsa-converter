@@ -13,7 +13,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-file_xml = INPUT_XMLS["aemo-2024-green"]
+file_xml = INPUT_XMLS["plexos-message"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -120,6 +120,7 @@ for m in memberships:
 # mod_db.list_objects_by_class(ClassEnum.Fuel)
 # mod_db.list_objects_by_class(ClassEnum.Scenario)
 # mod_db.list_objects_by_class(ClassEnum.Load)
+mod_db.list_objects_by_class(ClassEnum.GasNode)
 
 mod_db.list_objects_by_class(ClassEnum.DataFile)
 mod_db.list_objects_by_class(ClassEnum.Text)

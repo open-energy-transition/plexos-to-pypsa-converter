@@ -1403,6 +1403,7 @@ def setup_network(
     vre_profiles_path=None,
     model_name=None,
     inflow_path=None,
+    transmission_as_lines=False,
 ):
     """
     Unified network setup function that automatically detects the appropriate mode.
@@ -1440,6 +1441,9 @@ def setup_network(
     inflow_path : str, optional
         Path to the folder containing hydro inflow data files for storage units.
         If provided, natural inflows will be processed and added to hydro storage.
+    transmission_as_lines : bool, optional
+        If True, convert PLEXOS Line objects to PyPSA Lines with electrical impedance.
+        If False (default), use existing Links behavior for backward compatibility.
 
     Returns
     -------
@@ -1511,6 +1515,10 @@ def setup_network(
     from plexos_pypsa.network.generators import port_generators, reassign_generators_to_node
     from plexos_pypsa.network.links import port_links, reassign_links_to_node
     from plexos_pypsa.network.storage import add_storage, add_hydro_inflows
+    
+    # Conditionally import lines module if needed
+    if transmission_as_lines:
+        from plexos_pypsa.network.lines import port_lines
 
     # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
@@ -1565,17 +1573,28 @@ def setup_network(
         print(f"Reassigning all generators to aggregate node: {aggregate_node_name}")
         generator_summary = reassign_generators_to_node(network, aggregate_node_name)
 
-    # Step 4: Add links/lines
+    # Step 4: Add transmission (lines or links)
     print("\n" + "=" * 60)
-    print("STEP 4: Adding links")
-    print("=" * 60)
-    port_links(network, db)
-    
-    # For aggregation mode, reassign all links to/from the aggregate node
-    link_summary = None
-    if mode == "aggregation":
-        print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
-        link_summary = reassign_links_to_node(network, aggregate_node_name)
+    if transmission_as_lines:
+        print("STEP 4: Adding transmission lines (with electrical impedance)")
+        print("=" * 60)
+        port_lines(network, db, timeslice_csv=timeslice_csv)
+        
+        # Note: Lines don't need reassignment - they maintain physical connections
+        # even in aggregation mode (self-loops on aggregate node are handled in optimization)
+        link_summary = None
+        if mode == "aggregation":
+            print(f"Note: Lines maintain original bus connections for {aggregate_node_name} aggregation")
+    else:
+        print("STEP 4: Adding transmission links (legacy mode)")
+        print("=" * 60)
+        port_links(network, db)
+        
+        # For aggregation mode, reassign all links to/from the aggregate node
+        link_summary = None
+        if mode == "aggregation":
+            print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
+            link_summary = reassign_links_to_node(network, aggregate_node_name)
 
 
     print("\n" + "=" * 60)
@@ -1584,7 +1603,11 @@ def setup_network(
     print(f"Final network summary:")
     print(f"  Buses: {len(network.buses)}")
     print(f"  Generators: {len(network.generators)}")
-    print(f"  Links: {len(network.links)}")
+    if transmission_as_lines:
+        print(f"  Transmission Lines: {len(network.lines)}")
+        print(f"  Links: {len(network.links)}")
+    else:
+        print(f"  Links (incl. transmission): {len(network.links)}")
     print(f"  Batteries: {len(network.storage_units)}")
     print(f"  Loads: {len(network.loads)}")
     print(f"  Snapshots: {len(network.snapshots)}")
