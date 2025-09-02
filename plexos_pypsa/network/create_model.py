@@ -6,7 +6,7 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.network.core import setup_network
-from plexos_pypsa.network.data_driven import create_aemo_model_data_driven
+from plexos_pypsa.network.electricity_sector import create_aemo_model_data_driven
 
 
 def create_aemo_model(use_data_driven: bool = False):

@@ -3,7 +3,7 @@ from typing import DefaultDict
 
 import pandas as pd
 
-from plexos_pypsa.network.data_driven import create_model_from_xml
+from plexos_pypsa.network.electricity_sector import create_model_from_xml
 
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
 main_dir = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
