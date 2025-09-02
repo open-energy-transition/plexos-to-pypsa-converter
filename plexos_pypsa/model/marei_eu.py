@@ -82,7 +82,7 @@ if __name__ == "__main__":
     print(f"  Gas pipelines: {gas_summary['pipelines']}")
     print(f"  Gas storage: {gas_summary['storage']}")
     print(f"  Gas demand: {gas_summary['demand']}")
-    print(f"  Gas fields: {gas_summary['fields']}")
+    # print(f"  Gas fields: {gas_summary['fields']}")
 
     # Sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     print("✓ Network consistency check passed!")
 
     # Select subset of snapshots for optimization
-    x = 50  # number of snapshots to select per year
+    x = 100  # number of snapshots to select per year
     snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
     for snap in network.snapshots:
         year = pd.Timestamp(snap).year

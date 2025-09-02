@@ -139,7 +139,7 @@ def convert_plexos_volume_to_energy(
     """
     if model_type == "energy":
         # Direct energy conversion
-        if units and "gwh" in units.lower():
+        if units and "gwh" in str(units).lower():
             return volume * 1000, "direct_gwh_to_mwh"  # GWh to MWh
         else:
             return volume, "direct_mwh"  # Assume MWh
@@ -149,11 +149,11 @@ def convert_plexos_volume_to_energy(
         # This requires assumptions about water density, head height, turbine efficiency
         # For now, use approximate conversion factors
 
-        if units and "cmd" in units.lower():
+        if units and "cmd" in str(units).lower():
             # CMD (cumec-days) to MWh - approximate conversion
             # 1 CMD ≈ 0.01-0.1 MWh depending on head (using 0.05 as middle estimate)
             return volume * 0.05, "volume_cmd_approx"
-        elif units and ("af" in units.lower() or "acre" in units.lower()):
+        elif units and ("af" in str(units).lower() or "acre" in str(units).lower()):
             # Acre-feet to MWh - approximate conversion
             # 1 AF ≈ 0.001-0.01 MWh depending on head (using 0.005 as estimate)
             return volume * 0.005, "volume_af_approx"

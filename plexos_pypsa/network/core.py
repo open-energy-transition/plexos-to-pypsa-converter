@@ -326,12 +326,180 @@ def add_loads(network: Network, path: str):
         print(f"- Added load time series for {load_name}")
 
 
+def discover_carriers_from_db(db: PlexosDB) -> list:
+    """
+    Automatically discover all carriers needed for PyPSA network by analyzing PLEXOS database.
+    
+    This function examines multiple PLEXOS classes to build a comprehensive list of carriers:
+    - Core carriers (AC, conversion)
+    - All fuels from Fuel class
+    - Renewable carriers derived from generator names
+    - Multi-sector carriers (Gas, conversion types)
+    - Technology-specific carriers from generator analysis
+    
+    Parameters
+    ----------
+    db : PlexosDB
+        PLEXOS database connection
+        
+    Returns
+    -------
+    list
+        Complete list of carrier names needed for the network
+    """
+    carriers = set()
+    
+    # 1. Core carriers (always needed)
+    carriers.add('AC')  # For electrical buses
+    carriers.add('conversion')  # For generators-as-links
+    
+    # 2. PLEXOS Fuels (from database)
+    try:
+        fuels = db.list_objects_by_class(ClassEnum.Fuel)
+        carriers.update(fuels)
+        print(f"  Found {len(fuels)} fuel carriers from database")
+    except Exception as e:
+        logger.warning(f"Could not query fuels from database: {e}")
+    
+    # 3. Renewable carriers (from generator analysis)
+    try:
+        generators = db.list_objects_by_class(ClassEnum.Generator)
+        renewable_carriers = set()
+        
+        for gen_name in generators:
+            gen_lower = gen_name.lower()
+            if 'wind' in gen_lower:
+                if 'offshore' in gen_lower:
+                    renewable_carriers.add('Wind Offshore')
+                elif 'onshore' in gen_lower:
+                    renewable_carriers.add('Wind Onshore')
+                else:
+                    renewable_carriers.add('Wind')
+            elif 'solar' in gen_lower or 'pv' in gen_lower:
+                renewable_carriers.add('Solar')
+                if 'pv' in gen_lower:
+                    renewable_carriers.add('Solar PV')
+            elif 'hydro' in gen_lower:
+                renewable_carriers.add('Hydro')
+        
+        carriers.update(renewable_carriers)
+        print(f"  Found {len(renewable_carriers)} renewable carriers: {sorted(renewable_carriers)}")
+        
+    except Exception as e:
+        logger.warning(f"Could not analyze generators for renewable carriers: {e}")
+    
+    # 4. Multi-sector carriers (gas, conversion types)
+    try:
+        # Always add core multi-sector carriers since they may be used by multi-sector models
+        # Even if we can't detect the specific classes, the conversion carriers are needed
+        carriers.add('Gas')
+        carriers.add('Gas2Electric')  # For gas-to-electric conversion links
+        carriers.add('conversion')     # For generators-as-links conversion
+        print("  Added core multi-sector carriers: Gas, Gas2Electric, conversion")
+        
+        # Try to detect additional multi-sector components with various class name patterns
+        multi_sector_carriers = set()
+        
+        # Check for gas components with various possible class names
+        possible_gas_classes = [
+            'Gas_Node', 'Gas_Pipeline', 'Gas_Storage', 'Gas_Field', 'Gas_Plant', 'Gas_Demand',
+            'GasNode', 'GasPipeline', 'GasStorage', 'GasField', 'GasPlant', 'GasDemand'
+        ]
+        
+        for class_name in possible_gas_classes:
+            try:
+                class_enum = getattr(ClassEnum, class_name, None)
+                if class_enum and db.list_objects_by_class(class_enum):
+                    multi_sector_carriers.update(['Natural Gas', 'Gas Network'])
+                    break
+            except:
+                continue
+        
+        # Check for flow network components
+        possible_flow_classes = [
+            'Flow_Node', 'Flow_Path', 'Flow_Storage', 'FlowNode', 'FlowPath', 'FlowStorage'
+        ]
+        
+        for class_name in possible_flow_classes:
+            try:
+                class_enum = getattr(ClassEnum, class_name, None)
+                if class_enum and db.list_objects_by_class(class_enum):
+                    multi_sector_carriers.update(['Hydrogen', 'Ammonia', 'Electric2Hydrogen', 'Hydrogen2Ammonia'])
+                    break
+            except:
+                continue
+        
+        if multi_sector_carriers:
+            carriers.update(multi_sector_carriers)
+            print(f"  Found additional multi-sector carriers: {sorted(multi_sector_carriers)}")
+            
+    except Exception as e:
+        logger.warning(f"Could not analyze multi-sector components: {e}")
+        # Ensure essential multi-sector carriers are still added even if detection fails
+        carriers.update(['Gas', 'Gas2Electric', 'conversion'])
+    
+    # 5. Technology-specific carriers (from detailed generator analysis)
+    try:
+        generators = db.list_objects_by_class(ClassEnum.Generator)
+        tech_carriers = set()
+        generator_name_carriers = set()
+        
+        for gen_name in generators:
+            gen_lower = gen_name.lower()
+            # Gas technologies
+            if 'ccgt' in gen_lower or 'combined cycle' in gen_lower:
+                tech_carriers.add('Natural Gas CCGT')
+            elif 'ocgt' in gen_lower or 'open cycle' in gen_lower:
+                tech_carriers.add('Natural Gas OCGT')
+            elif 'gas' in gen_lower and 'natural' not in gen_lower:
+                tech_carriers.add('Natural Gas')
+            
+            # Coal technologies  
+            if 'lignite' in gen_lower:
+                tech_carriers.add('Lignite')
+            elif 'hard coal' in gen_lower:
+                tech_carriers.add('Hard Coal')
+            elif 'coal' in gen_lower:
+                tech_carriers.add('Coal')
+            
+            # Biomass technologies
+            if 'biomass' in gen_lower:
+                if 'waste' in gen_lower:
+                    tech_carriers.add('Biomass Waste')
+                else:
+                    tech_carriers.add('Biomass')
+            
+            # Other technologies
+            if 'nuclear' in gen_lower:
+                tech_carriers.add('Nuclear')
+            elif 'oil' in gen_lower:
+                tech_carriers.add('Oil')
+            elif 'solids' in gen_lower:
+                tech_carriers.add('Solids Fired')
+            
+            # Individual generator names (for generators-as-links functionality)
+            # This ensures generator names are available as carriers when needed
+            generator_name_carriers.add(gen_name)
+        
+        carriers.update(tech_carriers)
+        carriers.update(generator_name_carriers)
+        
+        if tech_carriers:
+            print(f"  Found {len(tech_carriers)} technology-specific carriers")
+        print(f"  Found {len(generator_name_carriers)} generator-name carriers (for generators-as-links)")
+            
+    except Exception as e:
+        logger.warning(f"Could not analyze generators for technology carriers: {e}")
+    
+    carriers_list = sorted(list(carriers))
+    print(f"  Total carriers discovered: {len(carriers_list)}")
+    return carriers_list
+
+
 def add_carriers(network: Network, db: PlexosDB):
     """
-    Adds carriers to the PyPSA network.
-    - Always adds 'AC' as a carrier.
-    - Adds all fuels from the PlexosDB as carriers.
-
+    Adds carriers to the PyPSA network using automatic discovery from PLEXOS database.
+    
     Parameters
     ----------
     network : pypsa.Network
@@ -339,23 +507,17 @@ def add_carriers(network: Network, db: PlexosDB):
     db : PlexosDB
         A PlexosDB object containing the database connection.
     """
-    # Add 'AC' carrier
-    if "AC" not in network.carriers.index:
-        network.add("Carrier", name="AC")
-
-    # Add "Solar" and "Wind" carriers
-    if "Solar" not in network.carriers.index:
-        network.add("Carrier", name="Solar")
-    if "Wind" not in network.carriers.index:
-        network.add("Carrier", name="Wind")
-
-    # Add all fuels as carriers
-    fuels = db.list_objects_by_class(ClassEnum.Fuel)
-    for fuel in fuels:
-        if fuel not in network.carriers.index:
-            network.add("Carrier", name=fuel)
-
-    print(f"Added carriers: ['AC', 'Solar', 'Wind'] + {fuels}")
+    # Discover all carriers from database
+    carriers_to_add = discover_carriers_from_db(db)
+    
+    # Add each carrier if not already present
+    added_carriers = []
+    for carrier in carriers_to_add:
+        if carrier not in network.carriers.index:
+            network.add("Carrier", name=carrier)
+            added_carriers.append(carrier)
+    
+    print(f"Added {len(added_carriers)} carriers automatically: {sorted(added_carriers)}")
 
 
 def parse_demand_data(demand_source, bus_mapping=None):

@@ -287,13 +287,17 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
         # Step 1: Set up basic network structure using core module
         print("\n1. Setting up basic network structure...")
         
-        # Add essential carriers
-        essential_carriers = ['AC', 'Gas', 'Coal', 'Natural Gas', 'Nuclear', 'Hydro', 'Wind', 'Solar', 
-                            'Biomass', 'Oil', 'Wind Onshore', 'Wind Offshore', 'Solar PV', 'Biomass Waste', 
-                            'Natural Gas CCGT', 'Natural Gas OCGT', 'Solids Fired', 'Lignite', 'Hard Coal']
-        for carrier in essential_carriers:
+        # Add carriers automatically discovered from database
+        print("   Discovering carriers from PLEXOS database...")
+        from .core import discover_carriers_from_db
+        carriers_to_add = discover_carriers_from_db(db)
+        
+        added_carriers = []
+        for carrier in carriers_to_add:
             if carrier not in network.carriers.index:
                 network.add('Carrier', carrier)
+                added_carriers.append(carrier)
+        print(f"   Added {len(added_carriers)} carriers automatically")
         
         # Add electricity buses from Node class
         node_objects = get_objects_by_class_name(db, 'Node')
