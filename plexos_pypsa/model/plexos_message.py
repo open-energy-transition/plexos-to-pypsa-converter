@@ -80,15 +80,17 @@ if __name__ == "__main__":
     print(f"Network type: {setup_summary['network_type']}")
     print(f"Sectors: {', '.join(setup_summary['sectors'])}")
 
-    # Flow network summary by carrier
-    for sector in setup_summary["sectors"]:
-        sector_summary = setup_summary[sector.lower()]
-        print(f"\n{sector.title()} Sector:")
-        print(f"  Flow nodes: {sector_summary['nodes']}")
-        print(f"  Flow paths: {sector_summary['paths']}")
-        print(f"  Flow storage: {sector_summary['storage']}")
-        if "demand" in sector_summary:
-            print(f"  Demand: {sector_summary['demand']}")
+    # Buses by sector
+    buses_summary = setup_summary["buses_by_sector"]
+    print("\nBuses by sector:")
+    for sector, count in buses_summary.items():
+        print(f"  {sector.title()}: {count}")
+
+    # Paths
+    paths_summary = setup_summary["paths"]
+    print("\nPaths:")
+    for process_type, count in paths_summary.items():
+        print(f"  {process_type}: {count}")
 
     # Process-based coupling summary
     process_summary = setup_summary["processes"]
@@ -160,7 +162,9 @@ if __name__ == "__main__":
                     },
                 )  # type: ignore
             else:
-                print(f"\nOptimizing network with {len(network.snapshots)} snapshots...")
+                print(
+                    f"\nOptimizing network with {len(network.snapshots)} snapshots..."
+                )
                 network.optimize(
                     solver_name="gurobi",
                     solver_options={
