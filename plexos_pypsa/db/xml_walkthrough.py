@@ -13,7 +13,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-file_xml = INPUT_XMLS["marei-eu"]
+file_xml = INPUT_XMLS["plexos-message"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -27,6 +27,20 @@ for cls in mod_classes:
 
 list_and_print_objects(mod_db, ClassEnum.Constraint)
 mod_db.list_objects_by_class(ClassEnum.GasNode)
+mod_db.list_objects_by_class(ClassEnum.Constraint)
+list_and_print_objects(mod_db, ClassEnum.Constraint)
+
+print_properties(
+    mod_db,
+    ClassEnum.Constraint,
+    "Biomass_units_built_constraint R5ASIA",
+    detailed=True,
+)
+
+mod_db.get_object_properties(
+    ClassEnum.Constraint, "Biomass_units_built_constraint R5ASIA"
+)
+
 
 list_and_print_objects(mod_db, ClassEnum.FlowPath)
 print_properties(

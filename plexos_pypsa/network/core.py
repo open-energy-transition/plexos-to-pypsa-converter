@@ -1597,6 +1597,19 @@ def setup_network(
             link_summary = reassign_links_to_node(network, aggregate_node_name)
 
 
+    # Add constraints as final step
+    print("\n" + "=" * 60)
+    print("STEP 5: Adding PLEXOS constraints")
+    print("=" * 60)
+    
+    try:
+        from .constraints import add_constraints_enhanced
+        constraint_results = add_constraints_enhanced(network, db, verbose=True)
+        print(f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped")
+    except Exception as e:
+        print(f"⚠️  Constraint porting failed: {e}")
+        constraint_results = {'implemented': 0, 'skipped': 0, 'warnings': []}
+
     print("\n" + "=" * 60)
     print(f"NETWORK SETUP COMPLETE ({mode.upper()} MODE)")
     print("=" * 60)
@@ -1611,9 +1624,11 @@ def setup_network(
     print(f"  Batteries: {len(network.storage_units)}")
     print(f"  Loads: {len(network.loads)}")
     print(f"  Snapshots: {len(network.snapshots)}")
+    print(f"  Constraints: {constraint_results['implemented']} implemented")
 
     # Add mode information to summary
     load_summary["mode"] = mode
+    load_summary["constraint_results"] = constraint_results
     if mode == "aggregation":
         load_summary["aggregate_node_name"] = aggregate_node_name
         load_summary["generator_summary"] = generator_summary
