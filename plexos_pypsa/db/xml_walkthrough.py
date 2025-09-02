@@ -13,7 +13,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-file_xml = INPUT_XMLS["plexos-message"]
+file_xml = INPUT_XMLS["marei-eu"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -24,6 +24,14 @@ mod_classes.sort()
 print("\nAvailable classes:")
 for cls in mod_classes:
     print(f"  - {cls}")
+
+list_and_print_objects(mod_db, ClassEnum.Line)
+print_properties(
+    mod_db,
+    ClassEnum.Line,
+    "AT-CZ",
+    detailed=False,
+)
 
 list_and_print_objects(mod_db, ClassEnum.Constraint)
 mod_db.list_objects_by_class(ClassEnum.GasNode)

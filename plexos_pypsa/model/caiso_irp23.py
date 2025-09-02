@@ -5,8 +5,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.model.data_driven import create_caiso_model_data_driven
 from plexos_pypsa.network.core import setup_network
+from plexos_pypsa.network.data_driven import create_caiso_model_data_driven
 
 
 def create_caiso_model(use_data_driven: bool = False):
