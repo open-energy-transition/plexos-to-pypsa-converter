@@ -16,6 +16,12 @@ from plexosdb.enums import ClassEnum
 from pypsa import Network
 
 from .progress import BatchProgressTracker, create_progress_tracker
+from .generators import port_generators
+from .links import port_links
+from .storage import add_storage
+from .gas import port_gas_components
+from .flows import port_flow_network
+from .core import setup_network
 
 logger = logging.getLogger(__name__)
 
@@ -228,9 +234,13 @@ def get_object_memberships(db: PlexosDB, class_name: str, object_name: str) -> L
     return memberships
 
 
-def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_links: bool = False, testing_mode: bool = False) -> Dict[str, Any]:
+def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_links: bool = False, testing_mode: bool = False, 
+                                  timeslice_csv: Optional[str] = None, vre_profiles_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Set up a multi-sector PyPSA network for gas and electricity using database queries.
+    Set up a multi-sector PyPSA network for gas and electricity using existing modules.
+    
+    This function now orchestrates existing electricity and gas sector modules
+    to eliminate code redundancy while maintaining the same functionality.
     
     Parameters
     ----------
@@ -245,13 +255,17 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
     testing_mode : bool, optional
         If True, process only limited subsets of components for faster testing.
         Default False creates complete model.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties.
+    vre_profiles_path : str, optional
+        Path to the folder containing VRE generation profile files.
         
     Returns
     -------
     Dict[str, Any]
         Setup summary with statistics for each sector
     """
-    print("Setting up gas-electric network using database queries...")
+    print("Setting up gas-electric network using existing modules...")
     if testing_mode:
         print("⚠️  TESTING MODE: Processing limited subsets for faster development")
     if generators_as_links:
@@ -262,42 +276,22 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
         'network_type': 'gas_electric_db',
         'sectors': ['Electricity', 'Gas'],
         'electricity': {'buses': 0, 'generators': 0, 'loads': 0, 'lines': 0, 'storage': 0},
-        'gas': {'buses': 0, 'pipelines': 0, 'storage': 0, 'demand': 0, 'fields': 0},
+        'gas': {'buses': 0, 'pipelines': 0, 'storage': 0, 'demand': 0},
         'sector_coupling': {
-            'gas_generators': 0, 
-            'efficiency_range': 'N/A',
-            'generator_links': 0,
-            'renewable_generators': 0, 
+            'generators_as_links': generators_as_links,
             'fuel_types': []
         }
     }
     
     try:
-        # Step 1: Discover multi-sector classes
-        print("\n1. Discovering multi-sector classes...")
-        multi_sector_classes = discover_multi_sector_classes(db)
+        # Step 1: Set up basic network structure using core module
+        print("\n1. Setting up basic network structure...")
         
-        # Step 2: Set up electricity sector (use existing functionality)
-        print("\n2. Setting up electricity sector...")
-        
-        # Add carriers first
-        if 'AC' not in network.carriers.index:
-            network.add('Carrier', 'AC')
-        if 'Gas' not in network.carriers.index:
-            network.add('Carrier', 'Gas')
-        
-        # Add common generator carriers
-        generator_carriers = ['Coal', 'Natural Gas', 'Nuclear', 'Hydro', 'Wind', 'Solar', 
-                            'Biomass', 'Oil', 'Unknown', 'Wind Onshore', 'Wind Offshore', 
-                            'Solar PV', 'Biomass Waste', 'Natural Gas CCGT', 'Natural Gas OCGT',
-                            'Solids Fired', 'Lignite', 'Hard Coal', 'Gas Turbine', 'Steam Turbine']
-        for carrier in generator_carriers:
-            if carrier not in network.carriers.index:
-                network.add('Carrier', carrier)
-        
-        # Add link/conversion carriers
-        link_carriers = ['Gas2Electric', 'Electricity', 'Hydrogen', 'Ammonia']
-        for carrier in link_carriers:
+        # Add essential carriers
+        essential_carriers = ['AC', 'Gas', 'Coal', 'Natural Gas', 'Nuclear', 'Hydro', 'Wind', 'Solar', 
+                            'Biomass', 'Oil', 'Wind Onshore', 'Wind Offshore', 'Solar PV', 'Biomass Waste', 
+                            'Natural Gas CCGT', 'Natural Gas OCGT', 'Solids Fired', 'Lignite', 'Hard Coal']
+        for carrier in essential_carriers:
             if carrier not in network.carriers.index:
                 network.add('Carrier', carrier)
         
@@ -308,259 +302,91 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
                 network.add('Bus', node_name, carrier='AC', v_nom=110)
         
         setup_summary['electricity']['buses'] = len(node_objects)
-        print(f"   Added {len(node_objects)} electricity buses")
         
         # Set basic snapshots
         snapshots = pd.date_range('2030-01-01', '2030-12-31 23:00', freq='h')
         network.set_snapshots(snapshots)
-        print(f"   Set {len(snapshots)} hourly snapshots")
+        print(f"   Added {len(node_objects)} electricity buses and {len(snapshots)} snapshots")
         
-        # Add electricity generators (with optional generators-as-links conversion)
-        generator_objects = get_objects_by_class_name(db, 'Generator')
-        generators_added = 0
-        generator_links_added = 0
-        fuel_types_used = set()
+        # Step 2: Port electricity sector components using existing modules
+        print("\n2. Setting up electricity sector using port_generators()...")
         
-        # Apply testing mode limit
-        if testing_mode and len(generator_objects) > 100:
-            print(f"   ⚠️  TESTING MODE: Processing only 100 of {len(generator_objects)} generators")
-            generator_objects = generator_objects[:100]
+        # Use the refactored generators module with generators-as-links support
+        gen_summary = port_generators(
+            network=network,
+            db=db,
+            timeslice_csv=timeslice_csv,
+            vre_profiles_path=vre_profiles_path,
+            generators_as_links=generators_as_links,
+            fuel_bus_prefix="fuel_"
+        )
         
-        for gen_name in generator_objects:
-            # Get generator properties and memberships
-            props = get_object_properties_by_name(db, 'Generator', gen_name)
-            memberships = get_object_memberships(db, 'Generator', gen_name)
-            
-            # Find connected node
-            node_name = None
-            for membership in memberships:
-                if membership.get('class') == 'Node':
-                    node_name = membership.get('name')
-                    break
-            
-            if node_name and node_name in network.buses.index:
-                max_capacity = 100  # Default
-                for prop in props:
-                    if prop.get('property') == 'Max Capacity':
-                        max_capacity = prop.get('value', 100)
-                        break
-                
-                try:
-                    p_nom = float(max_capacity) if max_capacity else 100.0
-                except:
-                    p_nom = 100.0
-                
-                # Determine carrier from generator name
-                carrier = 'Unknown'
-                gen_name_lower = gen_name.lower()
-                if 'wind onshore' in gen_name_lower:
-                    carrier = 'Wind Onshore'
-                elif 'wind offshore' in gen_name_lower:
-                    carrier = 'Wind Offshore'
-                elif 'wind' in gen_name_lower:
-                    carrier = 'Wind'
-                elif 'solar' in gen_name_lower or 'pv' in gen_name_lower:
-                    carrier = 'Solar PV'
-                elif 'biomass waste' in gen_name_lower:
-                    carrier = 'Biomass Waste'
-                elif 'biomass' in gen_name_lower:
-                    carrier = 'Biomass'
-                elif 'natural gas ccgt' in gen_name_lower or 'ccgt' in gen_name_lower:
-                    carrier = 'Natural Gas CCGT'
-                elif 'natural gas ocgt' in gen_name_lower or 'ocgt' in gen_name_lower:
-                    carrier = 'Natural Gas OCGT'
-                elif 'natural gas' in gen_name_lower or 'gas' in gen_name_lower:
-                    carrier = 'Natural Gas'
-                elif 'nuclear' in gen_name_lower:
-                    carrier = 'Nuclear'
-                elif 'solids fired' in gen_name_lower:
-                    carrier = 'Solids Fired'
-                elif 'lignite' in gen_name_lower:
-                    carrier = 'Lignite'
-                elif 'hard coal' in gen_name_lower:
-                    carrier = 'Hard Coal'
-                elif 'coal' in gen_name_lower:
-                    carrier = 'Coal'
-                elif 'hydro' in gen_name_lower:
-                    carrier = 'Hydro'
-                elif 'oil' in gen_name_lower:
-                    carrier = 'Oil'
-                
-                # Determine if this is a conventional (fuel-based) generator
-                conventional_fuels = ['Natural Gas', 'Natural Gas CCGT', 'Natural Gas OCGT', 
-                                    'Coal', 'Hard Coal', 'Lignite', 'Nuclear', 'Oil', 'Biomass', 
-                                    'Biomass Waste', 'Solids Fired']
-                is_conventional = carrier in conventional_fuels
-                
-                if generators_as_links and is_conventional:
-                    # Create fuel bus if it doesn't exist
-                    fuel_bus_name = f"{carrier.replace(' ', '_')}_bus"
-                    if fuel_bus_name not in network.buses.index:
-                        # Add fuel carrier if needed
-                        fuel_carrier = carrier.replace(' CCGT', '').replace(' OCGT', '').replace(' Waste', '')
-                        if fuel_carrier not in network.carriers.index:
-                            network.add('Carrier', fuel_carrier)
-                        network.add('Bus', fuel_bus_name, carrier=fuel_carrier)
-                        fuel_types_used.add(fuel_carrier)
-                    
-                    # Create generator-link (fuel bus → electric bus)
-                    link_name = f"gen_link_{gen_name}"
-                    if link_name not in network.links.index:
-                        # Set efficiency based on technology
-                        if 'CCGT' in carrier:
-                            efficiency = 0.55  # Combined cycle
-                        elif 'OCGT' in carrier:
-                            efficiency = 0.35  # Open cycle  
-                        elif 'Nuclear' in carrier:
-                            efficiency = 0.33  # Nuclear thermal
-                        elif 'Coal' in carrier:
-                            efficiency = 0.40  # Coal thermal
-                        elif 'Biomass' in carrier:
-                            efficiency = 0.30  # Biomass thermal
-                        else:
-                            efficiency = 0.40  # Default thermal
-                        
-                        # Fuel cost (marginal cost of fuel, not electricity)
-                        fuel_cost = 25.0 if 'Gas' in carrier else 20.0
-                        
-                        network.add('Link', link_name, 
-                                  bus0=fuel_bus_name, bus1=node_name,
-                                  p_nom=p_nom, efficiency=efficiency, 
-                                  marginal_cost=fuel_cost)
-                        generator_links_added += 1
-                        
-                        # Add infinite fuel supply (simplified)
-                        fuel_supply_name = f"fuel_supply_{fuel_carrier.replace(' ', '_')}"
-                        if fuel_supply_name not in network.generators.index:
-                            # Fuel supply should be cheaper than generator-link to ensure proper dispatch
-                            network.add('Generator', fuel_supply_name, 
-                                      bus=fuel_bus_name, p_nom=99999, 
-                                      carrier=fuel_carrier, marginal_cost=0.1)  # Very cheap fuel
-                            print(f"   🔍 DEBUG - Added fuel supply: {fuel_supply_name} on {fuel_bus_name} (p_nom=99999, mc=0.1)")
-                            print(f"   🔍 DEBUG - Generator-link: {link_name} {fuel_bus_name}→{node_name} (p_nom={p_nom}, eff={efficiency:.2f}, mc={fuel_cost})")
-                    
-                else:
-                    # Add as standard generator (renewables or when generators_as_links=False)
-                    if gen_name not in network.generators.index:
-                        network.add('Generator', gen_name, bus=node_name, p_nom=p_nom,
-                                  carrier=carrier, marginal_cost=50.0)
-                        generators_added += 1
-        
-        setup_summary['electricity']['generators'] = generators_added
-        setup_summary['sector_coupling']['generator_links'] = generator_links_added  
-        setup_summary['sector_coupling']['renewable_generators'] = generators_added
-        setup_summary['sector_coupling']['fuel_types'] = list(fuel_types_used)
-        
+        setup_summary['electricity']['generators'] = len(network.generators)
         if generators_as_links:
-            print(f"   Added {generator_links_added} generator-links (conventional)")
-            print(f"   Added {generators_added} generators (renewable)")  
-            print(f"   Fuel types: {list(fuel_types_used)}")
+            # Count generator-links (fuel→electric conversion links)
+            fuel_buses = [bus for bus in network.buses.index if 'fuel_' in bus]
+            elec_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'AC']
+            generator_links = [link for link in network.links.index 
+                             if network.links.at[link, 'bus0'] in fuel_buses and 
+                                network.links.at[link, 'bus1'] in elec_buses]
+            setup_summary['sector_coupling']['generator_links'] = len(generator_links)
+            print(f"   Created {len(generator_links)} generator-links and {len(network.generators)} generators")
         else:
-            print(f"   Added {generators_added} electricity generators")
+            print(f"   Added {len(network.generators)} electricity generators")
         
-        # Step 3: Set up gas sector
-        print("\n3. Setting up gas sector...")
+        # Step 3: Port transmission links using existing modules
+        print("\n3. Setting up transmission links using port_links()...")
         
-        # Add gas buses from discovered gas classes
-        gas_buses_added = 0
-        for gas_class in multi_sector_classes['gas']:
-            if 'node' in gas_class.lower():
-                gas_objects = get_objects_by_class_name(db, gas_class)
-                for gas_name in gas_objects:
-                    bus_name = f"gas_{gas_name}"
-                    if bus_name not in network.buses.index:
-                        if 'Gas' not in network.carriers.index:
-                            network.add('Carrier', 'Gas')
-                        network.add('Bus', bus_name, carrier='Gas')
-                        gas_buses_added += 1
+        port_links(network=network, db=db, timeslice_csv=timeslice_csv)
+        setup_summary['electricity']['lines'] = len(network.links)
+        print(f"   Added {len(network.links)} transmission links")
         
-        setup_summary['gas']['buses'] = gas_buses_added
-        print(f"   Added {gas_buses_added} gas buses")
+        # Step 4: Port storage using existing modules
+        print("\n4. Setting up storage using port_storage()...")
         
-        # Add gas pipelines
-        gas_pipelines_added = 0
-        for gas_class in multi_sector_classes['gas']:
-            if 'pipeline' in gas_class.lower():
-                pipeline_objects = get_objects_by_class_name(db, gas_class)
-                for pipeline_name in pipeline_objects:
-                    # Get connected gas nodes
-                    memberships = get_object_memberships(db, gas_class, pipeline_name)
-                    gas_nodes = [m['name'] for m in memberships if 'gas' in m.get('class', '').lower() and 'node' in m.get('class', '').lower()]
-                    
-                    if len(gas_nodes) >= 2:
-                        bus0 = f"gas_{gas_nodes[0]}"
-                        bus1 = f"gas_{gas_nodes[1]}"
-                        
-                        if bus0 in network.buses.index and bus1 in network.buses.index:
-                            props = get_object_properties_by_name(db, gas_class, pipeline_name)
-                            max_flow = 1000  # Default
-                            for prop in props:
-                                if prop.get('property') == 'Max Flow Day':
-                                    max_flow = prop.get('value', 1000)
-                                    break
-                            
-                            try:
-                                p_nom = float(max_flow) if max_flow else 1000.0
-                            except:
-                                p_nom = 1000.0
-                            
-                            link_name = f"gas_pipeline_{pipeline_name}"
-                            if link_name not in network.links.index:
-                                network.add('Link', link_name, bus0=bus0, bus1=bus1,
-                                          p_nom=p_nom, efficiency=0.98, carrier='Gas')
-                                gas_pipelines_added += 1
+        try:
+            add_storage(network=network, db=db, timeslice_csv=timeslice_csv)
+            setup_summary['electricity']['storage'] = len(network.storage_units)
+            print(f"   Added {len(network.storage_units)} storage units")
+        except Exception as e:
+            logger.warning(f"Storage porting failed: {e}")
+            setup_summary['electricity']['storage'] = 0
         
-        setup_summary['gas']['pipelines'] = gas_pipelines_added
-        print(f"   Added {gas_pipelines_added} gas pipelines")
+        # Step 5: Set up gas sector using new gas module
+        print("\n5. Setting up gas sector using port_gas_components()...")
         
-        # Step 4: Set up sector coupling
-        print("\n4. Setting up sector coupling...")
+        gas_summary = port_gas_components(network=network, db=db, timeslice_csv=timeslice_csv, testing_mode=testing_mode)
+        setup_summary['gas'].update(gas_summary)
+        
+        # Step 6: Add sector coupling (gas-electric coupling)
+        print("\n6. Setting up gas-electric sector coupling...")
         
         coupling_stats = add_gas_electric_coupling_db(network, db)
         setup_summary['sector_coupling'].update(coupling_stats)
-        print(f"   Added {coupling_stats['gas_generators']} gas-to-electric conversion links")
-        print(f"   Efficiency range: {coupling_stats['efficiency_range']}")
+        if coupling_stats.get('gas_generators', 0) > 0:
+            print(f"   Added {coupling_stats['gas_generators']} gas-to-electric conversion links")
+            print(f"   Efficiency range: {coupling_stats['efficiency_range']}")
         
-        # Step 5: Add basic loads
-        print("\n5. Adding basic demand profiles...")
+        # Step 7: Add basic loads for load balancing
+        print("\n7. Adding load balancing...")
         
-        # Add loads to ALL electricity buses to balance generation
-        elec_bus_list = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'AC']
+        # Add loads to electricity buses
+        elec_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'AC']
+        total_gen_capacity = sum(network.generators.p_nom) if len(network.generators) > 0 else len(elec_buses) * 1000
         
-        # Calculate total generation capacity differently for generators-as-links mode
         if generators_as_links:
-            # For generators-as-links: count renewable generators + generator-link capacity (with efficiency)
-            renewable_gen_capacity = sum(network.generators[
-                network.generators.bus.isin(elec_bus_list)
-            ].p_nom)
-            
-            # Generator-links capacity (fuel→electric links)
-            fuel_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] in ['Natural Gas', 'Biomass', 'Nuclear', 'Oil', 'Solids Fired']]
-            generator_link_capacity = sum(network.links[
-                (network.links.bus0.isin(fuel_buses)) & 
-                (network.links.bus1.isin(elec_bus_list))
-            ].p_nom * network.links[
-                (network.links.bus0.isin(fuel_buses)) & 
-                (network.links.bus1.isin(elec_bus_list))
-            ].efficiency)
-            
-            total_generation_capacity = renewable_gen_capacity + generator_link_capacity
-            print(f"   🔍 DEBUG - Renewable generators: {renewable_gen_capacity:.0f} MW")
-            print(f"   🔍 DEBUG - Generator-links (with efficiency): {generator_link_capacity:.0f} MW") 
-            print(f"   🔍 DEBUG - Total generation capacity: {total_generation_capacity:.0f} MW")
-        else:
-            # Standard mode: all generators
-            total_generation_capacity = sum(network.generators.p_nom)
-            print(f"   🔍 DEBUG - Standard generators: {total_generation_capacity:.0f} MW")
+            # Include generator-link capacity in total calculation
+            fuel_buses = [bus for bus in network.buses.index if 'fuel_' in bus]
+            gen_links = network.links[(network.links.bus0.isin(fuel_buses)) & (network.links.bus1.isin(elec_buses))]
+            gen_link_capacity = sum(gen_links.p_nom * gen_links.efficiency) if len(gen_links) > 0 else 0
+            total_gen_capacity += gen_link_capacity
         
-        total_generation_capacity = max(total_generation_capacity, len(elec_bus_list) * 1000)  # Ensure minimum capacity
-        load_per_bus = total_generation_capacity / len(elec_bus_list) * 0.3  # 30% capacity factor (more conservative)
+        load_per_bus = total_gen_capacity / len(elec_buses) * 0.3 if len(elec_buses) > 0 else 100
         
-        for i, bus in enumerate(elec_bus_list):
+        for i, bus in enumerate(elec_buses):
             load_name = f"elec_load_{bus}"
             if load_name not in network.loads.index:
-                # Vary load by bus with realistic country-based scaling
-                base_load = load_per_bus * (0.8 + 0.4 * np.random.random())  # 80-120% of average
+                base_load = load_per_bus * (0.8 + 0.4 * np.random.random())
                 load_profile = pd.Series(
                     base_load * (1 + 0.3 * np.sin(np.arange(len(network.snapshots)) * 2 * np.pi / 24)),
                     index=network.snapshots
@@ -568,67 +394,15 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
                 network.add('Load', load_name, bus=bus, p_set=load_profile)
         
         setup_summary['electricity']['loads'] = len([l for l in network.loads.index if 'elec_load' in l])
-        
-        # Debug load-generation balance
-        total_load = sum([network.loads.at[load, 'p_set'].sum() for load in network.loads.index if 'elec_load' in load])
-        print(f"   🔍 DEBUG - Total load created: {total_load/1e6:.1f} TWh/year")
-        print(f"   🔍 DEBUG - Load-generation ratio: {total_load/(total_generation_capacity*8760):.2f}")
-        
-        # Add real transmission lines from PLEXOS Line objects
-        print("   Adding real transmission lines from PLEXOS model...")
-        lines_added = 0
-        
-        # Get PLEXOS Line objects
-        line_objects = get_objects_by_class_name(db, 'Line')
-        
-        for line_name in line_objects:
-            # Get line properties
-            props = get_object_properties_by_name(db, 'Line', line_name)
-            
-            # Get connected nodes
-            memberships = get_object_memberships(db, 'Line', line_name)
-            
-            node_from = None
-            node_to = None
-            for membership in memberships:
-                if membership.get('collection_name') == 'Node From':
-                    node_from = membership.get('name')
-                elif membership.get('collection_name') == 'Node To':
-                    node_to = membership.get('name')
-            
-            # Only add line if both nodes exist in the network
-            if node_from and node_to and node_from in network.buses.index and node_to in network.buses.index:
-                # Extract capacity from Max Flow property
-                s_nom = 1000  # Default capacity (MW)
-                for prop in props:
-                    if prop.get('property') == 'Max Flow':
-                        try:
-                            s_nom = float(prop.get('value', 1000))
-                        except:
-                            s_nom = 1000
-                        break
-                
-                # Add realistic impedance values for transmission lines
-                # Typical transmission line R/X ratio ≈ 0.1-0.3
-                # Using conservative values for stability
-                line_length_factor = 1.0  # Could be refined based on geography
-                r = 0.01 * line_length_factor  # Resistance
-                x = 0.03 * line_length_factor  # Reactance (higher X/R for transmission)
-                
-                if line_name not in network.lines.index:
-                    network.add('Line', line_name, 
-                              bus0=node_from, bus1=node_to, 
-                              s_nom=abs(s_nom), r=r, x=x)
-                    lines_added += 1
-        
-        setup_summary['electricity']['lines'] = lines_added
-        print(f"   Added {lines_added} real transmission lines from PLEXOS model")
+        print(f"   Added {setup_summary['electricity']['loads']} electricity loads")
         
     except Exception as e:
         logger.error(f"Error setting up gas-electric network: {e}")
         raise
     
-    print("Gas-electric multi-sector network setup complete!")
+    print("\nGas-electric multi-sector network setup complete!")
+    print(f"  Electricity: {setup_summary['electricity']}")
+    print(f"  Gas: {setup_summary['gas']}")
     return setup_summary
 
 
@@ -710,9 +484,12 @@ def add_gas_electric_coupling_db(network: Network, db: PlexosDB) -> Dict[str, An
     return coupling_stats
 
 
-def setup_flow_network_db(network: Network, db: PlexosDB, testing_mode: bool = False) -> Dict[str, Any]:
+def setup_flow_network_db(network: Network, db: PlexosDB, testing_mode: bool = False, timeslice_csv: Optional[str] = None) -> Dict[str, Any]:
     """
-    Set up a multi-sector PyPSA network using PLEXOS Flow Network components with database queries.
+    Set up a multi-sector PyPSA network using PLEXOS Flow Network components with the flows.py module.
+    
+    This function now uses the dedicated flows.py module to eliminate code redundancy
+    while maintaining the same functionality.
     
     Parameters
     ----------
@@ -722,183 +499,35 @@ def setup_flow_network_db(network: Network, db: PlexosDB, testing_mode: bool = F
         PLEXOS database containing model data
     testing_mode : bool, optional
         If True, process only limited subsets of components for faster testing
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties
         
     Returns
     -------
     Dict[str, Any]
         Setup summary with statistics for each sector
     """
-    # Initialize batch progress tracker
-    batch_tracker = BatchProgressTracker("Flow Network Setup", testing_mode=testing_mode)
-    
-    setup_summary = {
-        'network_type': 'flow_network_db',
-        'sectors': [],
-        'processes': {}
-    }
+    print("Setting up flow network using flows.py module...")
+    if testing_mode:
+        print("⚠️  TESTING MODE: Processing limited subsets for faster development")
     
     try:
-        # Step 1: Discover multi-sector classes
-        print("\n1. Discovering multi-sector classes...")
-        multi_sector_classes = discover_multi_sector_classes(db)
+        # Use the dedicated flows.py module for complete flow network setup
+        setup_summary = port_flow_network(
+            network=network,
+            db=db,
+            timeslice_csv=timeslice_csv,
+            testing_mode=testing_mode
+        )
         
-        # Step 2: Add flow nodes as buses
-        print("\n2. Setting up flow nodes as buses...")
-        sectors = {}
-        
-        for flow_class in multi_sector_classes['flow']:
-            if 'node' in flow_class.lower():
-                flow_objects = get_objects_by_class_name(db, flow_class)
-                
-                for node_name in flow_objects:
-                    
-                    # Determine sector from node name
-                    if node_name.startswith('Elec_'):
-                        sector = 'Electricity'
-                    elif node_name.startswith('H2_'):
-                        sector = 'Hydrogen'
-                    elif node_name.startswith('NH3_'):
-                        sector = 'Ammonia'
-                    else:
-                        sector = 'Other'
-                    
-                    # Add carrier if needed
-                    if sector not in network.carriers.index:
-                        network.add('Carrier', sector)
-                    
-                    # Add bus
-                    if node_name not in network.buses.index:
-                        network.add('Bus', node_name, carrier=sector)
-                        
-                        if sector not in sectors:
-                            sectors[sector] = 0
-                        sectors[sector] += 1
-        
-        setup_summary['sectors'] = list(sectors.keys())
-        for sector in sectors:
-            setup_summary[sector.lower()] = {
-                'nodes': sectors[sector], 'paths': 0, 'storage': 0, 'demand': 0
-            }
-        
-        # Step 3: Set basic snapshots
-        snapshots = pd.date_range('2030-01-01', '2030-12-31 23:00', freq='h')
-        network.set_snapshots(snapshots)
-        
-        # Step 4: Add flow paths as links
-        print("\n3. Setting up flow paths as links...")
-        paths = {'Transport': 0, 'Conversion': 0}
-        
-        # Count total flow paths first
-        total_paths = 0
-        for flow_class in multi_sector_classes['flow']:
-            if 'path' in flow_class.lower():
-                path_objects = get_objects_by_class_name(db, flow_class)
-                total_paths += len(path_objects)
-        
-        # Initialize progress tracker for flow paths
-        if total_paths > 0:
-            path_progress = batch_tracker.add_batch(total_paths, "Processing Flow Paths", test_limit=100)
-            path_index = 0
-            
-            for flow_class in multi_sector_classes['flow']:
-                if 'path' in flow_class.lower():
-                    path_objects = get_objects_by_class_name(db, flow_class)
-                    
-                    for path_name in path_objects:
-                        # Check if we should process this path (testing mode)
-                        if not path_progress.should_process(path_index):
-                            break
-                        
-                        # Get connected flow nodes using specific collection names
-                        memberships = get_object_memberships(db, flow_class, path_name)
-                    
-                    # Extract flow nodes based on collection names
-                    bus0 = None
-                    bus1 = None
-                    for m in memberships:
-                        if m.get('collection_name') == 'Flow Node From' and 'flow' in m.get('class', '').lower():
-                            bus0 = m["name"]
-                        elif m.get('collection_name') == 'Flow Node To' and 'flow' in m.get('class', '').lower():
-                            bus1 = m["name"]
-                    
-                    if bus0 and bus1:
-                        
-                        if bus0 in network.buses.index and bus1 in network.buses.index:
-                            # Get path properties
-                            props = get_object_properties_by_name(db, flow_class, path_name)
-                            max_flow = 1000  # Default
-                            efficiency = 1.0  # Default
-                            
-                            for prop in props:
-                                if prop.get('property') == 'Max Flow':
-                                    max_flow = prop.get('value', 1000)
-                                elif prop.get('property') == 'Efficiency':
-                                    efficiency = prop.get('value', 1.0)
-                            
-                            try:
-                                p_nom = float(max_flow) if max_flow else 1000.0
-                                eff = float(efficiency) if efficiency else 1.0
-                            except:
-                                p_nom = 1000.0
-                                eff = 1.0
-                            
-                            # Determine if transport or conversion link
-                            bus0_carrier = network.buses.at[bus0, 'carrier']
-                            bus1_carrier = network.buses.at[bus1, 'carrier']
-                            
-                            if bus0_carrier == bus1_carrier:
-                                link_type = 'Transport'
-                                link_name = f"transport_{path_name}"
-                            else:
-                                link_type = 'Conversion'
-                                link_name = f"conversion_{path_name}"
-                            
-                            if link_name not in network.links.index:
-                                network.add('Link', link_name, bus0=bus0, bus1=bus1,
-                                          p_nom=p_nom, efficiency=eff)
-                                paths[link_type] += 1
-                        
-                        # Update progress
-                        path_progress.update(path_index, path_name)
-                        
-                        # Break out of both loops if we've hit the limit
-                        if not path_progress.should_process(path_index):
-                            break
-                    
-                    # Break outer loop if we've hit the limit
-                    if path_index >= path_progress.items_to_process:
-                        break
-            
-            # Finish flow path progress tracking
-            path_progress.finish(paths.get('Transport', 0) + paths.get('Conversion', 0))
-        
-        # Update sector path counts
-        for sector in sectors:
-            setup_summary[sector.lower()]['paths'] = paths.get('Transport', 0) + paths.get('Conversion', 0)
-        
-        # Step 5: Add processes for sector coupling
-        print("\n4. Setting up process-based sector coupling...")
-        process_stats = add_processes_db(network, db, multi_sector_classes)
-        setup_summary['processes'] = process_stats
-        
-        # Step 6: Add facilities as generators/loads
-        print("\n5. Setting up facilities as generators/loads...")
-        facility_stats = add_facilities_db(network, db, multi_sector_classes, testing_mode)
-        setup_summary['facilities'] = facility_stats
-        
-        # Step 7: Add basic demands (only to buses without facilities)  
-        print("\n6. Setting up basic demand profiles...")
-        for sector in sectors:
-            if sectors[sector] > 0:  # Only if we have buses for this sector
-                add_flow_demand_db(network, sector)
+        # Update summary format to match expected interface
+        setup_summary['network_type'] = 'flow_network_db'
         
     except Exception as e:
         logger.error(f"Error setting up flow network: {e}")
         raise
-    finally:
-        # Finish batch progress tracking
-        batch_tracker.finish()
     
+    print("Flow network multi-sector setup complete using flows.py module!")
     return setup_summary
 
 

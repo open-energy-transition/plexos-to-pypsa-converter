@@ -19,7 +19,7 @@ from plexos_pypsa.network.costs import set_capital_costs_generic
 logger = logging.getLogger(__name__)
 
 
-def add_generators(network: Network, db: PlexosDB):
+def add_generators(network: Network, db: PlexosDB, generators_as_links=False, fuel_bus_prefix="fuel_"):
     """
     Adds generators from a Plexos database to a PyPSA network.
 
@@ -33,6 +33,11 @@ def add_generators(network: Network, db: PlexosDB):
         The PyPSA network to which the generators will be added.
     db : PlexosDB
         The Plexos database containing generator data.
+    generators_as_links : bool, optional
+        If True, represent conventional generators (coal, gas, nuclear, etc.) as Links
+        connecting fuel buses to electric buses. Default False.
+    fuel_bus_prefix : str, optional
+        Prefix for fuel bus names when generators_as_links=True. Default "fuel_".
 
     Raises
     ------
@@ -44,12 +49,16 @@ def add_generators(network: Network, db: PlexosDB):
     - Generators without a "Max Capacity" property will not have `p_nom` specified.
     - Generators without an associated bus will be skipped and reported.
     - A summary of skipped generators is printed at the end.
+    - When generators_as_links=True, conventional generators become fuel→electric links.
 
     Examples
     --------
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
     >>> add_generators(network, db)
+    
+    # With generators-as-links
+    >>> add_generators(network, db, generators_as_links=True, fuel_bus_prefix="fuel_")
     """
     empty_generators = []
     skipped_generators = []
@@ -100,19 +109,78 @@ def add_generators(network: Network, db: PlexosDB):
         # Find associated fuel/carrier
         carrier = find_fuel_for_generator(db, gen)
 
+        # Determine if this is a conventional (fuel-based) generator for generators-as-links
+        conventional_fuels = ['Natural Gas', 'Natural Gas CCGT', 'Natural Gas OCGT', 
+                            'Coal', 'Hard Coal', 'Lignite', 'Nuclear', 'Oil', 'Biomass', 
+                            'Biomass Waste', 'Solids Fired', 'Gas']
+        is_conventional = carrier in conventional_fuels if carrier else False
+
         # Add generator to the network
-        if p_max is not None:
-            if carrier is not None:
-                network.add("Generator", gen, bus=bus, p_nom=p_max, carrier=carrier)
-            else:
-                network.add("Generator", gen, bus=bus, p_nom=p_max)
-            for attr, val in gen_attrs.items():
-                network.generators.loc[gen, attr] = val
+        if generators_as_links and is_conventional and carrier:
+            # Create fuel bus if it doesn't exist
+            fuel_carrier = carrier.replace(' CCGT', '').replace(' OCGT', '').replace(' Waste', '')
+            fuel_bus_name = f"{fuel_bus_prefix}{fuel_carrier.replace(' ', '_')}" if fuel_bus_prefix else f"{fuel_carrier.replace(' ', '_')}"
+            
+            if fuel_bus_name not in network.buses.index:
+                # Add fuel carrier if needed
+                if fuel_carrier not in network.carriers.index:
+                    network.add('Carrier', fuel_carrier)
+                network.add('Bus', fuel_bus_name, carrier=fuel_carrier)
+            
+            # Create generator-link (fuel bus → electric bus)
+            link_name = f"gen_link_{gen}"
+            if link_name not in network.links.index:
+                # Set efficiency based on technology
+                if 'CCGT' in carrier:
+                    efficiency = 0.55  # Combined cycle
+                elif 'OCGT' in carrier:
+                    efficiency = 0.35  # Open cycle  
+                elif 'Nuclear' in carrier:
+                    efficiency = 0.33  # Nuclear thermal
+                elif 'Coal' in carrier or 'Lignite' in carrier:
+                    efficiency = 0.40  # Coal thermal
+                elif 'Biomass' in carrier:
+                    efficiency = 0.30  # Biomass thermal
+                else:
+                    efficiency = 0.40  # Default thermal
+                
+                # Create link with p_nom
+                if p_max is not None:
+                    network.add('Link', link_name, 
+                              bus0=fuel_bus_name, bus1=bus,
+                              p_nom=p_max, efficiency=efficiency, 
+                              carrier='conversion')
+                else:
+                    network.add('Link', link_name, 
+                              bus0=fuel_bus_name, bus1=bus,
+                              efficiency=efficiency, 
+                              carrier='conversion')
+                
+                # Set ramp limits and other properties on the link
+                for attr, val in gen_attrs.items():
+                    if attr in ['ramp_limit_up', 'ramp_limit_down']:
+                        network.links.loc[link_name, attr] = val
+                
+                # Add infinite fuel supply generator (simplified)
+                fuel_supply_name = f"fuel_supply_{fuel_carrier.replace(' ', '_')}"
+                if fuel_supply_name not in network.generators.index:
+                    network.add('Generator', fuel_supply_name, 
+                              bus=fuel_bus_name, p_nom=99999, 
+                              carrier=fuel_carrier, marginal_cost=0.1)
         else:
-            if carrier is not None:
-                network.add("Generator", gen, bus=bus, carrier=carrier)
+            # Add as standard generator (renewables or when generators_as_links=False)
+            if p_max is not None:
+                if carrier is not None:
+                    network.add("Generator", gen, bus=bus, p_nom=p_max, carrier=carrier)
+                else:
+                    network.add("Generator", gen, bus=bus, p_nom=p_max)
+                for attr, val in gen_attrs.items():
+                    network.generators.loc[gen, attr] = val
             else:
-                network.add("Generator", gen, bus=bus)
+                if carrier is not None:
+                    network.add("Generator", gen, bus=bus, carrier=carrier)
+                else:
+                    network.add("Generator", gen, bus=bus)
     # Report skipped generators
     if empty_generators:
         print(f"\nSkipped {len(empty_generators)} generators with no properties:")
@@ -798,6 +866,8 @@ def port_generators(
     timeslice_csv=None,
     vre_profiles_path=None,
     target_node=None,
+    generators_as_links=False,
+    fuel_bus_prefix="fuel_",
 ):
     """
     Comprehensive function to add generators and set all their properties in the PyPSA network.
@@ -809,6 +879,7 @@ def port_generators(
     - Sets capital costs
     - Sets marginal costs (time-dependent)
     - Sets VRE profiles for solar and wind generators
+    - Optionally converts conventional generators to fuel→electric links
     - Optionally reassigns all generators to a specific node
 
     Parameters
@@ -824,6 +895,14 @@ def port_generators(
     target_node : str, optional
         If specified, all generators will be reassigned to this node after setup.
         This is useful when demand is aggregated to a single node.
+    generators_as_links : bool, optional
+        If True, represent conventional generators (coal, gas, nuclear, etc.) as Links
+        connecting fuel buses to electric buses. If False, use standard Generators.
+        Default False.
+    fuel_bus_prefix : str, optional
+        Prefix for fuel bus names when generators_as_links=True.
+        Default "fuel_" creates buses like "fuel_Natural_Gas_CCGT".
+        Use "" for no prefix.
 
     Returns
     -------
@@ -847,8 +926,11 @@ def port_generators(
     print("Starting generator porting process...")
 
     # Step 1: Add generators
-    print("1. Adding generators...")
-    add_generators(network, db)
+    if generators_as_links:
+        print("1. Adding generators (with generators-as-links conversion)...")
+    else:
+        print("1. Adding generators...")
+    add_generators(network, db, generators_as_links=generators_as_links, fuel_bus_prefix=fuel_bus_prefix)
 
     # Step 2: Set capacity ratings (p_max_pu)
     print("2. Setting capacity ratings...")
