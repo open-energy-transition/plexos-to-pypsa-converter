@@ -1578,3 +1578,538 @@ def add_flow_demand_db(network: Network, sector: str) -> None:
                 
     except Exception as e:
         logger.warning(f"Failed to add {sector} demand: {e}")
+
+
+# ============================================================================
+# MaREI CSV Data Integration Function
+# ============================================================================
+
+def setup_marei_csv_network(
+    network: Network, 
+    db: PlexosDB, 
+    csv_data_path: str,
+    infrastructure_scenario: str = "PCI",
+    pricing_scheme: str = "Production",
+    generators_as_links: bool = False
+) -> Dict[str, Any]:
+    """
+    Enhanced MaREI network setup with CSV data integration.
+    
+    This function creates a comprehensive EU multi-sector model by combining:
+    - PLEXOS database topology and generator data
+    - MaREI CSV data for detailed demand profiles and infrastructure
+    - PyPSA multi-sector patterns for gas/electricity coupling
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to populate
+    db : PlexosDB
+        PLEXOS database connection
+    csv_data_path : str
+        Path to MaREI CSV Files directory
+    infrastructure_scenario : str, default "PCI"
+        Infrastructure scenario ('PCI', 'High', 'Low')
+    pricing_scheme : str, default "Production" 
+        Gas pricing scheme ('Production', 'Postage', 'Trickle', 'Uniform')
+    generators_as_links : bool, default False
+        If True, represent conventional generators as fuel→electric Links
+        
+    Returns
+    -------
+    Dict[str, Any]
+        Comprehensive setup summary with CSV integration statistics
+    """
+    from .csv_loaders import load_marei_full_dataset
+    
+    print("Setting up MaREI EU multi-sector network with CSV data integration...")
+    print(f"  Infrastructure scenario: {infrastructure_scenario}")
+    print(f"  Gas pricing scheme: {pricing_scheme}")
+    print(f"  Generators as links: {generators_as_links}")
+    
+    setup_summary = {
+        'network_type': 'marei_csv_enhanced',
+        'sectors': ['Electricity', 'Gas'],
+        'csv_data_loaded': False,
+        'csv_integration': {},
+        'infrastructure_scenario': infrastructure_scenario,
+        'pricing_scheme': pricing_scheme,
+        'electricity': {'buses': 0, 'generators': 0, 'loads': 0, 'lines': 0, 'storage': 0},
+        'gas': {'buses': 0, 'pipelines': 0, 'storage': 0, 'demand': 0, 'fields': 0, 'plants': 0},
+        'sector_coupling': {'generators_as_links': generators_as_links, 'fuel_types': []},
+        'eu_countries': []
+    }
+    
+    try:
+        # Step 1: Load complete MaREI CSV dataset
+        print("\n1. Loading MaREI CSV dataset...")
+        marei_data = load_marei_full_dataset(
+            csv_base_dir=csv_data_path,
+            scenario=infrastructure_scenario,
+            pricing_scheme=pricing_scheme
+        )
+        
+        if marei_data:
+            setup_summary['csv_data_loaded'] = True
+            setup_summary['csv_integration'] = {
+                'data_categories': len(marei_data),
+                'available_datasets': list(marei_data.keys())
+            }
+            print(f"  ✓ Loaded {len(marei_data)} data categories")
+        
+        # Step 2: Set up basic network structure from PlexosDB
+        print("\n2. Setting up base network structure from PlexosDB...")
+        
+        # Add carriers
+        carriers = ['AC', 'gas', 'hydrogen']
+        for carrier in carriers:
+            if carrier not in network.carriers.index:
+                network.add('Carrier', carrier)
+        
+        # Get electricity buses from PlexosDB
+        node_objects = get_objects_by_class_name(db, 'Node')
+        eu_countries = set()
+        
+        for node_name in node_objects:
+            # Extract country code from node name
+            country_code = node_name[:2] if len(node_name) >= 2 else node_name
+            eu_countries.add(country_code)
+            
+            if node_name not in network.buses.index:
+                network.add('Bus', node_name, carrier='AC', v_nom=110)
+        
+        setup_summary['electricity']['buses'] = len(node_objects)
+        setup_summary['eu_countries'] = sorted(list(eu_countries))
+        print(f"  ✓ Added {len(node_objects)} electricity buses for {len(eu_countries)} countries")
+        
+        # Step 3: Create gas network buses for EU countries
+        print("\n3. Creating gas network infrastructure...")
+        
+        # Create gas buses for each EU country
+        gas_buses_created = 0
+        for country in eu_countries:
+            gas_bus_name = f"gas_{country}"
+            if gas_bus_name not in network.buses.index:
+                network.add('Bus', gas_bus_name, carrier='gas')
+                gas_buses_created += 1
+        
+        setup_summary['gas']['buses'] = gas_buses_created
+        print(f"  ✓ Created {gas_buses_created} gas buses")
+        
+        # Step 4: Set up snapshots from CSV data
+        print("\n4. Configuring time snapshots...")
+        
+        # Use electricity demand CSV as snapshots source if available
+        if 'electricity_demand' in marei_data:
+            # Get any country's demand data to extract time structure
+            elec_demand = next(iter(marei_data['electricity_demand'].values()))
+            if hasattr(elec_demand, 'index') and len(elec_demand.index) > 0:
+                network.set_snapshots(elec_demand.index)
+                print(f"  ✓ Set {len(elec_demand.index)} snapshots from electricity demand CSV")
+            else:
+                # Fall back to full year
+                snapshots = pd.date_range('2030-01-01', '2030-12-31 23:00', freq='h')
+                network.set_snapshots(snapshots)
+                print(f"  ✓ Set {len(snapshots)} snapshots (full year default)")
+        else:
+            # Fall back to full year
+            snapshots = pd.date_range('2030-01-01', '2030-12-31 23:00', freq='h')
+            network.set_snapshots(snapshots)
+            print(f"  ✓ Set {len(snapshots)} snapshots (full year default)")
+        
+        # Step 5: Port electricity sector using existing modules
+        print("\n5. Setting up electricity sector from PlexosDB...")
+        
+        gen_summary = port_generators(
+            network=network,
+            db=db,
+            generators_as_links=generators_as_links,
+            fuel_bus_prefix="fuel_"
+        )
+        setup_summary['electricity']['generators'] = len(network.generators)
+        
+        # Port transmission links
+        port_links(network=network, db=db)
+        setup_summary['electricity']['lines'] = len(network.links)
+        
+        # Port electricity storage
+        try:
+            add_storage(network=network, db=db)
+            setup_summary['electricity']['storage'] = len(network.storage_units)
+        except Exception as e:
+            logger.warning(f"Storage porting failed: {e}")
+            setup_summary['electricity']['storage'] = 0
+        
+        print(f"  ✓ Electricity sector: {setup_summary['electricity']}")
+        
+        # Step 6: Integrate gas and electricity demand from CSV
+        print("\n6. Integrating CSV demand data...")
+        
+        demand_stats = add_marei_csv_loads(network, marei_data, eu_countries)
+        setup_summary['electricity']['loads'] += demand_stats.get('electricity_loads', 0)
+        setup_summary['gas']['demand'] = demand_stats.get('gas_loads', 0)
+        
+        # Step 7: Add gas infrastructure from CSV
+        print("\n7. Adding gas infrastructure from CSV...")
+        
+        gas_infra_stats = add_marei_gas_infrastructure(network, marei_data, eu_countries)
+        setup_summary['gas'].update(gas_infra_stats)
+        
+        # Step 8: Set up gas sector from PlexosDB (enhanced with CSV)
+        print("\n8. Setting up gas sector from PlexosDB...")
+        
+        gas_summary = port_gas_components(network=network, db=db, testing_mode=False)
+        # Update with CSV-enhanced values
+        for key, value in gas_summary.items():
+            if key in setup_summary['gas'] and isinstance(value, int):
+                setup_summary['gas'][key] += value
+            else:
+                setup_summary['gas'][key] = value
+        
+        # Step 9: Add sector coupling
+        print("\n9. Setting up gas-electricity sector coupling...")
+        
+        coupling_stats = add_marei_sector_coupling(network, db, generators_as_links)
+        setup_summary['sector_coupling'].update(coupling_stats)
+        
+        # Step 10: Apply gas pricing from CSV
+        if 'gas_pricing' in marei_data and marei_data['gas_pricing']:
+            print(f"\n10. Applying {pricing_scheme} gas pricing...")
+            apply_marei_gas_pricing(network, marei_data['gas_pricing'], pricing_scheme)
+        
+        # Final summary
+        total_buses = len(network.buses)
+        total_generators = len(network.generators) 
+        total_links = len(network.links)
+        total_loads = len(network.loads)
+        total_storage = len(network.storage_units) + len(network.stores)
+        
+        print(f"\n✓ MaREI CSV-enhanced network complete!")
+        print(f"  Total components: {total_buses} buses, {total_generators} generators, {total_links} links, {total_loads} loads, {total_storage} storage")
+        
+        # Update final summary
+        setup_summary.update({
+            'total_buses': total_buses,
+            'total_generators': total_generators,
+            'total_links': total_links,
+            'total_loads': total_loads,
+            'total_storage': total_storage
+        })
+        
+    except Exception as e:
+        logger.error(f"Error setting up MaREI CSV network: {e}")
+        raise
+    
+    return setup_summary
+
+
+def add_marei_csv_loads(network: Network, marei_data: Dict, eu_countries: List[str]) -> Dict[str, int]:
+    """Add electricity and gas loads from MaREI CSV data."""
+    load_stats = {'electricity_loads': 0, 'gas_loads': 0, 'missing_countries': []}
+    
+    try:
+        # Add electricity loads from Load Files CSV
+        if 'electricity_demand' in marei_data:
+            elec_demands = marei_data['electricity_demand']
+            
+            for country, demand_profile in elec_demands.items():
+                # Find matching electricity bus
+                elec_bus = None
+                for bus_name in network.buses.index:
+                    if (network.buses.at[bus_name, 'carrier'] == 'AC' and 
+                        (bus_name.startswith(country) or bus_name.endswith(country))):
+                        elec_bus = bus_name
+                        break
+                
+                if elec_bus and len(demand_profile) > 0:
+                    load_name = f"elec_load_{country}"
+                    if load_name not in network.loads.index:
+                        # Ensure demand profile matches network snapshots
+                        if len(network.snapshots) == len(demand_profile):
+                            demand_series = pd.Series(demand_profile.values, index=network.snapshots)
+                        else:
+                            # Resample or extend to match snapshots
+                            demand_series = pd.Series(
+                                [demand_profile.iloc[i % len(demand_profile)] for i in range(len(network.snapshots))],
+                                index=network.snapshots
+                            )
+                        
+                        network.add('Load', load_name, bus=elec_bus, p_set=demand_series, carrier='electricity')
+                        load_stats['electricity_loads'] += 1
+                        
+                        if load_stats['electricity_loads'] <= 3:  # Debug first few
+                            print(f"    ✓ Added electricity load for {country}: {demand_series.mean():.1f} MW avg")
+                else:
+                    load_stats['missing_countries'].append(f"{country} (elec)")
+        
+        # Add gas loads from Gas Demand CSV
+        if 'gas_demand' in marei_data:
+            gas_demands = marei_data['gas_demand']
+            
+            for country, demand_profile in gas_demands.items():
+                gas_bus = f"gas_{country}"
+                
+                if gas_bus in network.buses.index and len(demand_profile) > 0:
+                    load_name = f"gas_load_{country}"
+                    if load_name not in network.loads.index:
+                        # Ensure demand profile matches network snapshots
+                        if len(network.snapshots) == len(demand_profile):
+                            demand_series = pd.Series(demand_profile.values, index=network.snapshots)
+                        else:
+                            # Resample or extend to match snapshots
+                            demand_series = pd.Series(
+                                [demand_profile.iloc[i % len(demand_profile)] for i in range(len(network.snapshots))],
+                                index=network.snapshots
+                            )
+                        
+                        network.add('Load', load_name, bus=gas_bus, p_set=demand_series, carrier='gas')
+                        load_stats['gas_loads'] += 1
+                        
+                        if load_stats['gas_loads'] <= 3:  # Debug first few
+                            print(f"    ✓ Added gas load for {country}: {demand_series.mean():.1f} MW avg")
+                else:
+                    load_stats['missing_countries'].append(f"{country} (gas)")
+        
+        print(f"  ✓ Added {load_stats['electricity_loads']} electricity loads, {load_stats['gas_loads']} gas loads")
+        if load_stats['missing_countries'][:5]:  # Show first 5 missing
+            print(f"    Missing buses for: {load_stats['missing_countries'][:5]}...")
+            
+    except Exception as e:
+        logger.warning(f"Error adding MaREI CSV loads: {e}")
+    
+    return load_stats
+
+
+def add_marei_gas_infrastructure(network: Network, marei_data: Dict, eu_countries: List[str]) -> Dict[str, int]:
+    """Add gas infrastructure from MaREI CSV data."""
+    infra_stats = {'pipelines': 0, 'storage': 0, 'lng': 0, 'fields': 0}
+    
+    try:
+        # Add gas pipelines from infrastructure CSV
+        if 'infrastructure' in marei_data and 'flow' in marei_data['infrastructure']:
+            flow_data = marei_data['infrastructure']['flow']
+            
+            if not flow_data.empty and len(flow_data.columns) > 1:
+                # Parse pipeline connections from column names (country pairs)
+                pipeline_connections = [col for col in flow_data.columns if '-' in col and col != 'Year']
+                
+                for connection in pipeline_connections:
+                    if '-' in connection:
+                        parts = connection.split('-')
+                        if len(parts) == 2:
+                            country1, country2 = parts[0], parts[1]
+                            gas_bus1 = f"gas_{country1}"
+                            gas_bus2 = f"gas_{country2}"
+                            
+                            if (gas_bus1 in network.buses.index and gas_bus2 in network.buses.index):
+                                pipeline_name = f"gas_pipeline_{country1}_{country2}"
+                                
+                                if pipeline_name not in network.links.index:
+                                    # Get capacity from CSV data (use 2030 value if available)
+                                    capacity = 100  # Default MW
+                                    if len(flow_data) > 0:
+                                        capacity_value = flow_data[connection].iloc[0] if not flow_data[connection].empty else 100
+                                        try:
+                                            capacity = float(capacity_value) if capacity_value else 100
+                                        except:
+                                            capacity = 100
+                                    
+                                    network.add('Link', pipeline_name,
+                                              bus0=gas_bus1, bus1=gas_bus2,
+                                              p_nom=capacity, efficiency=0.95,
+                                              carrier='gas_transport', marginal_cost=0.001)
+                                    infra_stats['pipelines'] += 1
+                
+                print(f"    ✓ Added {infra_stats['pipelines']} gas pipelines")
+        
+        # Add gas storage from storage CSV files
+        storage_files = ['storage_cap', 'storage_inj', 'storage_with']
+        if 'infrastructure' in marei_data:
+            for storage_type in storage_files:
+                if storage_type in marei_data['infrastructure']:
+                    storage_data = marei_data['infrastructure'][storage_type]
+                    
+                    if not storage_data.empty:
+                        # Parse storage locations from column names
+                        storage_locations = [col for col in storage_data.columns if col not in ['Year'] and len(col) <= 3]
+                        
+                        for country in storage_locations:
+                            gas_bus = f"gas_{country}"
+                            if gas_bus in network.buses.index:
+                                storage_name = f"gas_storage_{country}"
+                                
+                                if storage_name not in network.stores.index:
+                                    # Get storage capacity
+                                    capacity = 1000  # Default MWh
+                                    if len(storage_data) > 0 and country in storage_data.columns:
+                                        cap_value = storage_data[country].iloc[0] if not storage_data[country].empty else 1000
+                                        try:
+                                            capacity = float(cap_value) if cap_value else 1000
+                                        except:
+                                            capacity = 1000
+                                    
+                                    network.add('Store', storage_name, bus=gas_bus,
+                                              e_nom=capacity, e_cyclic=True,
+                                              carrier='gas', capital_cost=50)
+                                    infra_stats['storage'] += 1
+                                    break  # Only add one storage per country
+        
+        # Add LNG terminals
+        if 'infrastructure' in marei_data and 'lng' in marei_data['infrastructure']:
+            lng_data = marei_data['infrastructure']['lng']
+            
+            if not lng_data.empty:
+                lng_countries = [col for col in lng_data.columns if col not in ['Year'] and len(col) <= 3]
+                
+                for country in lng_countries:
+                    gas_bus = f"gas_{country}"
+                    if gas_bus in network.buses.index:
+                        lng_name = f"lng_terminal_{country}"
+                        
+                        if lng_name not in network.stores.index:
+                            # Get LNG capacity
+                            capacity = 500  # Default MWh
+                            if country in lng_data.columns and len(lng_data) > 0:
+                                cap_value = lng_data[country].iloc[0] if not lng_data[country].empty else 500
+                                try:
+                                    capacity = float(cap_value) if cap_value else 500
+                                except:
+                                    capacity = 500
+                            
+                            network.add('Store', lng_name, bus=gas_bus,
+                                      e_nom=capacity, e_cyclic=False,
+                                      carrier='gas', capital_cost=100)
+                            infra_stats['lng'] += 1
+        
+        print(f"    ✓ Gas infrastructure: {infra_stats['pipelines']} pipelines, {infra_stats['storage']} storage, {infra_stats['lng']} LNG terminals")
+        
+    except Exception as e:
+        logger.warning(f"Error adding MaREI gas infrastructure: {e}")
+    
+    return infra_stats
+
+
+def add_marei_sector_coupling(network: Network, db: PlexosDB, generators_as_links: bool) -> Dict[str, Any]:
+    """Add enhanced sector coupling for MaREI model."""
+    coupling_stats = {
+        'gas_to_elec_links': 0,
+        'gas_generators': 0,
+        'efficiency_range': 'N/A',
+        'fuel_types': []
+    }
+    
+    try:
+        # Get all gas and electricity buses
+        gas_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'gas']
+        elec_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'AC']
+        
+        # Create gas-to-electricity conversion links for each country
+        country_pairs = []
+        for gas_bus in gas_buses:
+            if gas_bus.startswith('gas_'):
+                country = gas_bus.replace('gas_', '')
+                # Find matching electricity bus
+                matching_elec_bus = None
+                for elec_bus in elec_buses:
+                    if elec_bus.startswith(country) or elec_bus.endswith(country):
+                        matching_elec_bus = elec_bus
+                        break
+                
+                if matching_elec_bus:
+                    country_pairs.append((gas_bus, matching_elec_bus, country))
+        
+        # Add gas-to-electricity conversion links
+        efficiency_values = []
+        for gas_bus, elec_bus, country in country_pairs:
+            link_name = f"gas_to_elec_{country}"
+            
+            if link_name not in network.links.index:
+                # Default gas plant efficiency
+                efficiency = 0.45  # 45% efficiency for gas-fired generation
+                efficiency_values.append(efficiency)
+                
+                network.add('Link', link_name,
+                          bus0=gas_bus, bus1=elec_bus,
+                          p_nom_extendable=True, efficiency=efficiency,
+                          carrier='gas_to_electricity', marginal_cost=0.01)
+                coupling_stats['gas_to_elec_links'] += 1
+        
+        if efficiency_values:
+            min_eff = min(efficiency_values)
+            max_eff = max(efficiency_values)
+            coupling_stats['efficiency_range'] = f"{min_eff:.1%} - {max_eff:.1%}"
+        
+        coupling_stats['fuel_types'] = ['Natural Gas']
+        
+        # Additional generators-as-links processing if enabled
+        if generators_as_links:
+            generator_objects = get_objects_by_class_name(db, 'Generator')
+            
+            for gen_name in generator_objects[:10]:  # Process first 10 for performance
+                props = get_object_properties_by_name(db, 'Generator', gen_name)
+                memberships = get_object_memberships(db, 'Generator', gen_name)
+                
+                # Check for gas connection
+                gas_connected = False
+                elec_node = None
+                
+                for membership in memberships:
+                    if membership.get('class') == 'Node':
+                        elec_node = membership.get('name')
+                
+                for prop in props:
+                    if prop.get('property') == 'Fuel' and 'gas' in str(prop.get('value', '')).lower():
+                        gas_connected = True
+                        break
+                
+                if gas_connected and elec_node and elec_node in network.buses.index:
+                    # Find matching gas bus for this generator's country
+                    country = elec_node[:2] if len(elec_node) >= 2 else elec_node
+                    gas_bus = f"gas_{country}"
+                    
+                    if gas_bus in network.buses.index:
+                        gen_link_name = f"gen_link_{gen_name}"
+                        if gen_link_name not in network.links.index:
+                            network.add('Link', gen_link_name,
+                                      bus0=gas_bus, bus1=elec_node,
+                                      p_nom=100, efficiency=0.45,
+                                      carrier='gas_generation')
+                            coupling_stats['gas_generators'] += 1
+        
+        print(f"    ✓ Sector coupling: {coupling_stats['gas_to_elec_links']} gas-to-elec links")
+        if generators_as_links and coupling_stats['gas_generators'] > 0:
+            print(f"    ✓ Generator links: {coupling_stats['gas_generators']} gas generator links")
+            
+    except Exception as e:
+        logger.warning(f"Error adding MaREI sector coupling: {e}")
+    
+    return coupling_stats
+
+
+def apply_marei_gas_pricing(network: Network, pricing_data: Dict, pricing_scheme: str) -> None:
+    """Apply gas pricing from MaREI CSV to gas buses and links."""
+    try:
+        if pricing_scheme.lower() not in pricing_data:
+            print(f"    Warning: Pricing scheme '{pricing_scheme}' not found in data")
+            return
+        
+        pricing_df = pricing_data[pricing_scheme.lower()]
+        
+        # Apply base gas pricing to gas buses (set marginal costs)
+        gas_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'gas']
+        base_gas_price = 30.0  # Default €/MWh
+        
+        if len(pricing_df) > 0 and 'price' in pricing_df.columns:
+            base_gas_price = float(pricing_df['price'].iloc[0]) if not pricing_df['price'].empty else 30.0
+        
+        # Update marginal costs for gas-related components
+        gas_links = [link for link in network.links.index if 'gas' in link.lower()]
+        for link in gas_links:
+            if network.links.at[link, 'carrier'] in ['gas_transport', 'gas_to_electricity']:
+                current_cost = network.links.at[link, 'marginal_cost']
+                network.links.at[link, 'marginal_cost'] = max(current_cost, base_gas_price * 0.01)
+        
+        print(f"    ✓ Applied {pricing_scheme} pricing: {base_gas_price:.1f} €/MWh base price")
+        
+    except Exception as e:
+        logger.warning(f"Error applying gas pricing: {e}")

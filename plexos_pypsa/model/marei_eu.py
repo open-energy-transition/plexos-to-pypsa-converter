@@ -16,7 +16,12 @@ from plexos_pypsa.db.models import INPUT_XMLS
 from plexos_pypsa.network.multi_sector_db import setup_gas_electric_network_db
 
 
-def create_marei_eu_model():
+def create_marei_eu_model(
+    use_csv_integration: bool = False,
+    csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
+    infrastructure_scenario: str = "PCI",
+    pricing_scheme: str = "Production"
+):
     """
     Create MaREI-EU PyPSA model with gas and electricity sectors.
 
@@ -24,6 +29,19 @@ def create_marei_eu_model():
     - Electricity network (Node, Generator, Line, Storage)
     - Gas network represented as PyPSA Links and Nodes
     - Sector coupling through gas-to-electric conversion Links
+    - Optional CSV data integration for enhanced demand profiles and infrastructure
+
+    Parameters
+    ----------
+    use_csv_integration : bool, default False
+        If True, integrates MaREI CSV data for detailed demand profiles and infrastructure.
+        If False, uses PlexosDB-only approach (legacy behavior).
+    csv_data_path : str, default MaREI CSV path
+        Path to MaREI CSV Files directory containing demand, infrastructure, and pricing data
+    infrastructure_scenario : str, default "PCI"
+        Infrastructure scenario for gas network ('PCI', 'High', 'Low')
+    pricing_scheme : str, default "Production"
+        Gas pricing mechanism ('Production', 'Postage', 'Trickle', 'Uniform')
 
     Returns
     -------
@@ -37,6 +55,12 @@ def create_marei_eu_model():
 
     print("Creating MaREI-EU Multi-Sector PyPSA Model...")
     print(f"XML file: {xml_file}")
+    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
+    
+    if use_csv_integration:
+        print(f"CSV data path: {csv_data_path}")
+        print(f"Infrastructure scenario: {infrastructure_scenario}")
+        print(f"Pricing scheme: {pricing_scheme}")
 
     # Load PLEXOS database
     print("\nLoading PLEXOS database...")
@@ -45,19 +69,45 @@ def create_marei_eu_model():
     # Initialize PyPSA network
     network = pypsa.Network()
 
-    # Set up multi-sector network with gas and electricity using database queries
-    print("\nSetting up multi-sector network (Gas + Electricity)...")
-    print("   Using direct database queries to discover gas and electricity components")
-    print("   Representing gas sector through Links and Nodes for sector coupling")
+    if use_csv_integration:
+        # Enhanced setup with CSV data integration
+        print("\nSetting up enhanced multi-sector network with CSV data integration...")
+        print("   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data")
+        print("   Following PyPSA multi-sector patterns for gas/electricity coupling")
+        
+        from plexos_pypsa.network.multi_sector_db import setup_marei_csv_network
+        
+        setup_summary = setup_marei_csv_network(
+            network=network,
+            db=plexos_db,
+            csv_data_path=csv_data_path,
+            infrastructure_scenario=infrastructure_scenario,
+            pricing_scheme=pricing_scheme,
+            generators_as_links=False
+        )
+    else:
+        # Traditional PlexosDB-only setup
+        print("\nSetting up multi-sector network (Gas + Electricity)...")
+        print("   Using direct database queries to discover gas and electricity components")
+        print("   Representing gas sector through Links and Nodes for sector coupling")
 
-    setup_summary = setup_gas_electric_network_db(network=network, db=plexos_db)
+        setup_summary = setup_gas_electric_network_db(network=network, db=plexos_db)
 
     return network, setup_summary
 
 
 if __name__ == "__main__":
     # Create the multi-sector model
-    network, setup_summary = create_marei_eu_model()
+    # Set use_csv_integration=True to enable MaREI CSV data integration
+    use_csv_integration = True  # Enable CSV integration for enhanced model
+    infrastructure_scenario = "PCI"  # Infrastructure scenario: 'PCI', 'High', 'Low'
+    pricing_scheme = "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
+    
+    network, setup_summary = create_marei_eu_model(
+        use_csv_integration=use_csv_integration,
+        infrastructure_scenario=infrastructure_scenario,
+        pricing_scheme=pricing_scheme
+    )
 
     # Print setup summary
     print("\n" + "=" * 60)
@@ -65,6 +115,19 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Network type: {setup_summary['network_type']}")
     print(f"Sectors: {', '.join(setup_summary['sectors'])}")
+    
+    # CSV integration summary (if enabled)
+    if use_csv_integration and setup_summary.get('csv_data_loaded', False):
+        csv_summary = setup_summary.get('csv_integration', {})
+        print(f"\nCSV Data Integration:")
+        print(f"  Infrastructure scenario: {setup_summary.get('infrastructure_scenario', 'N/A')}")
+        print(f"  Gas pricing scheme: {setup_summary.get('pricing_scheme', 'N/A')}")
+        print(f"  Data categories loaded: {csv_summary.get('data_categories', 0)}")
+        print(f"  Available datasets: {', '.join(csv_summary.get('available_datasets', []))}")
+        
+        # EU countries summary
+        if setup_summary.get('eu_countries'):
+            print(f"  EU countries: {len(setup_summary['eu_countries'])} ({', '.join(setup_summary['eu_countries'][:5])}...)")
 
     # Electricity sector summary
     elec_summary = setup_summary["electricity"]
@@ -75,23 +138,30 @@ if __name__ == "__main__":
     print(f"  Lines: {elec_summary['lines']}")
     print(f"  Storage: {elec_summary['storage']}")
 
-    # Gas sector summary
+    # Gas sector summary (enhanced with CSV)
     gas_summary = setup_summary["gas"]
-    print("\nGas Sector (Enhanced):")
+    print("\nGas Sector (Enhanced with CSV):")
     print(f"  Gas buses: {gas_summary['buses']}")
     print(f"  Gas fields: {gas_summary.get('fields', 0)} (Store components)")
     print(f"  Gas pipelines: {gas_summary['pipelines']} (Link components)")
     print(f"  Gas storage: {gas_summary['storage']} (Store components)")
     print(f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity Links)")
     print(f"  Gas demand: {gas_summary['demand']}")
+    print(f"  LNG terminals: {gas_summary.get('lng', 0)} (Store components)")
 
     # Enhanced sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
     print("\nEnhanced Sector Coupling:")
-    print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
-    print(f"  Gas-to-electric generators: {coupling_summary['gas_generators']}")
-    print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
-    print(f"  Conversion efficiency range: {coupling_summary['efficiency_range']}")
+    if use_csv_integration:
+        print(f"  Gas-to-electric links: {coupling_summary.get('gas_to_elec_links', 0)} (CSV enhanced)")
+        print(f"  Gas plants (from PlexosDB): {coupling_summary.get('gas_plants_added', 0)}")
+        print(f"  Generator links: {coupling_summary.get('gas_generators', 0)}")
+    else:
+        print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
+        print(f"  Gas-to-electric generators: {coupling_summary.get('gas_generators', 0)}")
+        print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
+    
+    print(f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}")
     if coupling_summary.get('fuel_types'):
         print(f"  Fuel types: {', '.join(coupling_summary['fuel_types'])}")
 
