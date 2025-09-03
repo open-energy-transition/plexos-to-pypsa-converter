@@ -13,7 +13,7 @@ from plexos_pypsa.db.read import (
     save_properties,
 )
 
-file_xml = INPUT_XMLS["marei-eu"]
+file_xml = INPUT_XMLS["plexos-message"]
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)
@@ -25,25 +25,26 @@ print("\nAvailable classes:")
 for cls in mod_classes:
     print(f"  - {cls}")
 
-list_and_print_objects(mod_db, ClassEnum.Line)
-print_properties(
-    mod_db,
-    ClassEnum.Line,
-    "AT-CZ",
-    detailed=False,
-)
-
 list_and_print_objects(mod_db, ClassEnum.Constraint)
-mod_db.list_objects_by_class(ClassEnum.GasNode)
+list_and_print_objects(mod_db, ClassEnum.FlowNode)
+
+mod_db.list_objects_by_class(ClassEnum.FlowNode)
 mod_db.list_objects_by_class(ClassEnum.Constraint)
 list_and_print_objects(mod_db, ClassEnum.Constraint)
 
 print_properties(
     mod_db,
     ClassEnum.Constraint,
-    "Biomass_units_built_constraint R5ASIA",
+    "H2PipelineAF-AGO-AF-COD|Con",
     detailed=True,
 )
+
+# check memberships of constraint
+mem_constraint = mod_db.get_memberships_system(
+    "H2PipelineAF-AGO-AF-COD|Con", object_class=ClassEnum.Constraint
+)
+print_memberships(mem_constraint)
+
 
 mod_db.get_object_properties(
     ClassEnum.Constraint, "Biomass_units_built_constraint R5ASIA"
