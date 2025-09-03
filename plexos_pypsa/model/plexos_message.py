@@ -13,10 +13,15 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.db.models import INPUT_XMLS
-from plexos_pypsa.network.multi_sector_db import setup_flow_network_db, setup_enhanced_flow_network_with_csv
+from plexos_pypsa.network.multi_sector_db import (
+    setup_enhanced_flow_network_with_csv,
+    setup_flow_network_db,
+)
 
 
-def create_plexos_message_model(testing_mode: bool = False, use_csv_integration: bool = True):
+def create_plexos_message_model(
+    testing_mode: bool = False, use_csv_integration: bool = True
+):
     """
     Create PLEXOS-MESSAGE PyPSA model with electricity, hydrogen, and ammonia sectors.
 
@@ -63,16 +68,18 @@ def create_plexos_message_model(testing_mode: bool = False, use_csv_integration:
         )
         print("   Following PyPSA best practices for sector coupling")
         print("   Integrating BuildCosts.csv, Load.csv, H2_Demand_With_Blending.csv")
-        print("   Creating sector coupling links (Electrolysis, H2Power, Haber-Bosch, Ammonia Cracking)")
-        
+        print(
+            "   Creating sector coupling links (Electrolysis, H2Power, Haber-Bosch, Ammonia Cracking)"
+        )
+
         # Define inputs folder path
         inputs_folder = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main/Inputs"
-        
+
         setup_summary = setup_enhanced_flow_network_with_csv(
-            network=network, 
-            db=plexos_db, 
+            network=network,
+            db=plexos_db,
             inputs_folder=inputs_folder,
-            testing_mode=testing_mode
+            testing_mode=testing_mode,
         )
     else:
         # Use traditional flow network setup
@@ -89,17 +96,14 @@ def create_plexos_message_model(testing_mode: bool = False, use_csv_integration:
     return network, setup_summary
 
 
-# n, s = create_plexos_message_model()  # Disabled to avoid double execution
-
 if __name__ == "__main__":
     # Create the multi-sector model
     # Set testing_mode=True for faster development, False for complete model
     testing_mode = True  # Change to True for testing
     use_csv_integration = True  # Enable CSV data integration with PyPSA best practices
-    
+
     network, setup_summary = create_plexos_message_model(
-        testing_mode=testing_mode, 
-        use_csv_integration=use_csv_integration
+        testing_mode=testing_mode, use_csv_integration=use_csv_integration
     )
 
     # Print setup summary
@@ -108,17 +112,19 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"Network type: {setup_summary['network_type']}")
     print(f"Sectors: {', '.join(setup_summary['sectors'])}")
-    
+
     # CSV integration summary (if enabled)
-    if use_csv_integration and setup_summary.get('csv_data_loaded', False):
-        csv_summary = setup_summary.get('csv_integration', {})
-        print(f"\nCSV Data Integration:")
+    if use_csv_integration and setup_summary.get("csv_data_loaded", False):
+        csv_summary = setup_summary.get("csv_integration", {})
+        print("\nCSV Data Integration:")
         print(f"  Cost files loaded: {csv_summary.get('cost_files', 0)}")
         print(f"  Time series files loaded: {csv_summary.get('time_series_files', 0)}")
-        print(f"  Infrastructure files loaded: {csv_summary.get('infrastructure_files', 0)}")
+        print(
+            f"  Infrastructure files loaded: {csv_summary.get('infrastructure_files', 0)}"
+        )
         print(f"  Snapshots source: {setup_summary.get('snapshots_source', 'N/A')}")
         print(f"  Snapshots count: {setup_summary.get('snapshots_count', 0)}")
-        
+
     # Multi-sector buses (if CSV integration enabled)
     if "multi_sector_buses" in setup_summary:
         buses_summary = setup_summary["multi_sector_buses"]
@@ -138,14 +144,14 @@ if __name__ == "__main__":
         print("\nSector Coupling Links (PyPSA Best Practices):")
         for link_type, count in coupling_summary.items():
             print(f"  {link_type.replace('_', ' ').title()}: {count}")
-            
+
     # Multi-sector loads (if CSV integration enabled)
     if "multi_sector_loads" in setup_summary:
         loads_summary = setup_summary["multi_sector_loads"]
         print("\nMulti-Sector Loads:")
         for sector, count in loads_summary.items():
             print(f"  {sector.title()}: {count}")
-            
+
     # Multi-sector storage (if CSV integration enabled)
     if "multi_sector_storage" in setup_summary:
         storage_summary = setup_summary["multi_sector_storage"]
@@ -158,7 +164,7 @@ if __name__ == "__main__":
         print(f"\nH2 Pipeline Infrastructure: {setup_summary['h2_pipelines']} links")
 
     # Traditional summaries (if not using CSV integration)
-    if not use_csv_integration or not setup_summary.get('csv_data_loaded', False):
+    if not use_csv_integration or not setup_summary.get("csv_data_loaded", False):
         # Paths
         if "paths" in setup_summary:
             paths_summary = setup_summary["paths"]

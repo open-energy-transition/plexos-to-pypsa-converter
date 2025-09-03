@@ -27,6 +27,42 @@ from .core import setup_network
 logger = logging.getLogger(__name__)
 
 
+def sync_network_carriers(network: Network) -> None:
+    """
+    Discover and add missing carriers from existing network components.
+    
+    This function inspects all network components (generators, links, loads, buses) 
+    and adds any carriers they reference that don't already exist in network.carriers.
+    This ensures PyPSA consistency by preventing "carrier not defined" warnings.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to sync carriers for
+    """
+    missing_carriers = set()
+    
+    # Extract carriers from all network components
+    if len(network.links) > 0 and 'carrier' in network.links.columns:
+        missing_carriers.update(network.links.carrier.dropna().unique())
+    if len(network.generators) > 0 and 'carrier' in network.generators.columns:
+        missing_carriers.update(network.generators.carrier.dropna().unique())
+    if len(network.loads) > 0 and 'carrier' in network.loads.columns:
+        missing_carriers.update(network.loads.carrier.dropna().unique())
+    if len(network.buses) > 0 and 'carrier' in network.buses.columns:
+        missing_carriers.update(network.buses.carrier.dropna().unique())
+    
+    # Add any missing carriers
+    added_count = 0
+    for carrier in missing_carriers:
+        if carrier not in network.carriers.index:
+            network.add('Carrier', carrier)
+            added_count += 1
+            
+    if added_count > 0:
+        print(f"   Automatically added {added_count} missing carriers from network components")
+
+
 def get_class_enum_from_string(class_name: str) -> Optional[ClassEnum]:
     """
     Convert a string class name to the corresponding ClassEnum value.
@@ -1149,6 +1185,10 @@ def setup_enhanced_flow_network_with_csv(network: Network, db: PlexosDB, inputs_
         setup_summary['total_loads'] = len(network.loads)
         setup_summary['total_stores'] = len(network.stores)
         
+        # Step 11: Sync any missing carriers from network components
+        print("\n11. Syncing network carriers...")
+        sync_network_carriers(network)
+        
     except Exception as e:
         logger.error(f"Error setting up enhanced flow network: {e}")
         raise
@@ -1660,42 +1700,17 @@ def setup_marei_csv_network(
         # Step 2: Set up basic network structure from PlexosDB
         print("\n2. Setting up base network structure from PlexosDB...")
         
-        # Add comprehensive carriers for multi-sector MaREI model
-        # This must be done BEFORE creating any components that reference these carriers
-        carriers = [
-            # Base carriers (buses)
-            'AC',                    # Electricity buses
-            'gas',                   # Gas buses  
-            'hydrogen',              # Hydrogen buses (if used)
-            
-            # Load carriers
-            'electricity',           # Electricity loads
-            
-            # Link/conversion carriers
-            'gas_to_electricity',    # Gas-to-electricity conversion links
-            'gas_transport',         # Gas pipeline transport links
-            'gas_generation',        # Gas generation links
-            'conversion',            # Generator-as-link conversion (from generators.py)
-            'hydrogen_transport',    # Hydrogen transport links (if used)
-            'electrolysis',          # Electrolysis links (if used)
-            'fuel_cell',             # Fuel cell links (if used)
-            
-            # Fuel carriers (created dynamically by generators.py when generators_as_links=True)
-            'Natural_Gas',           # Natural gas fuel
-            'Coal',                  # Coal fuel
-            'Nuclear',               # Nuclear fuel
-            'Lignite',               # Lignite fuel  
-            'Biomass',               # Biomass fuel
-            'Oil',                   # Oil fuel
-            'Waste',                 # Waste fuel
-            'Gas',                   # Generic gas fuel
-        ]
+        # Add carriers automatically discovered from database
+        print("   Discovering carriers from PLEXOS database...")
+        from .core import discover_carriers_from_db
+        carriers_to_add = discover_carriers_from_db(db)
         
-        for carrier in carriers:
+        added_carriers = []
+        for carrier in carriers_to_add:
             if carrier not in network.carriers.index:
                 network.add('Carrier', carrier)
-                
-        print(f"  ✓ Added {len(carriers)} carriers for multi-sector model")
+                added_carriers.append(carrier)
+        print(f"   Added {len(added_carriers)} carriers automatically from database")
         
         # Get electricity buses from PlexosDB
         node_objects = get_objects_by_class_name(db, 'Node')
@@ -1826,6 +1841,10 @@ def setup_marei_csv_network(
             'total_loads': total_loads,
             'total_storage': total_storage
         })
+        
+        # Sync any missing carriers from network components
+        print("\nSyncing network carriers...")
+        sync_network_carriers(network)
         
     except Exception as e:
         logger.error(f"Error setting up MaREI CSV network: {e}")
