@@ -114,44 +114,53 @@ if __name__ == "__main__":
     print(f"  Lines: {elec_summary['lines']}")
     print(f"  Storage: {elec_summary['storage']}")
 
-    # Gas sector summary
+    # Enhanced gas sector summary
     gas_summary = setup_summary["gas"]
-    print("\nGas Sector:")
-    print(f"  Gas buses: {gas_summary['buses']}")
-    print(f"  Gas pipelines: {gas_summary['pipelines']}")
-    print(f"  Gas storage: {gas_summary['storage']}")
-    print(f"  Gas demand: {gas_summary['demand']}")
-    print(f"  Gas fields: {gas_summary['fields']}")
+    print("\nGas Sector (Enhanced with PyPSA Patterns):")
+    print(f"  Gas buses: {gas_summary['buses']} (enhanced carrier typing)")
+    print(f"  Gas fields: {gas_summary.get('fields', 0)} (Store components - finite reserves)")
+    print(f"  Gas pipelines: {gas_summary['pipelines']} (Link components with losses)")
+    print(f"  Gas storage: {gas_summary['storage']} (Store components with cycling)")
+    print(f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity conversion Links)")
+    print(f"  Gas demand: {gas_summary['demand']} (Load components)")
 
-    # Sector coupling summary
+    # Enhanced sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
-    print("\nSector Coupling:")
+    print("\nEnhanced Sector Coupling:")
     if generators_as_links:
-        print(
-            f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)}"
-        )
-        print(
-            f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)}"
-        )
+        print(f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)} (fuel→electricity)")
+        print(f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)} (standard generators)")
+        print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (gas→electricity from gas.py)")
+        print(f"  Gas-fired generators: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)")
+        print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
         print(f"  Fuel types represented: {coupling_summary.get('fuel_types', [])}")
     else:
         print(f"  Gas-to-electric generators: {coupling_summary['gas_generators']}")
+        print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
     print(f"  Conversion efficiency range: {coupling_summary['efficiency_range']}")
 
-    # Network totals
-    print("\nTotal Network Components:")
-    print(f"  Total buses: {len(network.buses)}")
-    print(f"  Total generators: {len(network.generators)}")
-    print(f"  Total links: {len(network.links)}")
-    print(f"  Total storage units: {len(network.storage_units)}")
-    print(f"  Total loads: {len(network.loads)}")
+    # Enhanced network totals with multi-sector breakdown
+    print("\nTotal Network Components (Multi-Sector):")
+    print(f"  Total buses: {len(network.buses)} (electricity + gas + other carriers)")
+    print(f"  Total generators: {len(network.generators)} (renewables + remaining conventional)")
+    print(f"  Total links: {len(network.links)} (transmission + pipelines + conversions + generator-links)")
+    print(f"  Total storage units: {len(network.storage_units)} (electricity storage)")
+    print(f"  Total stores: {len(network.stores)} (gas fields + gas storage)")
+    print(f"  Total loads: {len(network.loads)} (electricity + gas demand)")
 
-    # Carrier breakdown
+    # Enhanced carrier breakdown
     if len(network.buses) > 0:
         carriers = network.buses.carrier.value_counts()
-        print("\nCarrier Distribution:")
+        print("\nBus Carrier Distribution (Multi-Sector):")
         for carrier, count in carriers.items():
             print(f"  {carrier}: {count} buses")
+    
+    # Link breakdown by carrier
+    if len(network.links) > 0 and 'carrier' in network.links.columns:
+        link_carriers = network.links.carrier.value_counts()
+        print("\nLink Carrier Distribution:")
+        for carrier, count in link_carriers.items():
+            print(f"  {carrier}: {count} links")
 
     # Run consistency check
     print("\nRunning network consistency check...")

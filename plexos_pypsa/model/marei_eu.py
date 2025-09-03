@@ -77,26 +77,39 @@ if __name__ == "__main__":
 
     # Gas sector summary
     gas_summary = setup_summary["gas"]
-    print("\nGas Sector:")
+    print("\nGas Sector (Enhanced):")
     print(f"  Gas buses: {gas_summary['buses']}")
-    print(f"  Gas pipelines: {gas_summary['pipelines']}")
-    print(f"  Gas storage: {gas_summary['storage']}")
+    print(f"  Gas fields: {gas_summary.get('fields', 0)} (Store components)")
+    print(f"  Gas pipelines: {gas_summary['pipelines']} (Link components)")
+    print(f"  Gas storage: {gas_summary['storage']} (Store components)")
+    print(f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity Links)")
     print(f"  Gas demand: {gas_summary['demand']}")
-    # print(f"  Gas fields: {gas_summary['fields']}")
 
-    # Sector coupling summary
+    # Enhanced sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
-    print("\nSector Coupling:")
+    print("\nEnhanced Sector Coupling:")
+    print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
     print(f"  Gas-to-electric generators: {coupling_summary['gas_generators']}")
+    print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
     print(f"  Conversion efficiency range: {coupling_summary['efficiency_range']}")
+    if coupling_summary.get('fuel_types'):
+        print(f"  Fuel types: {', '.join(coupling_summary['fuel_types'])}")
 
-    # Network totals
+    # Network totals with enhanced multi-sector breakdown
     print("\nTotal Network Components:")
-    print(f"  Total buses: {len(network.buses)}")
+    print(f"  Total buses: {len(network.buses)} (electricity + gas)")
     print(f"  Total generators: {len(network.generators)}")
-    print(f"  Total links: {len(network.links)}")
+    print(f"  Total links: {len(network.links)} (transmission + pipelines + conversions)")
     print(f"  Total storage units: {len(network.storage_units)}")
-    print(f"  Total loads: {len(network.loads)}")
+    print(f"  Total stores: {len(network.stores)} (gas fields + gas storage)")
+    print(f"  Total loads: {len(network.loads)} (electricity + gas demand)")
+    
+    # Component breakdown by carrier
+    if len(network.buses) > 0:
+        carriers = network.buses.carrier.value_counts()
+        print("\nBus Carrier Distribution:")
+        for carrier, count in carriers.items():
+            print(f"  {carrier}: {count} buses")
 
     # Run consistency check
     print("\nRunning network consistency check...")

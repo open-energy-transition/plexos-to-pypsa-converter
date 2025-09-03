@@ -777,14 +777,22 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
         gas_summary = port_gas_components(network=network, db=db, timeslice_csv=timeslice_csv, testing_mode=testing_mode)
         setup_summary['gas'].update(gas_summary)
         
-        # Step 6: Add sector coupling (gas-electric coupling)
-        print("\n6. Setting up gas-electric sector coupling...")
+        # Step 6: Add enhanced sector coupling (gas-electric coupling)
+        print("\n6. Setting up enhanced gas-electric sector coupling...")
         
-        coupling_stats = add_gas_electric_coupling_db(network, db)
+        coupling_stats = add_gas_electric_coupling_db(network, db, generators_as_links=generators_as_links)
         setup_summary['sector_coupling'].update(coupling_stats)
+        
+        # Print coupling summary
+        if coupling_stats.get('gas_plants_added', 0) > 0:
+            print(f"   Gas plants (from gas.py): {coupling_stats['gas_plants_added']} links")
         if coupling_stats.get('gas_generators', 0) > 0:
-            print(f"   Added {coupling_stats['gas_generators']} gas-to-electric conversion links")
+            print(f"   Gas-fired generators: {coupling_stats['gas_generators']} links")
             print(f"   Efficiency range: {coupling_stats['efficiency_range']}")
+        if coupling_stats.get('sector_coupling_links', 0) > 0:
+            print(f"   Multi-sector links (electrolysis/fuel_cell): {coupling_stats['sector_coupling_links']} links")
+        if coupling_stats.get('fuel_types'):
+            print(f"   Fuel types: {', '.join(coupling_stats['fuel_types'])}")
         
         # Step 7: Add basic loads for load balancing
         print("\n7. Adding load balancing...")
@@ -825,80 +833,143 @@ def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_
     return setup_summary
 
 
-def add_gas_electric_coupling_db(network: Network, db: PlexosDB) -> Dict[str, Any]:
-    """Add gas-to-electric conversion from generators with gas connections."""
-    coupling_stats = {'gas_generators': 0, 'efficiency_range': 'N/A'}
+def add_gas_electric_coupling_db(network: Network, db: PlexosDB, generators_as_links: bool = False) -> Dict[str, Any]:
+    """
+    Add enhanced gas-to-electric conversion following PyPSA multi-sector patterns.
+    
+    This function creates comprehensive sector coupling between gas and electricity sectors,
+    integrating with the enhanced gas network components and following established patterns
+    from plexos_message.py.
+    """
+    coupling_stats = {
+        'gas_generators': 0, 
+        'efficiency_range': 'N/A',
+        'gas_plants_added': 0,
+        'fuel_types': [],
+        'sector_coupling_links': 0
+    }
     
     try:
-        generator_objects = get_objects_by_class_name(db, 'Generator')
-        efficiency_values = []
+        # 1. Process existing gas plants (already added by gas.py)
+        gas_plant_links = [link for link in network.links.index if 'gas_plant_' in link]
+        coupling_stats['gas_plants_added'] = len(gas_plant_links)
         
-        for gen_name in generator_objects:
-            # Get generator properties and memberships
-            props = get_object_properties_by_name(db, 'Generator', gen_name)
-            memberships = get_object_memberships(db, 'Generator', gen_name)
+        # 2. Process electricity generators with gas connections (for generators_as_links mode)
+        if generators_as_links:
+            generator_objects = get_objects_by_class_name(db, 'Generator')
+            efficiency_values = []
+            fuel_types_found = set()
             
-            # Check if generator has gas connection
-            gas_node = None
-            elec_node = None
-            
-            for membership in memberships:
-                if membership.get('class') == 'Node':
-                    elec_node = membership.get('name')
-                elif 'gas' in membership.get('class', '').lower() and 'node' in membership.get('class', '').lower():
-                    gas_node = membership.get('name')
-            
-            # Also check properties for Gas Node references
-            if not gas_node:
-                for prop in props:
-                    if prop.get('property') == 'Gas Node':
-                        gas_node = prop.get('value')
-                        break
-            
-            if elec_node and gas_node:
-                elec_bus = elec_node
-                gas_bus = f"gas_{gas_node}"
+            for gen_name in generator_objects:
+                # Get generator properties and memberships
+                props = get_object_properties_by_name(db, 'Generator', gen_name)
+                memberships = get_object_memberships(db, 'Generator', gen_name)
                 
-                # Check if both buses exist
-                if elec_bus in network.buses.index and gas_bus in network.buses.index:
-                    # Get generator properties
-                    max_capacity = 100  # Default
-                    heat_rate = 9.0  # Default
-                    
+                # Check if generator has gas connection
+                gas_node = None
+                elec_node = None
+                
+                for membership in memberships:
+                    if membership.get('class') == 'Node':
+                        elec_node = membership.get('name')
+                    elif 'gas' in membership.get('class', '').lower() and 'node' in membership.get('class', '').lower():
+                        gas_node = membership.get('name')
+                
+                # Also check properties for Gas Node references
+                if not gas_node:
                     for prop in props:
-                        if prop.get('property') == 'Max Capacity':
-                            max_capacity = prop.get('value', 100)
-                        elif prop.get('property') == 'Heat Rate':
-                            heat_rate = prop.get('value', 9.0)
+                        if prop.get('property') == 'Gas Node':
+                            gas_node = prop.get('value')
+                            break
+                
+                if elec_node and gas_node:
+                    elec_bus = elec_node
+                    gas_bus = f"gas_{gas_node}"
                     
-                    try:
-                        p_nom = float(max_capacity) if max_capacity else 100.0
-                        hr = float(heat_rate) if heat_rate else 9.0
+                    # Check if both buses exist
+                    if elec_bus in network.buses.index and gas_bus in network.buses.index:
+                        # Get generator properties
+                        max_capacity = 100  # Default
+                        heat_rate = 9.0  # Default
+                        fuel_type = 'Natural Gas'  # Default
                         
-                        # Calculate efficiency (3412 BTU/kWh conversion factor)
-                        efficiency = 3412 / hr if hr > 0 else 0.4
-                        efficiency = min(efficiency, 0.65)  # Cap at 65%
+                        for prop in props:
+                            if prop.get('property') == 'Max Capacity':
+                                max_capacity = prop.get('value', 100)
+                            elif prop.get('property') == 'Heat Rate':
+                                heat_rate = prop.get('value', 9.0)
+                            elif prop.get('property') == 'Fuel':
+                                fuel_type = prop.get('value', 'Natural Gas')
                         
-                        efficiency_values.append(efficiency)
-                        
-                        # Create gas-to-electric conversion link
-                        link_name = f"gas_to_elec_{gen_name}"
-                        if link_name not in network.links.index:
-                            network.add('Link', link_name,
-                                      bus0=gas_bus, bus1=elec_bus, p_nom=p_nom,
-                                      efficiency=efficiency, carrier='Gas2Electric')
-                            coupling_stats['gas_generators'] += 1
-                    except:
-                        pass
+                        try:
+                            p_nom = float(max_capacity) if max_capacity else 100.0
+                            hr = float(heat_rate) if heat_rate else 9.0
+                            
+                            # Calculate efficiency (3412 BTU/kWh conversion factor)
+                            efficiency = 3412 / hr if hr > 0 else 0.4
+                            efficiency = min(efficiency, 0.65)  # Cap at 65%
+                            
+                            efficiency_values.append(efficiency)
+                            fuel_types_found.add(fuel_type)
+                            
+                            # Create gas-to-electric conversion link (generators-as-links mode)
+                            link_name = f"gas_to_elec_{gen_name}"
+                            if link_name not in network.links.index:
+                                network.add('Link', link_name,
+                                          bus0=gas_bus, bus1=elec_bus, p_nom=p_nom,
+                                          efficiency=efficiency, carrier='gas_to_electricity',
+                                          marginal_cost=0.01)  # Small marginal cost for gas conversion
+                                coupling_stats['gas_generators'] += 1
+                        except:
+                            pass
+            
+            coupling_stats['fuel_types'] = list(fuel_types_found)
+            
+            # Calculate efficiency range
+            if efficiency_values:
+                min_eff = min(efficiency_values)
+                max_eff = max(efficiency_values)
+                coupling_stats['efficiency_range'] = f"{min_eff:.1%} - {max_eff:.1%}"
         
-        # Calculate efficiency range
-        if efficiency_values:
-            min_eff = min(efficiency_values)
-            max_eff = max(efficiency_values)
-            coupling_stats['efficiency_range'] = f"{min_eff:.1%} - {max_eff:.1%}"
+        # 3. Add additional sector coupling following plexos_message.py patterns
+        # Check for any hydrogen or other gas types for multi-sector coupling
+        hydrogen_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'hydrogen']
+        elec_buses = [bus for bus in network.buses.index if network.buses.at[bus, 'carrier'] == 'AC']
+        
+        if hydrogen_buses and elec_buses:
+            # Add power-to-gas (electrolysis) links
+            for i, (elec_bus, h2_bus) in enumerate(zip(elec_buses[:3], hydrogen_buses[:3])):
+                electrolysis_link = f"power_to_gas_{i+1}"
+                if electrolysis_link not in network.links.index:
+                    network.add('Link', electrolysis_link,
+                              bus0=elec_bus, bus1=h2_bus,
+                              p_nom_extendable=True,
+                              efficiency=0.7,  # Electrolysis efficiency
+                              capital_cost=1000,  # €/MW
+                              carrier='electrolysis')
+                    coupling_stats['sector_coupling_links'] += 1
+            
+            # Add gas-to-power (fuel cell) links
+            for i, (h2_bus, elec_bus) in enumerate(zip(hydrogen_buses[:2], elec_buses[:2])):
+                fuel_cell_link = f"gas_to_power_{i+1}"
+                if fuel_cell_link not in network.links.index:
+                    network.add('Link', fuel_cell_link,
+                              bus0=h2_bus, bus1=elec_bus,
+                              p_nom_extendable=True,
+                              efficiency=0.5,  # Fuel cell efficiency
+                              capital_cost=1500,  # €/MW
+                              carrier='fuel_cell')
+                    coupling_stats['sector_coupling_links'] += 1
+        
+        # 4. Total sector coupling links
+        total_coupling = (coupling_stats['gas_generators'] + 
+                         coupling_stats['gas_plants_added'] + 
+                         coupling_stats['sector_coupling_links'])
+        
+        logger.info(f"Enhanced gas-electric coupling complete: {total_coupling} total coupling links")
             
     except Exception as e:
-        logger.warning(f"Failed to add gas-electric coupling: {e}")
+        logger.warning(f"Failed to add enhanced gas-electric coupling: {e}")
     
     return coupling_stats
 
