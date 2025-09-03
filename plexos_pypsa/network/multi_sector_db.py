@@ -3,11 +3,12 @@ Multi-Sector Network Setup Functions (Database-based)
 
 This module provides functions to set up PyPSA networks for multi-sector energy models
 using direct database queries to discover Gas and Flow network classes dynamically.
-This approach is more robust than relying on ClassEnum for multi-sector classes.
+Enhanced with CSV data integration following PyPSA multi-sector best practices.
 """
 
 import logging
 from typing import Dict, List, Any, Optional, Tuple
+import os
 
 import pandas as pd
 import numpy as np
@@ -232,6 +233,420 @@ def get_object_memberships(db: PlexosDB, class_name: str, object_name: str) -> L
         logger.warning(f"Failed to get memberships for object {object_name}: {e}")
     
     return memberships
+
+
+# ============================================================================
+# CSV Data Integration Functions (PyPSA Multi-Sector Best Practices)
+# ============================================================================
+
+def load_csv_costs(inputs_folder: str) -> Dict[str, pd.DataFrame]:
+    """
+    Load cost data from CSV files in the PLEXOS-MESSAGE inputs folder.
+    
+    Parameters
+    ----------
+    inputs_folder : str
+        Path to the inputs folder containing CSV files
+        
+    Returns
+    -------
+    Dict[str, pd.DataFrame]
+        Dictionary containing cost dataframes: 'build_costs', 'foms', 'voms', 'fuel_prices'
+    """
+    cost_data = {}
+    
+    try:
+        # Load build costs (capital costs)
+        build_costs_path = os.path.join(inputs_folder, "BuildCosts.csv")
+        if os.path.exists(build_costs_path):
+            cost_data['build_costs'] = pd.read_csv(build_costs_path, index_col='YEAR')
+            logger.info(f"Loaded BuildCosts.csv with {len(cost_data['build_costs'].columns)} technology-region combinations")
+        
+        # Load fixed O&M costs
+        foms_path = os.path.join(inputs_folder, "FOMs.csv")  
+        if os.path.exists(foms_path):
+            cost_data['foms'] = pd.read_csv(foms_path, index_col='YEAR')
+            logger.info(f"Loaded FOMs.csv with {len(cost_data['foms'].columns)} technology-region combinations")
+            
+        # Load variable O&M costs
+        voms_path = os.path.join(inputs_folder, "VOMs.csv")
+        if os.path.exists(voms_path):
+            cost_data['voms'] = pd.read_csv(voms_path, index_col='YEAR')
+            logger.info(f"Loaded VOMs.csv with {len(cost_data['voms'].columns)} technology-region combinations")
+            
+        # Load fuel prices with emissions
+        fuel_prices_path = os.path.join(inputs_folder, "prices_w_emissions_permwh.csv")
+        if os.path.exists(fuel_prices_path):
+            cost_data['fuel_prices'] = pd.read_csv(fuel_prices_path)
+            logger.info(f"Loaded fuel prices with {len(cost_data['fuel_prices'].columns)} fuel types")
+            
+    except Exception as e:
+        logger.warning(f"Error loading CSV cost data: {e}")
+    
+    return cost_data
+
+
+def load_time_series_data(inputs_folder: str) -> Dict[str, pd.DataFrame]:
+    """
+    Load time series data from CSV files following PyPSA patterns.
+    
+    Parameters
+    ----------
+    inputs_folder : str
+        Path to the inputs folder containing CSV files
+        
+    Returns
+    -------
+    Dict[str, pd.DataFrame]
+        Dictionary containing time series dataframes
+    """
+    time_series_data = {}
+    
+    try:
+        # Load electricity demand (primary snapshots source)
+        load_path = os.path.join(inputs_folder, "Load.csv")
+        if os.path.exists(load_path):
+            load_df = pd.read_csv(load_path, parse_dates=['Datetime'], index_col='Datetime')
+            time_series_data['electricity_demand'] = load_df
+            logger.info(f"Loaded Load.csv with {len(load_df.columns)} regions and {len(load_df)} time steps")
+            
+        # Load hydrogen demand
+        h2_demand_path = os.path.join(inputs_folder, "H2_Demand_With_Blending.csv")
+        if os.path.exists(h2_demand_path):
+            h2_df = pd.read_csv(h2_demand_path, parse_dates=['Datetime'], index_col='Datetime')
+            time_series_data['hydrogen_demand'] = h2_df
+            logger.info(f"Loaded H2 demand with {len(h2_df.columns)} regions")
+            
+        # Load VRE profiles
+        solar_path = os.path.join(inputs_folder, "Solar_Inverted.csv")
+        if os.path.exists(solar_path):
+            solar_df = pd.read_csv(solar_path, parse_dates=['Datetime'], index_col='Datetime')
+            time_series_data['solar_profiles'] = solar_df
+            logger.info(f"Loaded Solar profiles with {len(solar_df.columns)} regions")
+            
+        wind_path = os.path.join(inputs_folder, "Wind_Inverted.csv") 
+        if os.path.exists(wind_path):
+            wind_df = pd.read_csv(wind_path, parse_dates=['Datetime'], index_col='Datetime')
+            time_series_data['wind_profiles'] = wind_df
+            logger.info(f"Loaded Wind profiles with {len(wind_df.columns)} regions")
+            
+        # Load hydro inflows (monthly data)
+        hydro_path = os.path.join(inputs_folder, "Hydro.csv")
+        if os.path.exists(hydro_path):
+            hydro_df = pd.read_csv(hydro_path, index_col='NAME')
+            time_series_data['hydro_inflows'] = hydro_df
+            logger.info(f"Loaded Hydro inflows for {len(hydro_df)} facilities")
+            
+    except Exception as e:
+        logger.warning(f"Error loading time series data: {e}")
+        
+    return time_series_data
+
+
+def load_infrastructure_data(inputs_folder: str) -> Dict[str, pd.DataFrame]:
+    """
+    Load infrastructure data for multi-sector modeling.
+    
+    Parameters
+    ----------
+    inputs_folder : str
+        Path to the inputs folder containing CSV files
+        
+    Returns  
+    -------
+    Dict[str, pd.DataFrame]
+        Dictionary containing infrastructure dataframes
+    """
+    infrastructure_data = {}
+    
+    try:
+        # Load H2 pipeline data
+        pipelines_path = os.path.join(inputs_folder, "H2Pipelines.csv")
+        if os.path.exists(pipelines_path):
+            pipelines_df = pd.read_csv(pipelines_path)
+            infrastructure_data['h2_pipelines'] = pipelines_df
+            logger.info(f"Loaded {len(pipelines_df)} H2 pipelines")
+            
+        # Load losses data 
+        losses_path = os.path.join(inputs_folder, "Losses.csv")
+        if os.path.exists(losses_path):
+            losses_df = pd.read_csv(losses_path)
+            infrastructure_data['losses'] = losses_df
+            logger.info(f"Loaded transmission losses data")
+            
+    except Exception as e:
+        logger.warning(f"Error loading infrastructure data: {e}")
+        
+    return infrastructure_data
+
+
+def extract_region_from_column(column_name: str) -> str:
+    """
+    Extract region identifier from CSV column names following MESSAGE patterns.
+    
+    Examples: 'Solar_fac EU-DEU' -> 'EU-DEU', 'H2_mkt EU-FRA' -> 'EU-FRA'
+    """
+    parts = column_name.split()
+    if len(parts) >= 2:
+        return parts[-1]  # Last part is usually the region
+    return column_name
+
+
+def get_technology_costs(cost_data: Dict[str, pd.DataFrame], technology: str, region: str, year: int = 2050) -> Dict[str, float]:
+    """
+    Extract costs for a specific technology and region from loaded CSV data.
+    
+    Parameters
+    ----------
+    cost_data : Dict[str, pd.DataFrame]
+        Loaded cost data from load_csv_costs()
+    technology : str
+        Technology type (e.g., 'Solar_fac', 'Electrolysis_fac')
+    region : str
+        Region identifier (e.g., 'EU-DEU')
+    year : int, optional
+        Year for cost lookup, default 2050
+        
+    Returns
+    -------
+    Dict[str, float]
+        Dictionary with 'capital_cost', 'fixed_cost', 'marginal_cost'
+    """
+    costs = {'capital_cost': 0.0, 'fixed_cost': 0.0, 'marginal_cost': 0.0}
+    
+    try:
+        tech_region_col = f"{technology} {region}"
+        
+        # Extract capital cost from BuildCosts.csv
+        if 'build_costs' in cost_data and tech_region_col in cost_data['build_costs'].columns:
+            if year in cost_data['build_costs'].index:
+                costs['capital_cost'] = cost_data['build_costs'].at[year, tech_region_col]
+                
+        # Extract fixed O&M cost from FOMs.csv
+        if 'foms' in cost_data and tech_region_col in cost_data['foms'].columns:
+            if year in cost_data['foms'].index:
+                costs['fixed_cost'] = cost_data['foms'].at[year, tech_region_col]
+                
+        # Extract variable O&M cost from VOMs.csv  
+        if 'voms' in cost_data and tech_region_col in cost_data['voms'].columns:
+            if year in cost_data['voms'].index:
+                costs['marginal_cost'] = cost_data['voms'].at[year, tech_region_col]
+                
+    except Exception as e:
+        logger.debug(f"Error extracting costs for {technology} in {region}: {e}")
+        
+    return costs
+
+
+def create_multi_sector_buses(network: Network, regions: List[str]) -> Dict[str, List[str]]:
+    """
+    Create multi-sector buses following PyPSA best practices for sector coupling.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to add buses to
+    regions : List[str]
+        List of region identifiers
+        
+    Returns
+    -------
+    Dict[str, List[str]]
+        Dictionary mapping sectors to list of bus names created
+    """
+    sector_buses = {
+        'electricity': [],
+        'hydrogen': [], 
+        'ammonia': [],
+        'gas': []
+    }
+    
+    # Add carriers first following PyPSA patterns
+    carriers = ['AC', 'hydrogen', 'ammonia', 'gas']
+    for carrier in carriers:
+        if carrier not in network.carriers.index:
+            network.add('Carrier', carrier)
+    
+    # Create sector-specific buses for each region
+    for region in regions:
+        # Electricity bus (following existing AC pattern)
+        elec_bus = f"{region}_electricity"
+        if elec_bus not in network.buses.index:
+            network.add('Bus', elec_bus, carrier='AC', v_nom=110.0)
+            sector_buses['electricity'].append(elec_bus)
+            
+        # Hydrogen bus following PyPSA sector coupling patterns
+        h2_bus = f"{region}_hydrogen"
+        if h2_bus not in network.buses.index:
+            network.add('Bus', h2_bus, carrier='hydrogen')
+            sector_buses['hydrogen'].append(h2_bus)
+            
+        # Ammonia bus for synthetic fuel sector
+        nh3_bus = f"{region}_ammonia"
+        if nh3_bus not in network.buses.index:
+            network.add('Bus', nh3_bus, carrier='ammonia')
+            sector_buses['ammonia'].append(nh3_bus)
+            
+        # Gas bus (if needed for existing gas infrastructure)
+        gas_bus = f"{region}_gas"
+        if gas_bus not in network.buses.index:
+            network.add('Bus', gas_bus, carrier='gas')
+            sector_buses['gas'].append(gas_bus)
+    
+    logger.info(f"Created multi-sector buses: {len(sector_buses['electricity'])} electricity, "
+                f"{len(sector_buses['hydrogen'])} hydrogen, {len(sector_buses['ammonia'])} ammonia")
+    
+    return sector_buses
+
+
+def create_sector_coupling_links(network: Network, sector_buses: Dict[str, List[str]], cost_data: Dict[str, pd.DataFrame]) -> Dict[str, int]:
+    """
+    Create sector coupling links following PyPSA best practices.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to add links to
+    sector_buses : Dict[str, List[str]]
+        Dictionary mapping sectors to bus names from create_multi_sector_buses()
+    cost_data : Dict[str, pd.DataFrame]
+        Cost data from load_csv_costs()
+        
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary with counts of links created by type
+    """
+    link_counts = {
+        'electrolysis': 0,
+        'h2_power': 0,
+        'haber_bosch': 0,
+        'ammonia_crack': 0
+    }
+    
+    # Create sector coupling links for each region
+    electricity_buses = sector_buses.get('electricity', [])
+    hydrogen_buses = sector_buses.get('hydrogen', [])
+    ammonia_buses = sector_buses.get('ammonia', [])
+    
+    for i, elec_bus in enumerate(electricity_buses):
+        # Extract region from bus name (assuming pattern: "{region}_electricity")
+        region = elec_bus.replace('_electricity', '')
+        
+        if i < len(hydrogen_buses):
+            h2_bus = hydrogen_buses[i]
+            
+            # 1. Electrolysis: Electricity -> Hydrogen
+            electrolysis_costs = get_technology_costs(cost_data, 'Electrolysis_fac', region)
+            elec_link = f"{region}_electrolysis"
+            if elec_link not in network.links.index:
+                network.add('Link', elec_link,
+                          bus0=elec_bus,
+                          bus1=h2_bus,
+                          carrier='Electrolysis',
+                          efficiency=0.7,  # PyPSA typical electrolysis efficiency
+                          capital_cost=electrolysis_costs.get('capital_cost', 1000),
+                          marginal_cost=electrolysis_costs.get('marginal_cost', 5),
+                          p_nom_extendable=True)
+                link_counts['electrolysis'] += 1
+                
+            # 2. H2Power (Fuel Cell): Hydrogen -> Electricity  
+            h2power_costs = get_technology_costs(cost_data, 'H2Power_fac', region)
+            h2power_link = f"{region}_h2power"
+            if h2power_link not in network.links.index:
+                network.add('Link', h2power_link,
+                          bus0=h2_bus,
+                          bus1=elec_bus, 
+                          carrier='H2Power',
+                          efficiency=0.5,  # PyPSA typical fuel cell efficiency
+                          capital_cost=h2power_costs.get('capital_cost', 1500),
+                          marginal_cost=h2power_costs.get('marginal_cost', 10),
+                          p_nom_extendable=True)
+                link_counts['h2_power'] += 1
+        
+        if i < len(ammonia_buses):
+            h2_bus = hydrogen_buses[i] if i < len(hydrogen_buses) else None
+            nh3_bus = ammonia_buses[i]
+            
+            if h2_bus:
+                # 3. Haber-Bosch: Hydrogen -> Ammonia
+                haber_costs = get_technology_costs(cost_data, 'HaberBosch_fac', region)
+                haber_link = f"{region}_haber_bosch" 
+                if haber_link not in network.links.index:
+                    network.add('Link', haber_link,
+                              bus0=h2_bus,
+                              bus1=nh3_bus,
+                              carrier='HaberBosch',
+                              efficiency=0.8,  # Haber-Bosch process efficiency
+                              capital_cost=haber_costs.get('capital_cost', 2000),
+                              marginal_cost=haber_costs.get('marginal_cost', 20),
+                              p_nom_extendable=True)
+                    link_counts['haber_bosch'] += 1
+                    
+                # 4. Ammonia Cracking: Ammonia -> Hydrogen  
+                crack_costs = get_technology_costs(cost_data, 'AmmoniaCrack_fac', region)
+                crack_link = f"{region}_ammonia_crack"
+                if crack_link not in network.links.index:
+                    network.add('Link', crack_link,
+                              bus0=nh3_bus,
+                              bus1=h2_bus,
+                              carrier='AmmoniaCrack', 
+                              efficiency=0.9,  # Ammonia cracking efficiency
+                              capital_cost=crack_costs.get('capital_cost', 800),
+                              marginal_cost=crack_costs.get('marginal_cost', 15),
+                              p_nom_extendable=True)
+                    link_counts['ammonia_crack'] += 1
+    
+    logger.info(f"Created sector coupling links: {link_counts}")
+    return link_counts
+
+
+def add_multi_sector_storage(network: Network, sector_buses: Dict[str, List[str]]) -> Dict[str, int]:
+    """
+    Add storage for different sectors following PyPSA Store patterns.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to add storage to
+    sector_buses : Dict[str, List[str]]  
+        Dictionary mapping sectors to bus names
+        
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary with storage units added by sector
+    """
+    storage_counts = {'hydrogen': 0, 'ammonia': 0}
+    
+    # Add hydrogen storage
+    for h2_bus in sector_buses.get('hydrogen', []):
+        region = h2_bus.replace('_hydrogen', '')
+        store_name = f"{region}_h2_storage"
+        if store_name not in network.stores.index:
+            network.add('Store', store_name,
+                      bus=h2_bus,
+                      carrier='hydrogen',
+                      e_cyclic=True,  # PyPSA pattern for cyclic storage
+                      e_nom_extendable=True,
+                      capital_cost=50)  # €/MWh storage cost
+            storage_counts['hydrogen'] += 1
+            
+    # Add ammonia storage  
+    for nh3_bus in sector_buses.get('ammonia', []):
+        region = nh3_bus.replace('_ammonia', '')
+        store_name = f"{region}_nh3_storage"
+        if store_name not in network.stores.index:
+            network.add('Store', store_name,
+                      bus=nh3_bus,
+                      carrier='ammonia', 
+                      e_cyclic=True,
+                      e_nom_extendable=True,
+                      capital_cost=25)  # €/MWh storage cost
+            storage_counts['ammonia'] += 1
+    
+    logger.info(f"Added multi-sector storage: {storage_counts}")
+    return storage_counts
 
 
 def setup_gas_electric_network_db(network: Network, db: PlexosDB, generators_as_links: bool = False, testing_mode: bool = False, 
@@ -533,6 +948,293 @@ def setup_flow_network_db(network: Network, db: PlexosDB, testing_mode: bool = F
     
     print("Flow network multi-sector setup complete using flows.py module!")
     return setup_summary
+
+
+def setup_enhanced_flow_network_with_csv(network: Network, db: PlexosDB, inputs_folder: str, 
+                                        testing_mode: bool = False, timeslice_csv: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Set up enhanced multi-sector PyPSA network with CSV data integration.
+    
+    This function combines PLEXOS Flow Network components with CSV data following
+    PyPSA multi-sector best practices for electricity, hydrogen, and ammonia sectors.
+    
+    Parameters
+    ----------
+    network : pypsa.Network
+        Empty PyPSA network to populate
+    db : PlexosDB
+        PLEXOS database containing model data
+    inputs_folder : str
+        Path to folder containing CSV data files (BuildCosts.csv, Load.csv, etc.)
+    testing_mode : bool, optional
+        If True, process only limited subsets of components for faster testing
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent properties
+        
+    Returns
+    -------
+    Dict[str, Any]
+        Setup summary with statistics for each sector and CSV data integration
+    """
+    print("Setting up enhanced multi-sector flow network with CSV data integration...")
+    if testing_mode:
+        print("⚠️  TESTING MODE: Processing limited subsets for faster development")
+    
+    setup_summary = {
+        'network_type': 'enhanced_flow_network_csv',
+        'sectors': ['Electricity', 'Hydrogen', 'Ammonia'],
+        'csv_data_loaded': False,
+        'multi_sector_buses': {},
+        'sector_coupling_links': {},
+        'csv_integration': {}
+    }
+    
+    try:
+        # Step 1: Load CSV data
+        print("\n1. Loading CSV data...")
+        cost_data = load_csv_costs(inputs_folder)
+        time_series_data = load_time_series_data(inputs_folder)
+        infrastructure_data = load_infrastructure_data(inputs_folder)
+        
+        if cost_data or time_series_data:
+            setup_summary['csv_data_loaded'] = True
+            setup_summary['csv_integration'] = {
+                'cost_files': len(cost_data),
+                'time_series_files': len(time_series_data),
+                'infrastructure_files': len(infrastructure_data)
+            }
+            print(f"   Loaded {len(cost_data)} cost files, {len(time_series_data)} time series files")
+        
+        # Step 2: Set up basic flow network using existing flows.py
+        print("\n2. Setting up base flow network...")
+        flow_summary = port_flow_network(
+            network=network,
+            db=db,
+            timeslice_csv=timeslice_csv,
+            testing_mode=testing_mode
+        )
+        setup_summary.update(flow_summary)
+        
+        # Step 3: Extract regions from electricity demand or flow nodes
+        print("\n3. Discovering regions for multi-sector architecture...")
+        regions = []
+        
+        # Try to get regions from Load.csv first
+        if 'electricity_demand' in time_series_data:
+            elec_demand = time_series_data['electricity_demand'] 
+            for col in elec_demand.columns:
+                region = extract_region_from_column(col)
+                if region not in regions:
+                    regions.append(region)
+                    
+        # Fallback: use existing buses as regions
+        if not regions:
+            existing_buses = list(network.buses.index)[:10]  # Limit for testing
+            regions = [bus.replace('_electricity', '').replace('_Electric', '') for bus in existing_buses]
+            regions = list(set(regions))  # Remove duplicates
+            
+        print(f"   Found {len(regions)} regions: {regions[:5]}..." if len(regions) > 5 else f"   Found {len(regions)} regions: {regions}")
+        
+        # Step 4: Create multi-sector bus architecture
+        print("\n4. Creating multi-sector bus architecture...")
+        sector_buses = create_multi_sector_buses(network, regions)
+        setup_summary['multi_sector_buses'] = {
+            sector: len(buses) for sector, buses in sector_buses.items()
+        }
+        
+        # Step 5: Create sector coupling links with CSV cost data
+        print("\n5. Creating sector coupling links...")
+        coupling_links = create_sector_coupling_links(network, sector_buses, cost_data)
+        setup_summary['sector_coupling_links'] = coupling_links
+        
+        # Step 6: Add multi-sector storage
+        print("\n6. Adding multi-sector storage...")
+        storage_counts = add_multi_sector_storage(network, sector_buses)
+        setup_summary['multi_sector_storage'] = storage_counts
+        
+        # Step 7: Set up snapshots from Load.csv
+        if 'electricity_demand' in time_series_data:
+            print("\n7. Setting up snapshots from Load.csv...")
+            load_df = time_series_data['electricity_demand']
+            network.set_snapshots(load_df.index)
+            setup_summary['snapshots_source'] = 'Load.csv'
+            setup_summary['snapshots_count'] = len(load_df.index)
+            print(f"   Set {len(load_df.index)} snapshots from Load.csv")
+        
+        # Step 8: Add multi-sector loads
+        print("\n8. Adding multi-sector loads...")
+        loads_added = add_multi_sector_loads_from_csv(network, sector_buses, time_series_data)
+        setup_summary['multi_sector_loads'] = loads_added
+        
+        # Step 9: Add H2 pipeline infrastructure
+        if 'h2_pipelines' in infrastructure_data:
+            print("\n9. Adding H2 pipeline infrastructure...")
+            h2_links = add_h2_pipeline_network(network, infrastructure_data['h2_pipelines'], sector_buses)
+            setup_summary['h2_pipelines'] = h2_links
+            
+        # Step 10: Update summary
+        setup_summary['total_buses'] = len(network.buses)
+        setup_summary['total_links'] = len(network.links)
+        setup_summary['total_loads'] = len(network.loads)
+        setup_summary['total_stores'] = len(network.stores)
+        
+    except Exception as e:
+        logger.error(f"Error setting up enhanced flow network: {e}")
+        raise
+    
+    print("\nEnhanced multi-sector flow network with CSV integration complete!")
+    return setup_summary
+
+
+def add_multi_sector_loads_from_csv(network: Network, sector_buses: Dict[str, List[str]], 
+                                   time_series_data: Dict[str, pd.DataFrame]) -> Dict[str, int]:
+    """
+    Add multi-sector loads using CSV time series data following PyPSA Load patterns.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to add loads to
+    sector_buses : Dict[str, List[str]]
+        Dictionary mapping sectors to bus names
+    time_series_data : Dict[str, pd.DataFrame]
+        Time series data from load_time_series_data()
+        
+    Returns
+    -------
+    Dict[str, int]
+        Dictionary with load counts by sector
+    """
+    load_counts = {'electricity': 0, 'hydrogen': 0, 'ammonia': 0}
+    
+    try:
+        # Add electricity loads from Load.csv
+        if 'electricity_demand' in time_series_data:
+            elec_demand = time_series_data['electricity_demand']
+            
+            for col in elec_demand.columns:
+                region = extract_region_from_column(col)
+                elec_bus = f"{region}_electricity"
+                
+                if elec_bus in network.buses.index:
+                    load_name = f"{region}_elec_load"
+                    if load_name not in network.loads.index:
+                        network.add('Load', load_name,
+                                  bus=elec_bus,
+                                  p_set=elec_demand[col],
+                                  carrier='electricity')
+                        load_counts['electricity'] += 1
+        
+        # Add hydrogen loads from H2_Demand_With_Blending.csv
+        if 'hydrogen_demand' in time_series_data:
+            h2_demand = time_series_data['hydrogen_demand']
+            
+            for col in h2_demand.columns:
+                region = extract_region_from_column(col)
+                h2_bus = f"{region}_hydrogen"
+                
+                if h2_bus in network.buses.index:
+                    load_name = f"{region}_h2_load"
+                    if load_name not in network.loads.index:
+                        network.add('Load', load_name,
+                                  bus=h2_bus,
+                                  p_set=h2_demand[col],
+                                  carrier='hydrogen')
+                        load_counts['hydrogen'] += 1
+        
+        # Add basic ammonia demand (if no specific CSV available)
+        for nh3_bus in sector_buses.get('ammonia', []):
+            region = nh3_bus.replace('_ammonia', '')
+            load_name = f"{region}_nh3_load"
+            if load_name not in network.loads.index and len(network.snapshots) > 0:
+                # Create basic demand profile
+                base_demand = 50  # MW base demand
+                demand_profile = pd.Series([base_demand] * len(network.snapshots), 
+                                         index=network.snapshots)
+                network.add('Load', load_name,
+                          bus=nh3_bus,
+                          p_set=demand_profile,
+                          carrier='ammonia')
+                load_counts['ammonia'] += 1
+                
+    except Exception as e:
+        logger.warning(f"Error adding multi-sector loads: {e}")
+    
+    logger.info(f"Added multi-sector loads: {load_counts}")
+    return load_counts
+
+
+def add_h2_pipeline_network(network: Network, pipelines_df: pd.DataFrame, 
+                           sector_buses: Dict[str, List[str]]) -> int:
+    """
+    Add hydrogen pipeline network from H2Pipelines.csv following PyPSA Link patterns.
+    
+    Parameters
+    ----------
+    network : Network
+        PyPSA network to add pipelines to
+    pipelines_df : pd.DataFrame
+        DataFrame from H2Pipelines.csv with columns: Name, Build Cost, FO&M Charge, Efficiency
+    sector_buses : Dict[str, List[str]]
+        Dictionary mapping sectors to bus names
+        
+    Returns
+    -------
+    int
+        Number of H2 pipelines added
+    """
+    pipelines_added = 0
+    hydrogen_buses = sector_buses.get('hydrogen', [])
+    
+    # Create lookup for hydrogen buses by region
+    h2_bus_lookup = {}
+    for bus in hydrogen_buses:
+        region = bus.replace('_hydrogen', '')
+        h2_bus_lookup[region] = bus
+    
+    try:
+        for _, pipeline in pipelines_df.iterrows():
+            pipeline_name = pipeline['Name']
+            
+            # Parse pipeline name to extract source and destination regions
+            # Expected format: H2PipelineAF-AGO-AF-COD
+            if 'H2Pipeline' in pipeline_name:
+                # Remove prefix and split by remaining parts
+                regions_part = pipeline_name.replace('H2Pipeline', '')
+                # Split by potential separators
+                if '-' in regions_part:
+                    parts = regions_part.split('-')
+                    if len(parts) >= 4:  # AF-AGO-AF-COD format
+                        source_region = f"{parts[0]}-{parts[1]}" # AF-AGO
+                        dest_region = f"{parts[2]}-{parts[3]}" # AF-COD
+                        
+                        source_bus = h2_bus_lookup.get(source_region)
+                        dest_bus = h2_bus_lookup.get(dest_region)
+                        
+                        if source_bus and dest_bus and source_bus in network.buses.index and dest_bus in network.buses.index:
+                            link_name = f"h2_pipeline_{source_region}_{dest_region}"
+                            
+                            if link_name not in network.links.index:
+                                # Extract pipeline properties
+                                capital_cost = float(pipeline.get('Build Cost', 1000000)) / 1000  # Convert to per MW
+                                fixed_cost = float(pipeline.get('FO&M Charge', 10000)) / 1000    # Convert to per MW/year
+                                efficiency = float(pipeline.get('Efficiency', 98)) / 100         # Convert to decimal
+                                
+                                network.add('Link', link_name,
+                                          bus0=source_bus,
+                                          bus1=dest_bus,
+                                          carrier='hydrogen_transport',
+                                          capital_cost=capital_cost,
+                                          marginal_cost=fixed_cost / 8760,  # Convert annual to hourly
+                                          efficiency=efficiency,
+                                          p_nom_extendable=True)
+                                pipelines_added += 1
+                                
+    except Exception as e:
+        logger.warning(f"Error adding H2 pipelines: {e}")
+    
+    logger.info(f"Added {pipelines_added} H2 pipelines")
+    return pipelines_added
 
 
 def add_processes_db(network: Network, db: PlexosDB, multi_sector_classes: Dict[str, List[str]]) -> Dict[str, int]:
