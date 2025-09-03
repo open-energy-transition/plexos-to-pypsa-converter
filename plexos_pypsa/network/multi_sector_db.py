@@ -1660,11 +1660,42 @@ def setup_marei_csv_network(
         # Step 2: Set up basic network structure from PlexosDB
         print("\n2. Setting up base network structure from PlexosDB...")
         
-        # Add carriers
-        carriers = ['AC', 'gas', 'hydrogen']
+        # Add comprehensive carriers for multi-sector MaREI model
+        # This must be done BEFORE creating any components that reference these carriers
+        carriers = [
+            # Base carriers (buses)
+            'AC',                    # Electricity buses
+            'gas',                   # Gas buses  
+            'hydrogen',              # Hydrogen buses (if used)
+            
+            # Load carriers
+            'electricity',           # Electricity loads
+            
+            # Link/conversion carriers
+            'gas_to_electricity',    # Gas-to-electricity conversion links
+            'gas_transport',         # Gas pipeline transport links
+            'gas_generation',        # Gas generation links
+            'conversion',            # Generator-as-link conversion (from generators.py)
+            'hydrogen_transport',    # Hydrogen transport links (if used)
+            'electrolysis',          # Electrolysis links (if used)
+            'fuel_cell',             # Fuel cell links (if used)
+            
+            # Fuel carriers (created dynamically by generators.py when generators_as_links=True)
+            'Natural_Gas',           # Natural gas fuel
+            'Coal',                  # Coal fuel
+            'Nuclear',               # Nuclear fuel
+            'Lignite',               # Lignite fuel  
+            'Biomass',               # Biomass fuel
+            'Oil',                   # Oil fuel
+            'Waste',                 # Waste fuel
+            'Gas',                   # Generic gas fuel
+        ]
+        
         for carrier in carriers:
             if carrier not in network.carriers.index:
                 network.add('Carrier', carrier)
+                
+        print(f"  ✓ Added {len(carriers)} carriers for multi-sector model")
         
         # Get electricity buses from PlexosDB
         node_objects = get_objects_by_class_name(db, 'Node')
