@@ -6,13 +6,13 @@ and dependencies from PLEXOS database, enabling data-driven model creation.
 """
 
 import os
-import re
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List
 
 from plexosdb.enums import ClassEnum  # type: ignore
-from plexos_pypsa.utils.paths import normalize_path, resolve_relative_path
+
+from src.utils.paths import resolve_relative_path
 
 
 @dataclass
@@ -398,4 +398,4 @@ def discover_model_paths(db, main_directory: str) -> Dict[str, any]:
         'resolved_paths': resolved_paths,
         'structure_info': structure_info,
         'setup_paths': setup_paths
-    }
+    }    }

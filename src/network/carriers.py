@@ -3,7 +3,7 @@ import logging
 import pandas as pd  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.db.parse import (
+from src.db.parse import (
     get_dataid_timeslice_map,
     get_property_active_mask,
     read_timeslice_activity,
@@ -158,9 +158,9 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
                 prop_df_entries = pd.DataFrame(property_entries)
             else:
                 # Create empty DataFrame with expected columns
-                prop_df_entries = pd.DataFrame(columns=[
-                    "property", "value", "from", "to", "data_id", "timeslices"
-                ])
+                prop_df_entries = pd.DataFrame(
+                    columns=["property", "value", "from", "to", "data_id", "timeslices"]
+                )
 
             # Helper to build a time series for a property
             def build_ts(prop_name, fallback=None):

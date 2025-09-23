@@ -1,25 +1,26 @@
 import logging
-import os
 
 import pandas as pd  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import (
+from src.db.parse import (
     find_bus_for_object,
     find_fuel_for_generator,
     get_dataid_timeslice_map,
     get_property_active_mask,
     read_timeslice_activity,
 )
-from plexos_pypsa.network.carriers import parse_fuel_prices
-from plexos_pypsa.network.costs import set_capital_costs_generic
+from src.network.carriers import parse_fuel_prices
+from src.network.costs import set_capital_costs_generic
 
 logger = logging.getLogger(__name__)
 
 
-def add_generators(network: Network, db: PlexosDB, generators_as_links=False, fuel_bus_prefix="fuel_"):
+def add_generators(
+    network: Network, db: PlexosDB, generators_as_links=False, fuel_bus_prefix="fuel_"
+):
     """
     Adds generators from a Plexos database to a PyPSA network.
 
@@ -56,7 +57,7 @@ def add_generators(network: Network, db: PlexosDB, generators_as_links=False, fu
     >>> network = pypsa.Network()
     >>> db = PlexosDB("path/to/file.xml")
     >>> add_generators(network, db)
-    
+
     # With generators-as-links
     >>> add_generators(network, db, generators_as_links=True, fuel_bus_prefix="fuel_")
     """
@@ -110,63 +111,94 @@ def add_generators(network: Network, db: PlexosDB, generators_as_links=False, fu
         carrier = find_fuel_for_generator(db, gen)
 
         # Determine if this is a conventional (fuel-based) generator for generators-as-links
-        conventional_fuels = ['Natural Gas', 'Natural Gas CCGT', 'Natural Gas OCGT', 
-                            'Coal', 'Hard Coal', 'Lignite', 'Nuclear', 'Oil', 'Biomass', 
-                            'Biomass Waste', 'Solids Fired', 'Gas']
+        conventional_fuels = [
+            "Natural Gas",
+            "Natural Gas CCGT",
+            "Natural Gas OCGT",
+            "Coal",
+            "Hard Coal",
+            "Lignite",
+            "Nuclear",
+            "Oil",
+            "Biomass",
+            "Biomass Waste",
+            "Solids Fired",
+            "Gas",
+        ]
         is_conventional = carrier in conventional_fuels if carrier else False
 
         # Add generator to the network
         if generators_as_links and is_conventional and carrier:
             # Create fuel bus if it doesn't exist
-            fuel_carrier = carrier.replace(' CCGT', '').replace(' OCGT', '').replace(' Waste', '')
-            fuel_bus_name = f"{fuel_bus_prefix}{fuel_carrier.replace(' ', '_')}" if fuel_bus_prefix else f"{fuel_carrier.replace(' ', '_')}"
-            
+            fuel_carrier = (
+                carrier.replace(" CCGT", "").replace(" OCGT", "").replace(" Waste", "")
+            )
+            fuel_bus_name = (
+                f"{fuel_bus_prefix}{fuel_carrier.replace(' ', '_')}"
+                if fuel_bus_prefix
+                else f"{fuel_carrier.replace(' ', '_')}"
+            )
+
             if fuel_bus_name not in network.buses.index:
                 # Add fuel carrier if needed
                 if fuel_carrier not in network.carriers.index:
-                    network.add('Carrier', fuel_carrier)
-                network.add('Bus', fuel_bus_name, carrier=fuel_carrier)
-            
+                    network.add("Carrier", fuel_carrier)
+                network.add("Bus", fuel_bus_name, carrier=fuel_carrier)
+
             # Create generator-link (fuel bus → electric bus)
             link_name = f"gen_link_{gen}"
             if link_name not in network.links.index:
                 # Set efficiency based on technology
-                if 'CCGT' in carrier:
+                if "CCGT" in carrier:
                     efficiency = 0.55  # Combined cycle
-                elif 'OCGT' in carrier:
-                    efficiency = 0.35  # Open cycle  
-                elif 'Nuclear' in carrier:
+                elif "OCGT" in carrier:
+                    efficiency = 0.35  # Open cycle
+                elif "Nuclear" in carrier:
                     efficiency = 0.33  # Nuclear thermal
-                elif 'Coal' in carrier or 'Lignite' in carrier:
+                elif "Coal" in carrier or "Lignite" in carrier:
                     efficiency = 0.40  # Coal thermal
-                elif 'Biomass' in carrier:
+                elif "Biomass" in carrier:
                     efficiency = 0.30  # Biomass thermal
                 else:
                     efficiency = 0.40  # Default thermal
-                
+
                 # Create link with p_nom
                 if p_max is not None:
-                    network.add('Link', link_name, 
-                              bus0=fuel_bus_name, bus1=bus,
-                              p_nom=p_max, efficiency=efficiency, 
-                              carrier='conversion')
+                    network.add(
+                        "Link",
+                        link_name,
+                        bus0=fuel_bus_name,
+                        bus1=bus,
+                        p_nom=p_max,
+                        efficiency=efficiency,
+                        carrier="conversion",
+                    )
                 else:
-                    network.add('Link', link_name, 
-                              bus0=fuel_bus_name, bus1=bus,
-                              efficiency=efficiency, 
-                              carrier='conversion')
-                
+                    network.add(
+                        "Link",
+                        link_name,
+                        bus0=fuel_bus_name,
+                        bus1=bus,
+                        efficiency=efficiency,
+                        carrier="conversion",
+                    )
+
                 # Set ramp limits and other properties on the link
                 for attr, val in gen_attrs.items():
-                    if attr in ['ramp_limit_up', 'ramp_limit_down']:
+                    if attr in ["ramp_limit_up", "ramp_limit_down"]:
                         network.links.loc[link_name, attr] = val
-                
+
                 # Add infinite fuel supply generator (simplified)
                 fuel_supply_name = f"fuel_supply_{fuel_carrier.replace(' ', '_')}"
                 if fuel_supply_name not in network.generators.index:
-                    network.add('Generator', fuel_supply_name, 
-                              bus=fuel_bus_name, p_nom=99999, 
-                              carrier=fuel_carrier, marginal_cost=0.1)
+                    network.add(
+                        "Generator",
+                        fuel_supply_name,
+                        bus=fuel_bus_name,
+                        p_nom=99999,
+                        carrier=fuel_carrier,
+                        marginal_cost=0.1,
+                    )
         else:
             # Add as standard generator (renewables or when generators_as_links=False)
             if p_max is not None:
@@ -555,21 +587,23 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         props = db.get_object_properties(ClassEnum.Generator, gen)
 
         # Check if the generator has a solar or wind profile
-        from plexos_pypsa.utils.paths import contains_path_pattern, safe_join, extract_filename
-        
+        from src.utils.paths import contains_path_pattern, extract_filename, safe_join
+
         filename = next(
             (
                 p["texts"]
                 for p in props
-                if contains_path_pattern(p["texts"], "Traces/solar/") or 
-                   contains_path_pattern(p["texts"], "Traces/wind/")
+                if contains_path_pattern(p["texts"], "Traces/solar/")
+                or contains_path_pattern(p["texts"], "Traces/wind/")
             ),
             None,
         )
 
         if filename:
             # print(f"Found profile for generator {gen}: {filename}")
-            profile_type = "solar" if contains_path_pattern(filename, "Traces/solar/") else "wind"
+            profile_type = (
+                "solar" if contains_path_pattern(filename, "Traces/solar/") else "wind"
+            )
             # Extract just the filename to avoid path concatenation issues
             clean_filename = extract_filename(filename.strip())
             file_path = safe_join(path, "Traces", profile_type, clean_filename)
@@ -930,7 +964,12 @@ def port_generators(
         print("1. Adding generators (with generators-as-links conversion)...")
     else:
         print("1. Adding generators...")
-    add_generators(network, db, generators_as_links=generators_as_links, fuel_bus_prefix=fuel_bus_prefix)
+    add_generators(
+        network,
+        db,
+        generators_as_links=generators_as_links,
+        fuel_bus_prefix=fuel_bus_prefix,
+    )
 
     # Step 2: Set capacity ratings (p_max_pu)
     print("2. Setting capacity ratings...")

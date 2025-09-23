@@ -329,30 +329,30 @@ def add_loads(network: Network, path: str):
 def discover_carriers_from_db(db: PlexosDB) -> list:
     """
     Automatically discover all carriers needed for PyPSA network by analyzing PLEXOS database.
-    
+
     This function examines multiple PLEXOS classes to build a comprehensive list of carriers:
     - Core carriers (AC, conversion)
     - All fuels from Fuel class
     - Renewable carriers derived from generator names
     - Multi-sector carriers (Gas, conversion types)
     - Technology-specific carriers from generator analysis
-    
+
     Parameters
     ----------
     db : PlexosDB
         PLEXOS database connection
-        
+
     Returns
     -------
     list
         Complete list of carrier names needed for the network
     """
     carriers = set()
-    
+
     # 1. Core carriers (always needed)
-    carriers.add('AC')  # For electrical buses
-    carriers.add('conversion')  # For generators-as-links
-    
+    carriers.add("AC")  # For electrical buses
+    carriers.add("conversion")  # For generators-as-links
+
     # 2. PLEXOS Fuels (from database)
     try:
         fuels = db.list_objects_by_class(ClassEnum.Fuel)
@@ -360,137 +360,160 @@ def discover_carriers_from_db(db: PlexosDB) -> list:
         print(f"  Found {len(fuels)} fuel carriers from database")
     except Exception as e:
         logger.warning(f"Could not query fuels from database: {e}")
-    
+
     # 3. Renewable carriers (from generator analysis)
     try:
         generators = db.list_objects_by_class(ClassEnum.Generator)
         renewable_carriers = set()
-        
+
         for gen_name in generators:
             gen_lower = gen_name.lower()
-            if 'wind' in gen_lower:
-                if 'offshore' in gen_lower:
-                    renewable_carriers.add('Wind Offshore')
-                elif 'onshore' in gen_lower:
-                    renewable_carriers.add('Wind Onshore')
+            if "wind" in gen_lower:
+                if "offshore" in gen_lower:
+                    renewable_carriers.add("Wind Offshore")
+                elif "onshore" in gen_lower:
+                    renewable_carriers.add("Wind Onshore")
                 else:
-                    renewable_carriers.add('Wind')
-            elif 'solar' in gen_lower or 'pv' in gen_lower:
-                renewable_carriers.add('Solar')
-                if 'pv' in gen_lower:
-                    renewable_carriers.add('Solar PV')
-            elif 'hydro' in gen_lower:
-                renewable_carriers.add('Hydro')
-        
+                    renewable_carriers.add("Wind")
+            elif "solar" in gen_lower or "pv" in gen_lower:
+                renewable_carriers.add("Solar")
+                if "pv" in gen_lower:
+                    renewable_carriers.add("Solar PV")
+            elif "hydro" in gen_lower:
+                renewable_carriers.add("Hydro")
+
         carriers.update(renewable_carriers)
-        print(f"  Found {len(renewable_carriers)} renewable carriers: {sorted(renewable_carriers)}")
-        
+        print(
+            f"  Found {len(renewable_carriers)} renewable carriers: {sorted(renewable_carriers)}"
+        )
+
     except Exception as e:
         logger.warning(f"Could not analyze generators for renewable carriers: {e}")
-    
+
     # 4. Multi-sector carriers (gas, conversion types)
     try:
         # Always add core multi-sector carriers since they may be used by multi-sector models
         # Even if we can't detect the specific classes, the conversion carriers are needed
-        carriers.add('Gas')
-        carriers.add('Gas2Electric')  # For gas-to-electric conversion links
-        carriers.add('conversion')     # For generators-as-links conversion
+        carriers.add("Gas")
+        carriers.add("Gas2Electric")  # For gas-to-electric conversion links
+        carriers.add("conversion")  # For generators-as-links conversion
         print("  Added core multi-sector carriers: Gas, Gas2Electric, conversion")
-        
+
         # Try to detect additional multi-sector components with various class name patterns
         multi_sector_carriers = set()
-        
+
         # Check for gas components with various possible class names
         possible_gas_classes = [
-            'Gas_Node', 'Gas_Pipeline', 'Gas_Storage', 'Gas_Field', 'Gas_Plant', 'Gas_Demand',
-            'GasNode', 'GasPipeline', 'GasStorage', 'GasField', 'GasPlant', 'GasDemand'
+            "Gas_Node",
+            "Gas_Pipeline",
+            "Gas_Storage",
+            "Gas_Field",
+            "Gas_Plant",
+            "Gas_Demand",
+            "GasNode",
+            "GasPipeline",
+            "GasStorage",
+            "GasField",
+            "GasPlant",
+            "GasDemand",
         ]
-        
+
         for class_name in possible_gas_classes:
             try:
                 class_enum = getattr(ClassEnum, class_name, None)
                 if class_enum and db.list_objects_by_class(class_enum):
-                    multi_sector_carriers.update(['Natural Gas', 'Gas Network'])
+                    multi_sector_carriers.update(["Natural Gas", "Gas Network"])
                     break
             except:
                 continue
-        
+
         # Check for flow network components
         possible_flow_classes = [
-            'Flow_Node', 'Flow_Path', 'Flow_Storage', 'FlowNode', 'FlowPath', 'FlowStorage'
+            "Flow_Node",
+            "Flow_Path",
+            "Flow_Storage",
+            "FlowNode",
+            "FlowPath",
+            "FlowStorage",
         ]
-        
+
         for class_name in possible_flow_classes:
             try:
                 class_enum = getattr(ClassEnum, class_name, None)
                 if class_enum and db.list_objects_by_class(class_enum):
-                    multi_sector_carriers.update(['Hydrogen', 'Ammonia', 'Electric2Hydrogen', 'Hydrogen2Ammonia'])
+                    multi_sector_carriers.update(
+                        ["Hydrogen", "Ammonia", "Electric2Hydrogen", "Hydrogen2Ammonia"]
+                    )
                     break
             except:
                 continue
-        
+
         if multi_sector_carriers:
             carriers.update(multi_sector_carriers)
-            print(f"  Found additional multi-sector carriers: {sorted(multi_sector_carriers)}")
-            
+            print(
+                f"  Found additional multi-sector carriers: {sorted(multi_sector_carriers)}"
+            )
+
     except Exception as e:
         logger.warning(f"Could not analyze multi-sector components: {e}")
         # Ensure essential multi-sector carriers are still added even if detection fails
-        carriers.update(['Gas', 'Gas2Electric', 'conversion'])
-    
+        carriers.update(["Gas", "Gas2Electric", "conversion"])
+
     # 5. Technology-specific carriers (from detailed generator analysis)
     try:
         generators = db.list_objects_by_class(ClassEnum.Generator)
         tech_carriers = set()
         generator_name_carriers = set()
-        
+
         for gen_name in generators:
             gen_lower = gen_name.lower()
             # Gas technologies
-            if 'ccgt' in gen_lower or 'combined cycle' in gen_lower:
-                tech_carriers.add('Natural Gas CCGT')
-            elif 'ocgt' in gen_lower or 'open cycle' in gen_lower:
-                tech_carriers.add('Natural Gas OCGT')
-            elif 'gas' in gen_lower and 'natural' not in gen_lower:
-                tech_carriers.add('Natural Gas')
-            
-            # Coal technologies  
-            if 'lignite' in gen_lower:
-                tech_carriers.add('Lignite')
-            elif 'hard coal' in gen_lower:
-                tech_carriers.add('Hard Coal')
-            elif 'coal' in gen_lower:
-                tech_carriers.add('Coal')
-            
+            if "ccgt" in gen_lower or "combined cycle" in gen_lower:
+                tech_carriers.add("Natural Gas CCGT")
+            elif "ocgt" in gen_lower or "open cycle" in gen_lower:
+                tech_carriers.add("Natural Gas OCGT")
+            elif "gas" in gen_lower and "natural" not in gen_lower:
+                tech_carriers.add("Natural Gas")
+
+            # Coal technologies
+            if "lignite" in gen_lower:
+                tech_carriers.add("Lignite")
+            elif "hard coal" in gen_lower:
+                tech_carriers.add("Hard Coal")
+            elif "coal" in gen_lower:
+                tech_carriers.add("Coal")
+
             # Biomass technologies
-            if 'biomass' in gen_lower:
-                if 'waste' in gen_lower:
-                    tech_carriers.add('Biomass Waste')
+            if "biomass" in gen_lower:
+                if "waste" in gen_lower:
+                    tech_carriers.add("Biomass Waste")
                 else:
-                    tech_carriers.add('Biomass')
-            
+                    tech_carriers.add("Biomass")
+
             # Other technologies
-            if 'nuclear' in gen_lower:
-                tech_carriers.add('Nuclear')
-            elif 'oil' in gen_lower:
-                tech_carriers.add('Oil')
-            elif 'solids' in gen_lower:
-                tech_carriers.add('Solids Fired')
-            
+            if "nuclear" in gen_lower:
+                tech_carriers.add("Nuclear")
+            elif "oil" in gen_lower:
+                tech_carriers.add("Oil")
+            elif "solids" in gen_lower:
+                tech_carriers.add("Solids Fired")
+
             # Individual generator names (for generators-as-links functionality)
             # This ensures generator names are available as carriers when needed
             generator_name_carriers.add(gen_name)
-        
+
         carriers.update(tech_carriers)
         carriers.update(generator_name_carriers)
-        
+
         if tech_carriers:
             print(f"  Found {len(tech_carriers)} technology-specific carriers")
-        print(f"  Found {len(generator_name_carriers)} generator-name carriers (for generators-as-links)")
-            
+        print(
+            f"  Found {len(generator_name_carriers)} generator-name carriers (for generators-as-links)"
+        )
+
     except Exception as e:
         logger.warning(f"Could not analyze generators for technology carriers: {e}")
-    
+
     carriers_list = sorted(list(carriers))
     print(f"  Total carriers discovered: {len(carriers_list)}")
     return carriers_list
@@ -499,7 +522,7 @@ def discover_carriers_from_db(db: PlexosDB) -> list:
 def add_carriers(network: Network, db: PlexosDB):
     """
     Adds carriers to the PyPSA network using automatic discovery from PLEXOS database.
-    
+
     Parameters
     ----------
     network : pypsa.Network
@@ -509,15 +532,17 @@ def add_carriers(network: Network, db: PlexosDB):
     """
     # Discover all carriers from database
     carriers_to_add = discover_carriers_from_db(db)
-    
+
     # Add each carrier if not already present
     added_carriers = []
     for carrier in carriers_to_add:
         if carrier not in network.carriers.index:
             network.add("Carrier", name=carrier)
             added_carriers.append(carrier)
-    
-    print(f"Added {len(added_carriers)} carriers automatically: {sorted(added_carriers)}")
+
+    print(
+        f"Added {len(added_carriers)} carriers automatically: {sorted(added_carriers)}"
+    )
 
 
 def parse_demand_data(demand_source, bus_mapping=None):
@@ -1552,7 +1577,6 @@ def _add_loads_to_aggregate_node(
         }
 
 
-
 def setup_network(
     network: Network,
     db: PlexosDB,
@@ -1572,7 +1596,7 @@ def setup_network(
 
     This function intelligently chooses between three setup modes based on parameters:
     1. Per-node mode: Neither target_node nor aggregate_node_name specified (AEMO scenario)
-    2. Target node mode: target_node specified (SEM scenario - loads to target, generators/links keep original assignments)  
+    2. Target node mode: target_node specified (SEM scenario - loads to target, generators/links keep original assignments)
     3. Aggregation mode: aggregate_node_name specified (CAISO scenario - everything reassigned to aggregate node)
 
     Parameters
@@ -1621,26 +1645,32 @@ def setup_network(
     --------
     # Per-node mode (traditional AEMO)
     >>> setup_network(network, db, snapshots_source=path, demand_source=path)
-    
+
     # Target node mode (SEM scenario)
-    >>> setup_network(network, db, snapshots_source=path, demand_source=path, 
+    >>> setup_network(network, db, snapshots_source=path, demand_source=path,
     ...               target_node="SEM")
-    
+
     # Aggregation mode (CAISO scenario)
     >>> setup_network(network, db, snapshots_source=path, demand_source=path,
     ...               aggregate_node_name="CAISO_Load_Aggregate")
     """
     # Validate parameter combinations
     if target_node is not None and aggregate_node_name is not None:
-        raise ValueError("Cannot specify both target_node and aggregate_node_name. Choose one mode.")
+        raise ValueError(
+            "Cannot specify both target_node and aggregate_node_name. Choose one mode."
+        )
 
     # Detect mode and print status
     if aggregate_node_name is not None:
         mode = "aggregation"
-        print(f"Setting up network with demand aggregation to new node: {aggregate_node_name}")
+        print(
+            f"Setting up network with demand aggregation to new node: {aggregate_node_name}"
+        )
     elif target_node is not None:
         mode = "target_node"
-        print(f"Setting up network with all demand assigned to target node: {target_node}")
+        print(
+            f"Setting up network with all demand assigned to target node: {target_node}"
+        )
     else:
         mode = "per_node"
         print("Setting up network with per-node demand assignment")
@@ -1674,13 +1704,13 @@ def setup_network(
             )
 
     # Import required modules (avoid circular imports)
-    from plexos_pypsa.network.generators import port_generators, reassign_generators_to_node
-    from plexos_pypsa.network.links import port_links, reassign_links_to_node
-    from plexos_pypsa.network.storage import add_storage, add_hydro_inflows
-    
+    from src.network.generators import port_generators, reassign_generators_to_node
+    from src.network.links import port_links, reassign_links_to_node
+    from src.network.storage import add_hydro_inflows, add_storage
+
     # Conditionally import lines module if needed
     if transmission_as_lines:
-        from plexos_pypsa.network.lines import port_lines
+        from src.network.lines import port_lines
 
     # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
@@ -1702,7 +1732,7 @@ def setup_network(
     print("STEP 2: Adding storage units")
     print("=" * 60)
     add_storage(network, db, timeslice_csv)
-    
+
     # For aggregation mode, reassign all storage units to the aggregate node
     if mode == "aggregation":
         print(f"Reassigning all storage units to aggregate node: {aggregate_node_name}")
@@ -1719,7 +1749,9 @@ def setup_network(
         print(f"\nWarning: Inflow path specified but not found: {inflow_path}")
         print("Skipping hydro inflow processing")
     else:
-        print("\nNo inflow path specified - storage units will not have natural inflows")
+        print(
+            "\nNo inflow path specified - storage units will not have natural inflows"
+        )
 
     # Step 3: Add generators
     print("\n" + "=" * 60)
@@ -1728,7 +1760,7 @@ def setup_network(
     port_generators(
         network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
     )
-    
+
     # For aggregation mode, reassign all generators to the aggregate node
     generator_summary = None
     if mode == "aggregation":
@@ -1741,41 +1773,47 @@ def setup_network(
         print("STEP 4: Adding transmission lines (with electrical impedance)")
         print("=" * 60)
         port_lines(network, db, timeslice_csv=timeslice_csv)
-        
+
         # Note: Lines don't need reassignment - they maintain physical connections
         # even in aggregation mode (self-loops on aggregate node are handled in optimization)
         link_summary = None
         if mode == "aggregation":
-            print(f"Note: Lines maintain original bus connections for {aggregate_node_name} aggregation")
+            print(
+                f"Note: Lines maintain original bus connections for {aggregate_node_name} aggregation"
+            )
     else:
         print("STEP 4: Adding transmission links (legacy mode)")
         print("=" * 60)
         port_links(network, db)
-        
+
         # For aggregation mode, reassign all links to/from the aggregate node
         link_summary = None
         if mode == "aggregation":
-            print(f"Reassigning all links to/from aggregate node: {aggregate_node_name}")
+            print(
+                f"Reassigning all links to/from aggregate node: {aggregate_node_name}"
+            )
             link_summary = reassign_links_to_node(network, aggregate_node_name)
-
 
     # Add constraints as final step
     print("\n" + "=" * 60)
     print("STEP 5: Adding PLEXOS constraints")
     print("=" * 60)
-    
+
     try:
         from .constraints import add_constraints_enhanced
+
         constraint_results = add_constraints_enhanced(network, db, verbose=True)
-        print(f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped")
+        print(
+            f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"
+        )
     except Exception as e:
         print(f"⚠️  Constraint porting failed: {e}")
-        constraint_results = {'implemented': 0, 'skipped': 0, 'warnings': []}
+        constraint_results = {"implemented": 0, "skipped": 0, "warnings": []}
 
     print("\n" + "=" * 60)
     print(f"NETWORK SETUP COMPLETE ({mode.upper()} MODE)")
     print("=" * 60)
-    print(f"Final network summary:")
+    print("Final network summary:")
     print(f"  Buses: {len(network.buses)}")
     print(f"  Generators: {len(network.generators)}")
     if transmission_as_lines:

@@ -14,8 +14,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.db.models import INPUT_XMLS
-from plexos_pypsa.network.multi_sector_db import setup_gas_electric_network_db
+from src.db.models import INPUT_XMLS
+from src.network.multi_sector_db import setup_gas_electric_network_db
 
 
 def create_marei_eu_generators_as_links_model(
@@ -24,7 +24,7 @@ def create_marei_eu_generators_as_links_model(
     use_csv_integration: bool = False,
     csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
     infrastructure_scenario: str = "PCI",
-    pricing_scheme: str = "Production"
+    pricing_scheme: str = "Production",
 ):
     """
     Create MaREI-EU PyPSA model with optional generators-as-links conversion.
@@ -72,7 +72,7 @@ def create_marei_eu_generators_as_links_model(
 
     if testing_mode:
         print("⚠️  TESTING MODE: Processing limited subsets for faster development")
-        
+
     if use_csv_integration:
         print(f"CSV data path: {csv_data_path}")
         print(f"Infrastructure scenario: {infrastructure_scenario}")
@@ -88,7 +88,9 @@ def create_marei_eu_generators_as_links_model(
     if use_csv_integration:
         # Enhanced setup with CSV data integration
         print("\nSetting up enhanced multi-sector network with CSV data integration...")
-        print("   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data")
+        print(
+            "   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data"
+        )
         print("   Following PyPSA multi-sector patterns for gas/electricity coupling")
 
         if generators_as_links:
@@ -96,21 +98,23 @@ def create_marei_eu_generators_as_links_model(
             print("   Enabling multi-sector coupling through fuel buses")
         else:
             print("   Using standard Generator representation")
-        
-        from plexos_pypsa.network.multi_sector_db import setup_marei_csv_network
-        
+
+        from src.network.multi_sector_db import setup_marei_csv_network
+
         setup_summary = setup_marei_csv_network(
             network=network,
             db=plexos_db,
             csv_data_path=csv_data_path,
             infrastructure_scenario=infrastructure_scenario,
             pricing_scheme=pricing_scheme,
-            generators_as_links=generators_as_links
+            generators_as_links=generators_as_links,
         )
     else:
         # Traditional PlexosDB-only setup
         print("\nSetting up multi-sector network (Gas + Electricity)...")
-        print("   Using direct database queries to discover gas and electricity components")
+        print(
+            "   Using direct database queries to discover gas and electricity components"
+        )
 
         if generators_as_links:
             print("   Representing conventional generators as fuel-to-electric Links")
@@ -137,14 +141,16 @@ if __name__ == "__main__":
     testing_mode = False  # Full model to investigate actual PLEXOS data
     use_csv_integration = True  # Enable CSV integration for enhanced model
     infrastructure_scenario = "PCI"  # Infrastructure scenario: 'PCI', 'High', 'Low'
-    pricing_scheme = "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
+    pricing_scheme = (
+        "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
+    )
 
     network, setup_summary = create_marei_eu_generators_as_links_model(
         generators_as_links=generators_as_links,
         testing_mode=testing_mode,
         use_csv_integration=use_csv_integration,
         infrastructure_scenario=infrastructure_scenario,
-        pricing_scheme=pricing_scheme
+        pricing_scheme=pricing_scheme,
     )
 
     # Print setup summary
@@ -157,19 +163,25 @@ if __name__ == "__main__":
         f"Generators represented as: {'Links' if generators_as_links else 'Generators'}"
     )
     print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
-    
+
     # CSV integration summary (if enabled)
-    if use_csv_integration and setup_summary.get('csv_data_loaded', False):
-        csv_summary = setup_summary.get('csv_integration', {})
-        print(f"\nCSV Data Integration:")
-        print(f"  Infrastructure scenario: {setup_summary.get('infrastructure_scenario', 'N/A')}")
+    if use_csv_integration and setup_summary.get("csv_data_loaded", False):
+        csv_summary = setup_summary.get("csv_integration", {})
+        print("\nCSV Data Integration:")
+        print(
+            f"  Infrastructure scenario: {setup_summary.get('infrastructure_scenario', 'N/A')}"
+        )
         print(f"  Gas pricing scheme: {setup_summary.get('pricing_scheme', 'N/A')}")
         print(f"  Data categories loaded: {csv_summary.get('data_categories', 0)}")
-        print(f"  Available datasets: {', '.join(csv_summary.get('available_datasets', []))}")
-        
+        print(
+            f"  Available datasets: {', '.join(csv_summary.get('available_datasets', []))}"
+        )
+
         # EU countries summary
-        if setup_summary.get('eu_countries'):
-            print(f"  EU countries: {len(setup_summary['eu_countries'])} ({', '.join(setup_summary['eu_countries'][:5])}...)")
+        if setup_summary.get("eu_countries"):
+            print(
+                f"  EU countries: {len(setup_summary['eu_countries'])} ({', '.join(setup_summary['eu_countries'][:5])}...)"
+            )
 
     # Electricity sector summary
     elec_summary = setup_summary["electricity"]
@@ -187,45 +199,79 @@ if __name__ == "__main__":
     else:
         print("\nGas Sector (Enhanced with PyPSA Patterns):")
     print(f"  Gas buses: {gas_summary['buses']} (enhanced carrier typing)")
-    print(f"  Gas fields: {gas_summary.get('fields', 0)} (Store components - finite reserves)")
+    print(
+        f"  Gas fields: {gas_summary.get('fields', 0)} (Store components - finite reserves)"
+    )
     print(f"  Gas pipelines: {gas_summary['pipelines']} (Link components with losses)")
     print(f"  Gas storage: {gas_summary['storage']} (Store components with cycling)")
-    print(f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity conversion Links)")
+    print(
+        f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity conversion Links)"
+    )
     print(f"  Gas demand: {gas_summary['demand']} (Load components)")
     if use_csv_integration:
-        print(f"  LNG terminals: {gas_summary.get('lng', 0)} (Store components from CSV)")
+        print(
+            f"  LNG terminals: {gas_summary.get('lng', 0)} (Store components from CSV)"
+        )
 
     # Enhanced sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
     print("\nEnhanced Sector Coupling:")
     if use_csv_integration:
         # CSV integration mode
-        print(f"  Gas-to-electric links: {coupling_summary.get('gas_to_elec_links', 0)} (CSV enhanced)")
-        print(f"  Gas plants (from PlexosDB): {coupling_summary.get('gas_plants_added', 0)}")
+        print(
+            f"  Gas-to-electric links: {coupling_summary.get('gas_to_elec_links', 0)} (CSV enhanced)"
+        )
+        print(
+            f"  Gas plants (from PlexosDB): {coupling_summary.get('gas_plants_added', 0)}"
+        )
         if generators_as_links:
-            print(f"  Generator links: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)")
-        print(f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}")
-        if coupling_summary.get('fuel_types'):
+            print(
+                f"  Generator links: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)"
+            )
+        print(
+            f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}"
+        )
+        if coupling_summary.get("fuel_types"):
             print(f"  Fuel types: {', '.join(coupling_summary['fuel_types'])}")
     else:
         # Traditional PlexosDB mode
         if generators_as_links:
-            print(f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)} (fuel→electricity)")
-            print(f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)} (standard generators)")
-            print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (gas→electricity from gas.py)")
-            print(f"  Gas-fired generators: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)")
-            print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
+            print(
+                f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)} (fuel→electricity)"
+            )
+            print(
+                f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)} (standard generators)"
+            )
+            print(
+                f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (gas→electricity from gas.py)"
+            )
+            print(
+                f"  Gas-fired generators: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)"
+            )
+            print(
+                f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)"
+            )
             print(f"  Fuel types represented: {coupling_summary.get('fuel_types', [])}")
         else:
-            print(f"  Gas-to-electric generators: {coupling_summary.get('gas_generators', 0)}")
-            print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
-        print(f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}")
+            print(
+                f"  Gas-to-electric generators: {coupling_summary.get('gas_generators', 0)}"
+            )
+            print(
+                f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)"
+            )
+        print(
+            f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}"
+        )
 
     # Enhanced network totals with multi-sector breakdown
     print("\nTotal Network Components (Multi-Sector):")
     print(f"  Total buses: {len(network.buses)} (electricity + gas + other carriers)")
-    print(f"  Total generators: {len(network.generators)} (renewables + remaining conventional)")
-    print(f"  Total links: {len(network.links)} (transmission + pipelines + conversions + generator-links)")
+    print(
+        f"  Total generators: {len(network.generators)} (renewables + remaining conventional)"
+    )
+    print(
+        f"  Total links: {len(network.links)} (transmission + pipelines + conversions + generator-links)"
+    )
     print(f"  Total storage units: {len(network.storage_units)} (electricity storage)")
     print(f"  Total stores: {len(network.stores)} (gas fields + gas storage)")
     print(f"  Total loads: {len(network.loads)} (electricity + gas demand)")
@@ -236,9 +282,9 @@ if __name__ == "__main__":
         print("\nBus Carrier Distribution (Multi-Sector):")
         for carrier, count in carriers.items():
             print(f"  {carrier}: {count} buses")
-    
+
     # Link breakdown by carrier
-    if len(network.links) > 0 and 'carrier' in network.links.columns:
+    if len(network.links) > 0 and "carrier" in network.links.columns:
         link_carriers = network.links.carrier.value_counts()
         print("\nLink Carrier Distribution:")
         for carrier, count in link_carriers.items():
@@ -286,7 +332,9 @@ if __name__ == "__main__":
                     },
                 )  # type: ignore
             else:
-                print(f"\nOptimizing network with {len(network.snapshots)} snapshots...")
+                print(
+                    f"\nOptimizing network with {len(network.snapshots)} snapshots..."
+                )
                 network.optimize(
                     solver_name="gurobi",
                     solver_options={

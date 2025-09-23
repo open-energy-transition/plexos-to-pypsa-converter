@@ -112,7 +112,7 @@ Maps time-dependent properties for generators and other assets.
 ### Basic XML Conversion
 
 ```python
-from plexos_pypsa.network.electricity_sector import create_model_from_xml
+from src.network.electricity_sector import create_model_from_xml
 
 # Convert a PLEXOS model with automatic data discovery
 network = create_model_from_xml(

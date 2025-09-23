@@ -58,8 +58,5 @@ development = [
     "numpydoc>=1.5",
 ]
 
-[tool.setuptools]
-packages = ["plexos_pypsa"]
-
 [tool.setuptools_scm]
 version_scheme = "no-guess-dev"
