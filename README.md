@@ -1,4 +1,4 @@
-# PLEXOS-PyPSA
+# PLEXOS-to-PyPSA converter
 
 A Python tool for converting PLEXOS input XML files and their associated data to create equivalent PyPSA networks.
 
