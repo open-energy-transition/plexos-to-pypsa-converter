@@ -18,7 +18,7 @@ network = create_model_from_xml(
 network.consistency_check()
 
 # select a subset of snapshots for optimization
-x = 500  # number of snapshots to select per year
+x = 50  # number of snapshots to select per year
 snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
 for snap in network.snapshots:
     year = pd.Timestamp(snap).year
@@ -28,7 +28,7 @@ for snap in network.snapshots:
 subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
 # Configuration
-use_subset = False  # Set to True to optimize on subset, False for full network
+use_subset = True  # Set to True to optimize on subset, False for full network
 
 # solve the network
 if use_subset:
