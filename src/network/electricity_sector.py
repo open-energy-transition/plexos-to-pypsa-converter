@@ -11,8 +11,8 @@ from typing import Dict, Optional
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.db.discovery import discover_model_paths
-from plexos_pypsa.network.core import setup_network
+from src.db.discovery import discover_model_paths
+from src.network.core import setup_network
 
 
 def create_model_from_xml(

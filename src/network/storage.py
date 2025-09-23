@@ -7,14 +7,8 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from plexos_pypsa.db.parse import (
-    find_bus_for_object,
-    find_bus_for_storage_via_generators,
-)
-from plexos_pypsa.network.costs import (
-    set_battery_marginal_costs,
-    set_capital_costs_generic,
-)
+from src.db.parse import find_bus_for_object, find_bus_for_storage_via_generators
+from src.network.costs import set_battery_marginal_costs, set_capital_costs_generic
 
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
@@ -817,8 +811,8 @@ def process_storage_inflows(
 
     Returns inflow time series aligned with network snapshots, or None if no inflow data.
     """
-    from plexos_pypsa.utils.paths import extract_filename
-    
+    from src.utils.paths import extract_filename
+
     # Look for Natural Inflow property with Data File reference
     for prop in props:
         if prop.get("property") == "Natural Inflow":
@@ -833,7 +827,7 @@ def process_storage_inflows(
                     # Extract just the filename to avoid double path issues
                     clean_filename = extract_filename(filename.strip())
                     return load_inflow_from_file(clean_filename, inflow_path, snapshots)
-    
+
     # Also check for Filename property (common for hydro inflow files)
     for prop in props:
         if prop.get("property") == "Filename":
@@ -870,8 +864,8 @@ def load_inflow_from_file(
     filename: str, inflow_path: str, snapshots: pd.DatetimeIndex
 ) -> Optional[pd.Series]:
     """Load inflow data from file and align with snapshots."""
-    from plexos_pypsa.utils.paths import safe_join
-    
+    from src.utils.paths import safe_join
+
     try:
         # Use cross-platform path joining
         file_path = safe_join(inflow_path, filename)

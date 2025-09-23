@@ -2,9 +2,9 @@ from typing import Optional
 
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
-from plexos_pypsa.db.models import INPUT_XMLS
-from plexos_pypsa.db.plexosdb import PlexosDB  # type: ignore
-from plexos_pypsa.db.read import (
+from src.db.models import INPUT_XMLS
+from src.db.plexosdb import PlexosDB  # type: ignore
+from src.db.read import (
     check_valid_properties,
     list_and_print_objects,
     print_membership_data_entries,
@@ -201,7 +201,7 @@ save_properties(
     mod_db,
     ClassEnum.Line,
     "CNSW-NNSW",
-    "plexos_pypsa/data/scratch/properties_line_CNSW-NNSW.csv",
+    "src/data/scratch/properties_line_CNSW-NNSW.csv",
 )
 
 

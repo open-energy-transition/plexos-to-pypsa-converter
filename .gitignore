@@ -179,7 +179,7 @@ cython_debug/
 *.DS_Store
 
 # data
-plexos_pypsa/data/
+src/data/
 
 # figures
-plexos_pypsa/figures/
+src/figures/

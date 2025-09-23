@@ -73,4 +73,4 @@ if __name__ == "__main__":
     print(df)
 
 # save df as dynamic_multiband_properties.csv
-df.to_csv("plexos_pypsa/data/scratch/dynamic_multiband_properties.csv", index=False)
+df.to_csv("src/data/scratch/dynamic_multiband_properties.csv", index=False)

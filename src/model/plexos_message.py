@@ -12,8 +12,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.db.models import INPUT_XMLS
-from plexos_pypsa.network.multi_sector_db import (
+from src.db.models import INPUT_XMLS
+from src.network.multi_sector_db import (
     setup_enhanced_flow_network_with_csv,
     setup_flow_network_db,
 )
