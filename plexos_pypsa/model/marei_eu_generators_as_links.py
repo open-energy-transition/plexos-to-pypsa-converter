@@ -19,7 +19,12 @@ from plexos_pypsa.network.multi_sector_db import setup_gas_electric_network_db
 
 
 def create_marei_eu_generators_as_links_model(
-    generators_as_links: bool = True, testing_mode: bool = False
+    generators_as_links: bool = True,
+    testing_mode: bool = False,
+    use_csv_integration: bool = False,
+    csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
+    infrastructure_scenario: str = "PCI",
+    pricing_scheme: str = "Production"
 ):
     """
     Create MaREI-EU PyPSA model with optional generators-as-links conversion.
@@ -29,6 +34,7 @@ def create_marei_eu_generators_as_links_model(
     - Gas network represented as PyPSA Links and Nodes
     - Conventional generators optionally as Links for multi-sector coupling
     - Sector coupling through fuel-to-electric conversion Links
+    - Optional CSV data integration for enhanced demand profiles and infrastructure
 
     Parameters
     ----------
@@ -39,6 +45,15 @@ def create_marei_eu_generators_as_links_model(
     testing_mode : bool, optional
         If True, process only limited subsets of components for faster testing.
         Default False creates complete model.
+    use_csv_integration : bool, optional
+        If True, integrates MaREI CSV data for detailed demand profiles and infrastructure.
+        If False, uses PlexosDB-only approach (legacy behavior). Default False.
+    csv_data_path : str, optional
+        Path to MaREI CSV Files directory containing demand, infrastructure, and pricing data
+    infrastructure_scenario : str, optional
+        Infrastructure scenario for gas network ('PCI', 'High', 'Low'). Default 'PCI'.
+    pricing_scheme : str, optional
+        Gas pricing mechanism ('Production', 'Postage', 'Trickle', 'Uniform'). Default 'Production'.
 
     Returns
     -------
@@ -53,9 +68,15 @@ def create_marei_eu_generators_as_links_model(
     print("Creating MaREI-EU Multi-Sector PyPSA Model (Generators-as-Links Version)...")
     print(f"XML file: {xml_file}")
     print(f"Generators as links: {generators_as_links}")
+    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
 
     if testing_mode:
         print("⚠️  TESTING MODE: Processing limited subsets for faster development")
+        
+    if use_csv_integration:
+        print(f"CSV data path: {csv_data_path}")
+        print(f"Infrastructure scenario: {infrastructure_scenario}")
+        print(f"Pricing scheme: {pricing_scheme}")
 
     # Load PLEXOS database
     print("\nLoading PLEXOS database...")
@@ -64,22 +85,45 @@ def create_marei_eu_generators_as_links_model(
     # Initialize PyPSA network
     network = pypsa.Network()
 
-    # Set up multi-sector network with gas and electricity using database queries
-    print("\nSetting up multi-sector network (Gas + Electricity)...")
-    print("   Using direct database queries to discover gas and electricity components")
+    if use_csv_integration:
+        # Enhanced setup with CSV data integration
+        print("\nSetting up enhanced multi-sector network with CSV data integration...")
+        print("   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data")
+        print("   Following PyPSA multi-sector patterns for gas/electricity coupling")
 
-    if generators_as_links:
-        print("   Representing conventional generators as fuel-to-electric Links")
-        print("   Enabling multi-sector coupling through fuel buses")
+        if generators_as_links:
+            print("   Representing conventional generators as fuel-to-electric Links")
+            print("   Enabling multi-sector coupling through fuel buses")
+        else:
+            print("   Using standard Generator representation")
+        
+        from plexos_pypsa.network.multi_sector_db import setup_marei_csv_network
+        
+        setup_summary = setup_marei_csv_network(
+            network=network,
+            db=plexos_db,
+            csv_data_path=csv_data_path,
+            infrastructure_scenario=infrastructure_scenario,
+            pricing_scheme=pricing_scheme,
+            generators_as_links=generators_as_links
+        )
     else:
-        print("   Using standard Generator representation")
+        # Traditional PlexosDB-only setup
+        print("\nSetting up multi-sector network (Gas + Electricity)...")
+        print("   Using direct database queries to discover gas and electricity components")
 
-    setup_summary = setup_gas_electric_network_db(
-        network=network,
-        db=plexos_db,
-        generators_as_links=generators_as_links,
-        testing_mode=testing_mode,
-    )
+        if generators_as_links:
+            print("   Representing conventional generators as fuel-to-electric Links")
+            print("   Enabling multi-sector coupling through fuel buses")
+        else:
+            print("   Using standard Generator representation")
+
+        setup_summary = setup_gas_electric_network_db(
+            network=network,
+            db=plexos_db,
+            generators_as_links=generators_as_links,
+            testing_mode=testing_mode,
+        )
 
     return network, setup_summary
 
@@ -88,11 +132,19 @@ if __name__ == "__main__":
     # Create the multi-sector model
     # Set generators_as_links=True to use Link representation for conventional generators
     # Set testing_mode=True for faster development, False for complete model
-    generators_as_links = True  # NEW: Enable generators-as-links functionality
+    # Set use_csv_integration=True to enable MaREI CSV data integration
+    generators_as_links = True  # Enable generators-as-links functionality
     testing_mode = False  # Full model to investigate actual PLEXOS data
+    use_csv_integration = True  # Enable CSV integration for enhanced model
+    infrastructure_scenario = "PCI"  # Infrastructure scenario: 'PCI', 'High', 'Low'
+    pricing_scheme = "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
 
     network, setup_summary = create_marei_eu_generators_as_links_model(
-        generators_as_links=generators_as_links, testing_mode=testing_mode
+        generators_as_links=generators_as_links,
+        testing_mode=testing_mode,
+        use_csv_integration=use_csv_integration,
+        infrastructure_scenario=infrastructure_scenario,
+        pricing_scheme=pricing_scheme
     )
 
     # Print setup summary
@@ -104,6 +156,20 @@ if __name__ == "__main__":
     print(
         f"Generators represented as: {'Links' if generators_as_links else 'Generators'}"
     )
+    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
+    
+    # CSV integration summary (if enabled)
+    if use_csv_integration and setup_summary.get('csv_data_loaded', False):
+        csv_summary = setup_summary.get('csv_integration', {})
+        print(f"\nCSV Data Integration:")
+        print(f"  Infrastructure scenario: {setup_summary.get('infrastructure_scenario', 'N/A')}")
+        print(f"  Gas pricing scheme: {setup_summary.get('pricing_scheme', 'N/A')}")
+        print(f"  Data categories loaded: {csv_summary.get('data_categories', 0)}")
+        print(f"  Available datasets: {', '.join(csv_summary.get('available_datasets', []))}")
+        
+        # EU countries summary
+        if setup_summary.get('eu_countries'):
+            print(f"  EU countries: {len(setup_summary['eu_countries'])} ({', '.join(setup_summary['eu_countries'][:5])}...)")
 
     # Electricity sector summary
     elec_summary = setup_summary["electricity"]
@@ -114,44 +180,69 @@ if __name__ == "__main__":
     print(f"  Lines: {elec_summary['lines']}")
     print(f"  Storage: {elec_summary['storage']}")
 
-    # Gas sector summary
+    # Enhanced gas sector summary (with CSV integration)
     gas_summary = setup_summary["gas"]
-    print("\nGas Sector:")
-    print(f"  Gas buses: {gas_summary['buses']}")
-    print(f"  Gas pipelines: {gas_summary['pipelines']}")
-    print(f"  Gas storage: {gas_summary['storage']}")
-    print(f"  Gas demand: {gas_summary['demand']}")
-    print(f"  Gas fields: {gas_summary['fields']}")
-
-    # Sector coupling summary
-    coupling_summary = setup_summary["sector_coupling"]
-    print("\nSector Coupling:")
-    if generators_as_links:
-        print(
-            f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)}"
-        )
-        print(
-            f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)}"
-        )
-        print(f"  Fuel types represented: {coupling_summary.get('fuel_types', [])}")
+    if use_csv_integration:
+        print("\nGas Sector (Enhanced with CSV Integration):")
     else:
-        print(f"  Gas-to-electric generators: {coupling_summary['gas_generators']}")
-    print(f"  Conversion efficiency range: {coupling_summary['efficiency_range']}")
+        print("\nGas Sector (Enhanced with PyPSA Patterns):")
+    print(f"  Gas buses: {gas_summary['buses']} (enhanced carrier typing)")
+    print(f"  Gas fields: {gas_summary.get('fields', 0)} (Store components - finite reserves)")
+    print(f"  Gas pipelines: {gas_summary['pipelines']} (Link components with losses)")
+    print(f"  Gas storage: {gas_summary['storage']} (Store components with cycling)")
+    print(f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity conversion Links)")
+    print(f"  Gas demand: {gas_summary['demand']} (Load components)")
+    if use_csv_integration:
+        print(f"  LNG terminals: {gas_summary.get('lng', 0)} (Store components from CSV)")
 
-    # Network totals
-    print("\nTotal Network Components:")
-    print(f"  Total buses: {len(network.buses)}")
-    print(f"  Total generators: {len(network.generators)}")
-    print(f"  Total links: {len(network.links)}")
-    print(f"  Total storage units: {len(network.storage_units)}")
-    print(f"  Total loads: {len(network.loads)}")
+    # Enhanced sector coupling summary
+    coupling_summary = setup_summary["sector_coupling"]
+    print("\nEnhanced Sector Coupling:")
+    if use_csv_integration:
+        # CSV integration mode
+        print(f"  Gas-to-electric links: {coupling_summary.get('gas_to_elec_links', 0)} (CSV enhanced)")
+        print(f"  Gas plants (from PlexosDB): {coupling_summary.get('gas_plants_added', 0)}")
+        if generators_as_links:
+            print(f"  Generator links: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)")
+        print(f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}")
+        if coupling_summary.get('fuel_types'):
+            print(f"  Fuel types: {', '.join(coupling_summary['fuel_types'])}")
+    else:
+        # Traditional PlexosDB mode
+        if generators_as_links:
+            print(f"  Conventional generator-links: {coupling_summary.get('generator_links', 0)} (fuel→electricity)")
+            print(f"  Renewable generators: {coupling_summary.get('renewable_generators', 0)} (standard generators)")
+            print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (gas→electricity from gas.py)")
+            print(f"  Gas-fired generators: {coupling_summary.get('gas_generators', 0)} (generators-as-links mode)")
+            print(f"  Multi-sector links: {coupling_summary.get('sector_coupling_links', 0)} (electrolysis/fuel_cell)")
+            print(f"  Fuel types represented: {coupling_summary.get('fuel_types', [])}")
+        else:
+            print(f"  Gas-to-electric generators: {coupling_summary.get('gas_generators', 0)}")
+            print(f"  Gas plants: {coupling_summary.get('gas_plants_added', 0)} (from gas sector)")
+        print(f"  Conversion efficiency range: {coupling_summary.get('efficiency_range', 'N/A')}")
 
-    # Carrier breakdown
+    # Enhanced network totals with multi-sector breakdown
+    print("\nTotal Network Components (Multi-Sector):")
+    print(f"  Total buses: {len(network.buses)} (electricity + gas + other carriers)")
+    print(f"  Total generators: {len(network.generators)} (renewables + remaining conventional)")
+    print(f"  Total links: {len(network.links)} (transmission + pipelines + conversions + generator-links)")
+    print(f"  Total storage units: {len(network.storage_units)} (electricity storage)")
+    print(f"  Total stores: {len(network.stores)} (gas fields + gas storage)")
+    print(f"  Total loads: {len(network.loads)} (electricity + gas demand)")
+
+    # Enhanced carrier breakdown
     if len(network.buses) > 0:
         carriers = network.buses.carrier.value_counts()
-        print("\nCarrier Distribution:")
+        print("\nBus Carrier Distribution (Multi-Sector):")
         for carrier, count in carriers.items():
             print(f"  {carrier}: {count} buses")
+    
+    # Link breakdown by carrier
+    if len(network.links) > 0 and 'carrier' in network.links.columns:
+        link_carriers = network.links.carrier.value_counts()
+        print("\nLink Carrier Distribution:")
+        for carrier, count in link_carriers.items():
+            print(f"  {carrier}: {count} links")
 
     # Run consistency check
     print("\nRunning network consistency check...")

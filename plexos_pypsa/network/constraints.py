@@ -5,6 +5,9 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
+# Import enhanced constraint porting system
+from .constraint_porting import port_plexos_constraints
+
 logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.INFO)
 
@@ -219,3 +222,32 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
 
         except Exception as e:
             logger.error(f"Failed to apply constraint {constraint}: {e}")
+
+
+def add_constraints_enhanced(network: Network, db: PlexosDB, verbose: bool = True) -> dict:
+    """
+    Enhanced constraint porting using the comprehensive constraint analysis system.
+    
+    This function provides better constraint classification, implementation, and reporting
+    compared to the original add_constraints function.
+    
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network to add constraints to
+    db : PlexosDB
+        The PLEXOS database containing constraint data
+    verbose : bool, default True
+        Whether to print detailed implementation messages and statistics
+    
+    Returns
+    -------
+    dict
+        Summary dictionary with implementation statistics and warnings
+        
+    Examples
+    --------
+    >>> results = add_constraints_enhanced(network, db, verbose=True)
+    >>> print(f"Implemented {results['implemented']} constraints")
+    """
+    return port_plexos_constraints(network, db, verbose=verbose)

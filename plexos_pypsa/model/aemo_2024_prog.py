@@ -3,7 +3,7 @@ from typing import DefaultDict
 
 import pandas as pd
 
-from plexos_pypsa.model.data_driven import create_model_from_xml
+from plexos_pypsa.network.electricity_sector import create_model_from_xml
 
 path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
 main_dir = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
@@ -18,7 +18,7 @@ network = create_model_from_xml(
 network.consistency_check()
 
 # select a subset of snapshots for optimization
-x = 500  # number of snapshots to select per year
+x = 50  # number of snapshots to select per year
 snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
 for snap in network.snapshots:
     year = pd.Timestamp(snap).year
@@ -28,7 +28,7 @@ for snap in network.snapshots:
 subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
 # Configuration
-use_subset = False  # Set to True to optimize on subset, False for full network
+use_subset = True  # Set to True to optimize on subset, False for full network
 
 # solve the network
 if use_subset:

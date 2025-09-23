@@ -5,8 +5,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from plexos_pypsa.model.data_driven import create_caiso_model_data_driven
 from plexos_pypsa.network.core import setup_network
+from plexos_pypsa.network.electricity_sector import create_caiso_model_data_driven
 
 
 def create_caiso_model(use_data_driven: bool = False):
@@ -25,7 +25,7 @@ def create_caiso_model(use_data_driven: bool = False):
         Configured CAISO PyPSA network
     """
     # Define XML file path
-    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
+    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
     file_xml = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
 
     if use_data_driven:

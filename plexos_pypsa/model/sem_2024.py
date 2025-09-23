@@ -6,18 +6,19 @@ import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
 from plexos_pypsa.network.core import setup_network
-from plexos_pypsa.model.data_driven import create_sem_model_data_driven
+from plexos_pypsa.network.electricity_sector import create_sem_model_data_driven
+
 
 def create_sem_model(use_data_driven: bool = False):
     """
     Create SEM PyPSA model using traditional or data-driven approach.
-    
+
     Parameters
-    ---------- 
+    ----------
     use_data_driven : bool, default False
         If True, uses automatic path discovery from database.
         If False, uses hardcoded paths (legacy behavior).
-        
+
     Returns
     -------
     pypsa.Network
@@ -26,14 +27,13 @@ def create_sem_model(use_data_driven: bool = False):
     # Define XML file path
     path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
     file_xml = f"{path_root}/SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
-    
+
     if use_data_driven:
         print("Creating SEM PyPSA Model using data-driven approach...")
         return create_sem_model_data_driven(
-            xml_file_path=file_xml,
-            main_directory=f"{path_root}/SEM/SEM 2024-2032"
+            xml_file_path=file_xml, main_directory=f"{path_root}/SEM/SEM 2024-2032"
         )
-    
+
     # Legacy approach with hardcoded paths
     file_timeslice = None
 
@@ -69,7 +69,7 @@ def create_sem_model(use_data_driven: bool = False):
         vre_profiles_path=path_ren,
         inflow_path=path_hydro_inflows,
     )
-    
+
     return n, setup_summary
 
 
@@ -81,9 +81,7 @@ print(f"  Mode: {setup_summary['mode']}")
 print(f"  Target node: {setup_summary['target_node']}")
 print(f"  Format type: {setup_summary['format_type']}")
 if setup_summary["format_type"] == "iteration":
-    print(
-        f"  Iterations processed: {setup_summary['iterations_processed']}"
-    )
+    print(f"  Iterations processed: {setup_summary['iterations_processed']}")
     print(
         f"  Loads created: {setup_summary['loads_added']} (Load1_{setup_summary['target_node']} to Load{setup_summary['iterations_processed']}_{setup_summary['target_node']})"
     )
@@ -93,7 +91,7 @@ print(f"  Peak demand: {setup_summary['peak_demand']:.2f} MW")
 print(f"  Total buses: {len(n.buses)}")
 print(f"  Total generators: {len(n.generators)}")
 print(f"  Total storage units: {len(n.storage_units)}")
-if hasattr(n.storage_units_t, 'inflow') and len(n.storage_units_t.inflow.columns) > 0:
+if hasattr(n.storage_units_t, "inflow") and len(n.storage_units_t.inflow.columns) > 0:
     print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
 
 # run consistency check on network

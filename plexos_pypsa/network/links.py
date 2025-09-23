@@ -288,7 +288,7 @@ def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
     print(f"Set flow limits for {len(network.links)} links")
 
 
-def port_links(network: Network, db: PlexosDB, target_node=None):
+def port_links(network: Network, db: PlexosDB, timeslice_csv=None, target_node=None):
     """
     Comprehensive function to add links and set all their properties in the PyPSA network.
 
@@ -303,6 +303,8 @@ def port_links(network: Network, db: PlexosDB, target_node=None):
         The PyPSA network to which links will be added.
     db : PlexosDB
         The Plexos database containing link/transmission data.
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file for time-dependent link properties.
     target_node : str, optional
         If specified, all links will be reassigned to this node after setup.
         This is useful when demand is aggregated to a single node.
@@ -329,7 +331,7 @@ def port_links(network: Network, db: PlexosDB, target_node=None):
 
     # Step 2: Set link flow limits
     print("2. Setting link flow limits...")
-    set_link_flows(network, db)
+    set_link_flows(network, db, timeslice_csv=timeslice_csv)
 
     # Step 3: Reassign links to target node if specified
     if target_node:
