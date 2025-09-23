@@ -26,7 +26,7 @@ for cls in mod_classes:
     print(f"  - {cls}")
 
 list_and_print_objects(mod_db, ClassEnum.Constraint)
-list_and_print_objects(mod_db, ClassEnum.FlowNode)
+list_and_print_objects(mod_db, ClassEnum.Facility)
 
 mod_db.list_objects_by_class(ClassEnum.FlowNode)
 mod_db.list_objects_by_class(ClassEnum.Constraint)
@@ -51,7 +51,7 @@ mod_db.get_object_properties(
 )
 
 
-list_and_print_objects(mod_db, ClassEnum.FlowPath)
+fp = list_and_print_objects(mod_db, ClassEnum.FlowPath)
 print_properties(
     mod_db,
     ClassEnum.GasNode,
