@@ -2,7 +2,7 @@
 Universal Progress Tracking for Network Setup Functions.
 
 This module provides progress tracking and testing mode capabilities that can be
-used across all network setup functions in the plexos-pypsa package.
+used across all network setup functions in the plexos-to-pypsa-converter package.
 """
 
 import time

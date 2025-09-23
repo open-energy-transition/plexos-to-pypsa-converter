@@ -6,8 +6,8 @@ A Python tool for converting PLEXOS input XML files and their associated data to
 
 ```bash
 # Clone the repository
-git clone https://github.com/open-energy-transition/plexos-pypsa.git
-cd plexos-pypsa
+git clone https://github.com/open-energy-transition/plexos-to-pypsa-converter.git
+cd plexos-to-pypsa-converter
 
 # Install the package
 pip install -e .

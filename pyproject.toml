@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "plexos-pypsa"
+name = "plexos-to-pypsa-converter"
 dynamic = ["version"]
 description = "PLEXOS-to-PyPSA Converter"
 readme = "README.md"
@@ -36,8 +36,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/open-energy-transition/plexos-pypsa"
-Source = "https://github.com/open-energy-transition/plexos-pypsa"
+Homepage = "https://github.com/open-energy-transition/plexos-to-pypsa-converter"
+Source = "https://github.com/open-energy-transition/plexos-to-pypsa-converter"
 
 [project.optional-dependencies]
 jupyter = [
