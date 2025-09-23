@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plexos-pypsa"
+dynamic = ["version"]
+description = "PLEXOS-to-PyPSA Converter"
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pypsa>=0.34",
+    "pandas>=2.2",
+    "numpy>=2.2",
+    "scipy>=1.15",
+    "xarray>=2025.1",
+    "netcdf4>=1.7",
+    "linopy>=0.5.5",
+    "matplotlib>=3.10",
+    "geopandas>=1.0",
+    "networkx>=3.4",
+    "pyyaml>=6.0",
+    "openpyxl>=3.1",
+    "deprecation",
+    "validators",
+]
+
+[project.urls]
+Homepage = "https://github.com/open-energy-transition/plexos-pypsa"
+Source = "https://github.com/open-energy-transition/plexos-pypsa"
+
+[project.optional-dependencies]
+jupyter = [
+    "jupyter>=1.0",
+    "ipykernel>=6.16",
+    "ipywidgets>=8.0",
+    "notebook>=6.5",
+]
+solvers = [
+    "gurobipy>=12.0",
+    "highspy>=1.10",
+]
+development = [
+    "pytest>=8.4",
+    "mypy>=1.15",
+    "sphinx>=5.3",
+    "sphinx-rtd-theme>=1.2",
+    "numpydoc>=1.5",
+]
+
+[tool.setuptools]
+packages = ["plexos_pypsa"]
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
