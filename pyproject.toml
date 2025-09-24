@@ -117,7 +117,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"{test,examples,scratch}/**" = [
+"{test,examples}/**" = [
     'D',     # pydocstyle
     'ERA',   # eradicate
     'S',     # flake8-bandit
@@ -148,6 +148,8 @@ ignore = [
     'T20',  # flake8-print (TODO: allow print for now, change later?)
 ]
 
+"src/scratch/**" = ['ALL']
+
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
 ban-relative-imports = "all"
@@ -155,7 +157,7 @@ ban-relative-imports = "all"
 # Static type checker settings
 
 [tool.mypy]
-exclude = ['examples/*', 'data/*', 'doc/*', 'scratch/*']
+exclude = ['examples/*', 'data/*', 'doc/*', 'scratch/*', 'src/scratch/*']
 ignore_missing_imports = true
 no_implicit_optional = true
 warn_unused_ignores = true
