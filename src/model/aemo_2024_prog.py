@@ -1,5 +1,4 @@
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
 
@@ -19,7 +18,7 @@ network.consistency_check()
 
 # select a subset of snapshots for optimization
 x = 50  # number of snapshots to select per year
-snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+snapshots_by_year: defaultdict[int, list] = defaultdict(list)
 for snap in network.snapshots:
     year = pd.Timestamp(snap).year
     if len(snapshots_by_year[year]) < x:

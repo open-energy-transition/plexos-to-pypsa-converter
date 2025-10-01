@@ -1,14 +1,20 @@
 import pandas as pd
+import plexosdb as PlexosDB
+from plexosdb.enums import ClassEnum
 
 
-def print_objects_alphabetically(objects, object_type="object"):
+def print_objects_alphabetically(
+    objects: list[str], object_type: str = "object"
+) -> None:
     objects.sort()
     print(f"\n{object_type.capitalize()}s in mod_db:")
     for obj in objects:
         print(f"  - {obj}")
 
 
-def list_and_print_objects(db, class_enum, object_type=None):
+def list_and_print_objects(
+    db: PlexosDB, class_enum: ClassEnum, object_type: str
+) -> list[str]:
     objects = db.list_objects_by_class(class_enum)
     if object_type is None:
         object_type = "object"
@@ -17,7 +23,9 @@ def list_and_print_objects(db, class_enum, object_type=None):
     return objects
 
 
-def print_properties(db, class_enum, name, detailed=True):
+def print_properties(
+    db: PlexosDB, class_enum: ClassEnum, name: str, detailed: bool = True
+) -> None:
     properties = db.get_object_properties(class_enum, name)
     print(f"Properties of {name} ({class_enum.name}):")
     for prop in properties:
@@ -47,39 +55,40 @@ def print_properties(db, class_enum, name, detailed=True):
                         )
 
 
-def save_properties(db, class_enum, name, file_path):
+def save_properties(
+    db: PlexosDB, class_enum: ClassEnum, name: str, file_path: str
+) -> None:
     properties = db.get_object_properties(class_enum, name)
     if not properties:
         print(f"No properties found for {name} ({class_enum.name}).")
         return
 
     # Prepare data for DataFrame
-    data = []
-    for prop in properties:
-        data.append(
-            {
-                "property": prop["property"],
-                "value": prop["value"],
-                "unit": prop["unit"] or "",
-                "scenario": prop["scenario"],
-                "scenario_category": prop["scenario_category"],
-                "texts": prop["texts"],
-                "tags": prop["tags"],
-                "data_id": prop["data_id"],
-                "parent_object_id": prop["parent_object_id"],
-                "property_id": prop["property_id"],
-                "membership_id": prop["membership_id"],
-                "child_object_id": prop["child_object_id"],
-                "bands": prop["bands"]
-                if isinstance(prop["bands"], str)
-                else "; ".join(
-                    [
-                        f"{band['name']}: {band['value']} {band['unit'] or ''}"
-                        for band in prop["bands"]
-                    ]
-                ),
-            }
-        )
+    data = [
+        {
+            "property": prop["property"],
+            "value": prop["value"],
+            "unit": prop["unit"] or "",
+            "scenario": prop["scenario"],
+            "scenario_category": prop["scenario_category"],
+            "texts": prop["texts"],
+            "tags": prop["tags"],
+            "data_id": prop["data_id"],
+            "parent_object_id": prop["parent_object_id"],
+            "property_id": prop["property_id"],
+            "membership_id": prop["membership_id"],
+            "child_object_id": prop["child_object_id"],
+            "bands": prop["bands"]
+            if isinstance(prop["bands"], str)
+            else "; ".join(
+                [
+                    f"{band['name']}: {band['value']} {band['unit'] or ''}"
+                    for band in prop["bands"]
+                ]
+            ),
+        }
+        for prop in properties
+    ]
 
     # Create DataFrame
     df = pd.DataFrame(data)
@@ -91,8 +100,12 @@ def save_properties(db, class_enum, name, file_path):
 
 
 def check_valid_properties(
-    db, collection_enum, parent_class_enum, child_class_enum, label
-):
+    db: PlexosDB,
+    collection_enum: ClassEnum,
+    parent_class_enum: ClassEnum,
+    child_class_enum: ClassEnum,
+    label: str,
+) -> None:
     props = db.list_valid_properties(
         collection_enum,
         parent_class_enum=parent_class_enum,
@@ -109,7 +122,7 @@ def check_valid_properties(
             print(f"  - {p} (contains 'Rate' or 'Emission')")
 
 
-def print_memberships(memberships):
+def print_memberships(memberships: list[dict]) -> None:
     print("\nMemberships:")
     for membership in memberships:
         membership_id = membership.get("membership_id", "N/A")
@@ -138,7 +151,7 @@ def print_memberships(memberships):
         print()
 
 
-def format_t_data_entries(entries):
+def format_t_data_entries(entries: list[tuple]) -> list[dict]:
     """Format <t_data> entries neatly for printing or further processing."""
     formatted_entries = []
     for entry in entries:
@@ -157,9 +170,8 @@ def format_t_data_entries(entries):
     return formatted_entries
 
 
-def print_membership_data_entries(entries):
+def print_membership_data_entries(entries: list[tuple]) -> None:
     """Print <t_data> entries in a more readable format."""
-
     l_entries = format_t_data_entries(entries)
 
     print("\n<t_data> Entries:")

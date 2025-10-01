@@ -1,5 +1,4 @@
-"""
-Multi-Sector Network Setup Functions
+"""Multi-Sector Network Setup Functions.
 
 This module provides functions to set up PyPSA networks for multi-sector energy models,
 including gas, hydrogen, ammonia, and other energy carriers with sector coupling.
@@ -9,7 +8,7 @@ backward compatibility with existing model scripts.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 from plexosdb import PlexosDB
@@ -24,9 +23,8 @@ from src.network.storage import add_storage
 logger = logging.getLogger(__name__)
 
 
-def setup_gas_electric_network(network: Network, db: PlexosDB) -> Dict[str, Any]:
-    """
-    Set up a multi-sector PyPSA network for gas and electricity systems.
+def setup_gas_electric_network(network: Network, db: PlexosDB) -> dict[str, Any]:
+    """Set up a multi-sector PyPSA network for gas and electricity systems.
 
     This function creates a PyPSA network that represents both gas and electricity
     sectors with coupling through gas-fired generators, following the MaREI-EU model structure.
@@ -75,9 +73,6 @@ def setup_gas_electric_network(network: Network, db: PlexosDB) -> Dict[str, Any]
         # Try to find demand data for snapshots - using a simple approach for now
         nodes = db.list_objects_by_class(ClassEnum.Node)
         if nodes:
-            # For now, create basic hourly snapshots for one year
-            import pandas as pd
-
             snapshots = pd.date_range("2024-01-01", "2024-12-31 23:00", freq="H")
             network.set_snapshots(snapshots)
             print(f"   Set {len(snapshots)} hourly snapshots for 2024")
@@ -151,7 +146,7 @@ def setup_gas_electric_network(network: Network, db: PlexosDB) -> Dict[str, Any]
 
     # Set up basic load for electricity (placeholder)
     electricity_buses = network.buses[network.buses.carrier == "AC"].index
-    for i, bus in enumerate(
+    for _i, bus in enumerate(
         electricity_buses[:5]
     ):  # Add loads to first 5 buses as example
         load_name = f"Load_{bus}"
@@ -177,18 +172,19 @@ def add_gas_buses(network: Network, db: PlexosDB) -> int:
         try:
             result = db.execute_query(query)
             gas_nodes = [row[0] for row in result]
-        except:
+        except Exception:
             # Fallback: check if we can access via standard method with different name
             try:
                 # Try different possible class names
                 for class_name in ["Gas_Node", "GasNode", "Gas Node"]:
                     try:
-                        gas_nodes = getattr(db, "list_objects_by_class")(class_name)
+                        gas_nodes = db.list_objects_by_class(class_name)
                         break
-                    except:
+                    except Exception:
+                        logger.debug(f"Gas class name {class_name} not available")
                         continue
-            except:
-                pass
+            except Exception:
+                logger.debug("All gas node class name attempts failed")
 
         for node in gas_nodes:
             bus_name = f"gas_{node}"
@@ -427,7 +423,7 @@ def add_gas_fields(network: Network, db: PlexosDB) -> int:
     return fields_added
 
 
-def add_gas_electric_coupling(network: Network, db: PlexosDB) -> Dict[str, Any]:
+def add_gas_electric_coupling(network: Network, db: PlexosDB) -> dict[str, Any]:
     """Add gas-to-electric conversion links for gas-fired generators."""
     coupling_stats = {"gas_generators": 0, "efficiency_range": "N/A"}
 
@@ -521,9 +517,8 @@ def add_gas_electric_coupling(network: Network, db: PlexosDB) -> Dict[str, Any]:
     return coupling_stats
 
 
-def setup_flow_network(network: Network, db: PlexosDB) -> Dict[str, Any]:
-    """
-    Set up a multi-sector PyPSA network using PLEXOS Flow Network components.
+def setup_flow_network(network: Network, db: PlexosDB) -> dict[str, Any]:
+    """Set up a multi-sector PyPSA network using PLEXOS Flow Network components.
 
     This function creates a PyPSA network from PLEXOS Flow Network components,
     supporting multiple energy carriers like electricity, hydrogen, and ammonia.
@@ -619,7 +614,7 @@ def setup_flow_network(network: Network, db: PlexosDB) -> Dict[str, Any]:
     for sector in sectors:
         sector_buses = network.buses[network.buses.carrier == sector].index
         demand_count = 0
-        for i, bus in enumerate(
+        for _i, bus in enumerate(
             sector_buses[:3]
         ):  # Add demand to first 3 buses per sector
             load_name = f"{sector}_demand_{bus.split('_')[-1]}"
@@ -644,7 +639,7 @@ def setup_flow_network(network: Network, db: PlexosDB) -> Dict[str, Any]:
     return setup_summary
 
 
-def analyze_flow_sectors(db: PlexosDB) -> Dict[str, List[str]]:
+def analyze_flow_sectors(db: PlexosDB) -> dict[str, list[str]]:
     """Analyze flow nodes to identify energy sectors."""
     sectors = {}
     try:
@@ -672,8 +667,8 @@ def analyze_flow_sectors(db: PlexosDB) -> Dict[str, List[str]]:
 
 
 def add_flow_nodes(
-    network: Network, db: PlexosDB, sectors: Dict[str, List[str]]
-) -> Dict[str, int]:
+    network: Network, db: PlexosDB, sectors: dict[str, list[str]]
+) -> dict[str, int]:
     """Add flow nodes as PyPSA buses."""
     nodes_by_sector = {}
 
@@ -699,8 +694,8 @@ def add_flow_nodes(
 
 
 def add_flow_paths(
-    network: Network, db: PlexosDB, sectors: Dict[str, List[str]]
-) -> Dict[str, int]:
+    network: Network, db: PlexosDB, sectors: dict[str, list[str]]
+) -> dict[str, int]:
     """Add flow paths as PyPSA links."""
     paths_by_sector = {"Transport": 0, "Conversion": 0}
 
@@ -779,8 +774,8 @@ def add_flow_paths(
 
 
 def add_flow_storage(
-    network: Network, db: PlexosDB, sectors: Dict[str, List[str]]
-) -> Dict[str, int]:
+    network: Network, db: PlexosDB, sectors: dict[str, list[str]]
+) -> dict[str, int]:
     """Add flow storage as PyPSA storage units."""
     storage_by_sector = {}
 
@@ -851,7 +846,7 @@ def add_flow_storage(
     return storage_by_sector
 
 
-def add_processes(network: Network, db: PlexosDB) -> Dict[str, int]:
+def add_processes(network: Network, db: PlexosDB) -> dict[str, int]:
     """Add processes as sector coupling links."""
     process_stats = {}
 
@@ -879,11 +874,7 @@ def add_processes(network: Network, db: PlexosDB) -> Dict[str, int]:
                 memberships = db.get_memberships_system(
                     process, object_class=ClassEnum.Process
                 )
-                commodities = [
-                    m["name"]
-                    for m in memberships
-                    if m["collection_name"] == "Commodity"
-                ]
+                [m["name"] for m in memberships if m["collection_name"] == "Commodity"]
 
                 # Determine process type and create appropriate links
                 if "electrolysis" in process.lower():
@@ -965,7 +956,7 @@ def add_processes(network: Network, db: PlexosDB) -> Dict[str, int]:
     return process_stats
 
 
-def add_facilities(network: Network, db: PlexosDB) -> Dict[str, int]:
+def add_facilities(network: Network, db: PlexosDB) -> dict[str, int]:
     """Add facilities as generators."""
     facility_stats = {}
 

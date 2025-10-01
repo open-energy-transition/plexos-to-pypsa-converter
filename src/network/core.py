@@ -1,18 +1,23 @@
+import datetime
 import logging
-import os
+from pathlib import Path
 
-import pandas as pd  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum  # type: ignore
-from pypsa import Network  # type: ignore
+import pandas as pd
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
+from pypsa import Network
+
+from src.network.constraints import add_constraints_enhanced
+from src.network.generators import port_generators, reassign_generators_to_node
+from src.network.lines import port_lines
+from src.network.links import port_links, reassign_links_to_node
+from src.network.storage import add_hydro_inflows, add_storage
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO)
 
 
 def add_buses(network: Network, db: PlexosDB):
-    """
-    Adds buses to the given network based on the nodes retrieved from the database.
+    """Add buses to the given network based on the nodes retrieved from the database.
 
     Parameters
     ----------
@@ -43,9 +48,8 @@ def add_buses(network: Network, db: PlexosDB):
 
 
 def add_snapshots(network: Network, path: str):
-    """
-    Reads demand data to determine time resolution and creates unified time series
-    to set as the network snapshots. Handles both directory-based and single CSV formats.
+    """Read demand data to determine time resolution and create unified time series
+    to set as the network snapshots. Handle both directory-based and single CSV formats.
 
     Parameters
     ----------
@@ -55,7 +59,8 @@ def add_snapshots(network: Network, path: str):
         Path to the folder containing raw demand data files, or path to a single CSV file.
     """
     # Check if path is a single file or directory
-    if os.path.isfile(path) and path.endswith(".csv"):
+    path_obj = Path(path)
+    if path_obj.is_file() and path.endswith(".csv"):
         # Single CSV file format (CAISO/SEM style)
         df = pd.read_csv(path)
 
@@ -98,8 +103,6 @@ def add_snapshots(network: Network, path: str):
             all_times = []
 
             for _, row in unique_dates.iterrows():
-                import datetime
-
                 date = datetime.datetime(
                     year=int(row["Year"]), month=int(row["Month"]), day=int(row["Day"])
                 )
@@ -119,13 +122,13 @@ def add_snapshots(network: Network, path: str):
             unique_dates_list = sorted(df["datetime"].unique())
             network.set_snapshots(unique_dates_list)
 
-    elif os.path.isdir(path):
+    elif path_obj.is_dir():
         # Directory with multiple CSV files
         all_times_list = []
 
-        for file in os.listdir(path):
-            if file.endswith(".csv"):
-                file_path = os.path.join(path, file)
+        for file in path_obj.iterdir():
+            if file.name.endswith(".csv"):
+                file_path = str(file)
                 df = pd.read_csv(file_path)
 
                 # Check if this is a CAISO/SEM format file (has Period column)
@@ -167,8 +170,6 @@ def add_snapshots(network: Network, path: str):
                     )
 
                     for _, row in unique_dates.iterrows():
-                        import datetime
-
                         date = datetime.datetime(
                             year=int(row["Year"]),
                             month=int(row["Month"]),
@@ -233,14 +234,15 @@ def add_snapshots(network: Network, path: str):
             # Set the unified time series as the network snapshots
             network.set_snapshots(unified_times.tolist())
         else:
-            raise ValueError("No valid CSV files found in directory")
+            msg = "No valid CSV files found in directory"
+            raise ValueError(msg)
     else:
-        raise ValueError(f"Path must be either a CSV file or directory: {path}")
+        msg = f"Path must be either a CSV file or directory: {path}"
+        raise ValueError(msg)
 
 
 def add_loads(network: Network, path: str):
-    """
-    Adds loads to the PyPSA network for each bus based on the corresponding {bus}...csv file.
+    """Add loads to the PyPSA network for each bus based on the corresponding {bus}...csv file.
 
     Parameters
     ----------
@@ -251,18 +253,19 @@ def add_loads(network: Network, path: str):
     """
     for bus in network.buses.index:
         # Find the corresponding load file for the bus
+        path_obj = Path(path)
         file_name = next(
             (
-                f
-                for f in os.listdir(path)
-                if f.startswith(f"{bus}_") and f.endswith(".csv")
+                f.name
+                for f in path_obj.iterdir()
+                if f.name.startswith(f"{bus}_") and f.name.endswith(".csv")
             ),
             None,
         )
         if file_name is None:
             print(f"Warning: No load file found for bus {bus}")
             continue
-        file_path = os.path.join(path, file_name)
+        file_path = str(path_obj / file_name)
 
         # Read the load file
         df = pd.read_csv(file_path, index_col=["Year", "Month", "Day"])
@@ -289,7 +292,8 @@ def add_loads(network: Network, path: str):
         elif len(non_date_columns) == 48:
             resolution = 30  # 30 minutes
         else:
-            raise ValueError("Unsupported resolution.")
+            msg = "Unsupported resolution."
+            raise ValueError(msg)
 
         # Change df to long format, with datetime as index
         df_long = df.melt(
@@ -327,8 +331,7 @@ def add_loads(network: Network, path: str):
 
 
 def discover_carriers_from_db(db: PlexosDB) -> list:
-    """
-    Automatically discover all carriers needed for PyPSA network by analyzing PLEXOS database.
+    """Automatically discover all carriers needed for PyPSA network by analyzing PLEXOS database.
 
     This function examines multiple PLEXOS classes to build a comprehensive list of carriers:
     - Core carriers (AC, conversion)
@@ -424,7 +427,8 @@ def discover_carriers_from_db(db: PlexosDB) -> list:
                 if class_enum and db.list_objects_by_class(class_enum):
                     multi_sector_carriers.update(["Natural Gas", "Gas Network"])
                     break
-            except:
+            except Exception:
+                logger.debug(f"Gas class {class_name} not available, trying next")
                 continue
 
         # Check for flow network components
@@ -445,7 +449,8 @@ def discover_carriers_from_db(db: PlexosDB) -> list:
                         ["Hydrogen", "Ammonia", "Electric2Hydrogen", "Hydrogen2Ammonia"]
                     )
                     break
-            except:
+            except Exception:
+                logger.debug(f"Flow class {class_name} not available, trying next")
                 continue
 
         if multi_sector_carriers:
@@ -514,14 +519,13 @@ def discover_carriers_from_db(db: PlexosDB) -> list:
     except Exception as e:
         logger.warning(f"Could not analyze generators for technology carriers: {e}")
 
-    carriers_list = sorted(list(carriers))
+    carriers_list = sorted(carriers)
     print(f"  Total carriers discovered: {len(carriers_list)}")
     return carriers_list
 
 
 def add_carriers(network: Network, db: PlexosDB):
-    """
-    Adds carriers to the PyPSA network using automatic discovery from PLEXOS database.
+    """Add carriers to the PyPSA network using automatic discovery from PLEXOS database.
 
     Parameters
     ----------
@@ -546,8 +550,7 @@ def add_carriers(network: Network, db: PlexosDB):
 
 
 def parse_demand_data(demand_source, bus_mapping=None):
-    """
-    Parse demand data from various formats and return a standardized DataFrame.
+    """Parse demand data from various formats and return a standardized DataFrame.
 
     Parameters
     ----------
@@ -573,29 +576,32 @@ def parse_demand_data(demand_source, bus_mapping=None):
     >>> demand_df = parse_demand_data("/path/to/single_demand.csv",
     ...                               bus_mapping={"1": "Zone_1", "2": "Zone_2"})
     """
-
     if isinstance(demand_source, str):
-        if os.path.isdir(demand_source):
+        path_obj = Path(demand_source)
+        if path_obj.is_dir():
             # Original format: directory with individual CSV files
             return _parse_demand_directory(demand_source)
-        elif os.path.isfile(demand_source):
+        elif path_obj.is_file():
             # Single CSV file format
             return _parse_demand_single_file(demand_source, bus_mapping)
         else:
-            raise ValueError(f"Demand source path does not exist: {demand_source}")
+            msg = f"Demand source path does not exist: {demand_source}"
+            raise ValueError(msg)
     else:
-        raise ValueError("demand_source must be a string path")
+        msg = "demand_source must be a string path"
+        raise TypeError(msg)
 
 
 def _parse_demand_directory(directory_path):
     """Parse demand data from directory with individual CSV files per bus or CAISO/SEM format files."""
     demand_data = {}
+    path_obj = Path(directory_path)
 
-    for file_name in os.listdir(directory_path):
-        if not file_name.endswith(".csv"):
+    for file in path_obj.iterdir():
+        if not file.name.endswith(".csv"):
             continue
 
-        file_path = os.path.join(directory_path, file_name)
+        file_path = str(file)
 
         try:
             # First, peek at the file to determine its format
@@ -606,19 +612,19 @@ def _parse_demand_directory(directory_path):
                 col in df_peek.columns for col in ["Year", "Month", "Day", "Period"]
             ):
                 # This is a CAISO/SEM format file - treat it as a single file
-                print(f"  - Detected CAISO/SEM format file: {file_name}")
+                print(f"  - Detected CAISO/SEM format file: {file.name}")
                 single_file_data = _parse_demand_single_file(file_path)
 
                 # Merge the data from this file
                 for col in single_file_data.columns:
                     # Use filename as prefix for column names to avoid conflicts
-                    file_prefix = file_name.replace(".csv", "")
+                    file_prefix = file.stem
                     column_name = f"{file_prefix}_{col}"
                     demand_data[column_name] = single_file_data[col]
 
             else:
                 # Original format: individual bus files with format {bus}_*.csv
-                bus_name = file_name.split("_")[0]
+                bus_name = file.stem.split("_")[0]
 
                 # Read the load file (original format without Period column)
                 df = pd.read_csv(file_path, index_col=["Year", "Month", "Day"])
@@ -656,7 +662,7 @@ def _parse_demand_directory(directory_path):
                 demand_data[bus_name] = df_long["load"]
 
         except Exception as e:
-            logger.warning(f"Failed to parse demand file {file_name}: {e}")
+            logger.warning(f"Failed to parse demand file {file.name}: {e}")
             continue
 
     if demand_data:
@@ -669,7 +675,8 @@ def _parse_demand_directory(directory_path):
 
         return result_df
     else:
-        raise ValueError("No valid demand files found in directory")
+        msg = "No valid demand files found in directory"
+        raise ValueError(msg)
 
 
 def _parse_demand_single_file(file_path, bus_mapping=None):
@@ -677,7 +684,8 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
     try:
         df = pd.read_csv(file_path)
     except Exception as e:
-        raise ValueError(f"Failed to read demand file {file_path}: {e}")
+        msg = f"Failed to read demand file {file_path}: {e}"
+        raise ValueError(msg) from e
 
     # Identify datetime columns
     datetime_cols = []
@@ -697,7 +705,8 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
     if datetime_cols:
         df["datetime"] = pd.to_datetime(df[datetime_cols])
     else:
-        raise ValueError("Could not identify datetime columns in demand file")
+        msg = "Could not identify datetime columns in demand file"
+        raise ValueError(msg)
 
     # Identify load zone columns (everything except datetime and period columns)
     exclude_cols = datetime_cols + ["datetime"]
@@ -707,13 +716,14 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
     load_columns = [col for col in df.columns if col not in exclude_cols]
 
     if not load_columns:
-        raise ValueError("No load zone columns found in demand file")
+        msg = "No load zone columns found in demand file"
+        raise ValueError(msg)
 
     # Detect if this is an iteration-based format
     # Check if all load columns are numeric strings (indicating iterations)
     is_iteration_format = all(
         col.strip().isdigit()
-        or (isinstance(col, (int, float)) and str(col).replace(".", "").isdigit())
+        or (isinstance(col, int | float) and str(col).replace(".", "").isdigit())
         for col in load_columns
     )
 
@@ -740,7 +750,7 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
             demand_data = {}
 
             # Process each iteration
-            for i, orig_col in enumerate(original_columns):
+            for _i, orig_col in enumerate(original_columns):
                 # Create iteration-specific data
                 iteration_data = df[["datetime", period_col, orig_col]].copy()
                 iteration_data = iteration_data.sort_values(["datetime", period_col])
@@ -834,7 +844,7 @@ def _parse_demand_single_file(file_path, bus_mapping=None):
         df = df.set_index("datetime")
         if is_iteration_format:
             demand_data = {}
-            for i, orig_col in enumerate(original_columns):
+            for _i, orig_col in enumerate(original_columns):
                 iteration_key = f"iteration_{int(float(str(orig_col)))}"
                 demand_data[iteration_key] = df[orig_col]
         else:
@@ -875,8 +885,7 @@ def add_loads_flexible(
     target_node=None,
     aggregate_node_name=None,
 ):
-    """
-    Flexible function to add loads to the PyPSA network from various demand data formats.
+    """Flexible function to add loads to the PyPSA network from various demand data formats.
 
     Parameters
     ----------
@@ -937,8 +946,7 @@ def port_core_network(
     aggregate_node_name=None,
     model_name=None,
 ):
-    """
-    Comprehensive function to set up the core PyPSA network infrastructure.
+    """Comprehensive function to set up the core PyPSA network infrastructure.
 
     This function combines all core network setup operations:
     - Adds buses from the Plexos database
@@ -1007,27 +1015,23 @@ def port_core_network(
 
     if len(models) > 1:
         if model_name is None:
-            raise ValueError(
-                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
-            )
+            msg = f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
+            raise ValueError(msg)
         elif model_name not in models:
-            raise ValueError(
-                f"Model '{model_name}' not found in XML file. Available models: {models}"
-            )
+            msg = f"Model '{model_name}' not found in XML file. Available models: {models}"
+            raise ValueError(msg)
         else:
             print(f"  Using specified model: {model_name}")
     elif len(models) == 1:
         if model_name is not None and model_name != models[0]:
-            raise ValueError(
-                f"Model '{model_name}' not found. Only available model: {models[0]}"
-            )
+            msg = f"Model '{model_name}' not found. Only available model: {models[0]}"
+            raise ValueError(msg)
         print(f"  Found single model: {models[0]}")
     else:
         print("  No models found in database")
         if model_name is not None:
-            raise ValueError(
-                f"Model '{model_name}' not found. No models available in XML file."
-            )
+            msg = f"Model '{model_name}' not found. No models available in XML file."
+            raise ValueError(msg)
 
     # Step 1: Add buses
     print("1. Adding buses...")
@@ -1057,8 +1061,7 @@ def port_core_network(
 
 
 def create_bus_mapping_from_csv(csv_path, network_buses=None, auto_detect=True):
-    """
-    Create a bus mapping dictionary by analyzing a demand CSV file.
+    """Create a bus mapping dictionary by analyzing a demand CSV file.
 
     Parameters
     ----------
@@ -1082,7 +1085,8 @@ def create_bus_mapping_from_csv(csv_path, network_buses=None, auto_detect=True):
     try:
         df = pd.read_csv(csv_path, nrows=5)  # Just read header and a few rows
     except Exception as e:
-        raise ValueError(f"Failed to read CSV file: {e}")
+        msg = f"Failed to read CSV file: {e}"
+        raise ValueError(msg) from e
 
     # Identify datetime columns to exclude
     datetime_cols = ["Year", "Month", "Day", "Period", "datetime"]
@@ -1131,8 +1135,7 @@ def create_bus_mapping_from_csv(csv_path, network_buses=None, auto_detect=True):
 
 
 def get_demand_format_info(source_path):
-    """
-    Analyze demand data source and return format information.
+    """Analyze demand data source and return format information.
 
     Parameters
     ----------
@@ -1150,17 +1153,18 @@ def get_demand_format_info(source_path):
         - suggested_mapping: suggested bus mapping (for single files)
     """
     info = {}
+    path_obj = Path(source_path)
 
-    if os.path.isdir(source_path):
+    if path_obj.is_dir():
         info["format_type"] = "directory"
-        csv_files = [f for f in os.listdir(source_path) if f.endswith(".csv")]
+        csv_files = [f.name for f in path_obj.iterdir() if f.name.endswith(".csv")]
         info["num_files"] = len(csv_files)
         info["num_load_zones"] = len(csv_files)
         info["sample_files"] = csv_files[:5]
 
         # Analyze one file for time resolution
         if csv_files:
-            sample_file = os.path.join(source_path, csv_files[0])
+            sample_file = str(path_obj / csv_files[0])
             try:
                 df = pd.read_csv(sample_file, nrows=5)
                 datetime_cols = ["Year", "Month", "Day", "datetime"]
@@ -1169,7 +1173,7 @@ def get_demand_format_info(source_path):
             except Exception:
                 info["time_resolution"] = "unknown"
 
-    elif os.path.isfile(source_path) and source_path.endswith(".csv"):
+    elif path_obj.is_file() and source_path.endswith(".csv"):
         info["format_type"] = "single_file"
         try:
             df = pd.read_csv(source_path, nrows=10)
@@ -1201,8 +1205,7 @@ def get_demand_format_info(source_path):
 
 
 def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
-    """
-    Default mode: Assign loads to individual nodes based on matching.
+    """Assign loads to individual nodes based on matching (default mode).
 
     For iteration-based formats, creates multiple loads per node (Load1_{Node}, Load2_{Node}, etc.)
     For zone-based formats, creates one load per zone (Load_{Zone})
@@ -1334,8 +1337,7 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
 def _add_loads_to_target_node(
     network: Network, demand_df: pd.DataFrame, target_node: str
 ):
-    """
-    Assign all demand to a specific existing node.
+    """Assign all demand to a specific existing node.
 
     For iteration-based formats, creates multiple loads (Load1_{target_node}, Load2_{target_node}, etc.)
     For zone-based formats, creates a single aggregated load
@@ -1356,9 +1358,8 @@ def _add_loads_to_target_node(
     """
     # Verify target node exists
     if target_node not in network.buses.index:
-        raise ValueError(
-            f"Target node '{target_node}' not found in network buses: {list(network.buses.index)}"
-        )
+        msg = f"Target node '{target_node}' not found in network buses: {list(network.buses.index)}"
+        raise ValueError(msg)
 
     print(f"Assigning all demand to target node: {target_node}")
 
@@ -1455,8 +1456,7 @@ def _add_loads_to_target_node(
 def _add_loads_to_aggregate_node(
     network: Network, demand_df: pd.DataFrame, aggregate_node_name: str
 ):
-    """
-    Create a new aggregate node and assign all demand to it.
+    """Create a new aggregate node and assign all demand to it.
 
     For iteration-based formats, creates multiple loads (Load1_{aggregate_node}, Load2_{aggregate_node}, etc.)
     For zone-based formats, creates a single aggregated load
@@ -1591,8 +1591,7 @@ def setup_network(
     inflow_path=None,
     transmission_as_lines=False,
 ):
-    """
-    Unified network setup function that automatically detects the appropriate mode.
+    """Unified network setup function that automatically detects the appropriate mode.
 
     This function intelligently chooses between three setup modes based on parameters:
     1. Per-node mode: Neither target_node nor aggregate_node_name specified (AEMO scenario)
@@ -1656,9 +1655,10 @@ def setup_network(
     """
     # Validate parameter combinations
     if target_node is not None and aggregate_node_name is not None:
-        raise ValueError(
+        msg = (
             "Cannot specify both target_node and aggregate_node_name. Choose one mode."
         )
+        raise ValueError(msg)
 
     # Detect mode and print status
     if aggregate_node_name is not None:
@@ -1681,36 +1681,23 @@ def setup_network(
 
     if len(models) > 1:
         if model_name is None:
-            raise ValueError(
-                f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
-            )
+            msg = f"Multiple models found in XML file: {models}. Please specify a model_name parameter."
+            raise ValueError(msg)
         elif model_name not in models:
-            raise ValueError(
-                f"Model '{model_name}' not found in XML file. Available models: {models}"
-            )
+            msg = f"Model '{model_name}' not found in XML file. Available models: {models}"
+            raise ValueError(msg)
         else:
             print(f"  Using specified model: {model_name}")
     elif len(models) == 1:
         if model_name is not None and model_name != models[0]:
-            raise ValueError(
-                f"Model '{model_name}' not found. Only available model: {models[0]}"
-            )
+            msg = f"Model '{model_name}' not found. Only available model: {models[0]}"
+            raise ValueError(msg)
         print(f"  Found single model: {models[0]}")
     else:
         print("  No models found in database")
         if model_name is not None:
-            raise ValueError(
-                f"Model '{model_name}' not found. No models available in XML file."
-            )
-
-    # Import required modules (avoid circular imports)
-    from src.network.generators import port_generators, reassign_generators_to_node
-    from src.network.links import port_links, reassign_links_to_node
-    from src.network.storage import add_hydro_inflows, add_storage
-
-    # Conditionally import lines module if needed
-    if transmission_as_lines:
-        from src.network.lines import port_lines
+            msg = f"Model '{model_name}' not found. No models available in XML file."
+            raise ValueError(msg)
 
     # Step 1: Set up core network (port_core_network handles demand assignment logic)
     print("=" * 60)
@@ -1740,7 +1727,7 @@ def setup_network(
             network.storage_units.loc[storage_name, "bus"] = aggregate_node_name
 
     # Step 2b: Add hydro inflows if path provided
-    if inflow_path and os.path.exists(inflow_path):
+    if inflow_path and Path(inflow_path).exists():
         print("\n" + "=" * 60)
         print("STEP 2b: Adding hydro inflows")
         print("=" * 60)
@@ -1800,8 +1787,6 @@ def setup_network(
     print("=" * 60)
 
     try:
-        from .constraints import add_constraints_enhanced
-
         constraint_results = add_constraints_enhanced(network, db, verbose=True)
         print(
             f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"

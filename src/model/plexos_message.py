@@ -1,16 +1,8 @@
-"""
-PLEXOS-MESSAGE Multi-Sector Model (Electricity + Hydrogen + Ammonia)
-
-This script creates a PyPSA network from the PLEXOS-MESSAGE model which includes
-electricity, hydrogen, and ammonia sectors with process-based sector coupling.
-"""
-
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.db.models import INPUT_XMLS
 from src.network.multi_sector_db import (
@@ -21,9 +13,8 @@ from src.network.multi_sector_db import (
 
 def create_plexos_message_model(
     testing_mode: bool = False, use_csv_integration: bool = True
-):
-    """
-    Create PLEXOS-MESSAGE PyPSA model with electricity, hydrogen, and ammonia sectors.
+) -> tuple[pypsa.Network, dict]:
+    """Create PLEXOS-MESSAGE PyPSA model with electricity, hydrogen, and ammonia sectors.
 
     The PLEXOS-MESSAGE model includes:
     - Flow Network represented as PyPSA Nodes and Links
@@ -214,7 +205,7 @@ if __name__ == "__main__":
     # Select subset of snapshots for optimization
     if len(network.snapshots) > 0:
         x = 24  # number of snapshots to select per year (fewer for multi-sector complexity)
-        snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+        snapshots_by_year: defaultdict[int, list] = defaultdict(list)
         for snap in network.snapshots:
             year = pd.Timestamp(snap).year
             if len(snapshots_by_year[year]) < x:

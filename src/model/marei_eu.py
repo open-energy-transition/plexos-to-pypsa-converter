@@ -1,19 +1,14 @@
-"""
-MaREI-EU Multi-Sector Model (Electricity + Gas)
-
-This script creates a PyPSA network from the MaREI-EU PLEXOS model which includes
-both electricity and gas sectors with sector coupling through gas-fired generators.
-"""
-
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.db.models import INPUT_XMLS
-from src.network.multi_sector_db import setup_gas_electric_network_db
+from src.network.multi_sector_db import (
+    setup_gas_electric_network_db,
+    setup_marei_csv_network,
+)
 
 
 def create_marei_eu_model(
@@ -21,9 +16,8 @@ def create_marei_eu_model(
     csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
     infrastructure_scenario: str = "PCI",
     pricing_scheme: str = "Production",
-):
-    """
-    Create MaREI-EU PyPSA model with gas and electricity sectors.
+) -> tuple[pypsa.Network, dict]:
+    """Create MaREI-EU PyPSA model with gas and electricity sectors.
 
     The MaREI-EU model includes:
     - Electricity network (Node, Generator, Line, Storage)
@@ -76,8 +70,6 @@ def create_marei_eu_model(
             "   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data"
         )
         print("   Following PyPSA multi-sector patterns for gas/electricity coupling")
-
-        from src.network.multi_sector_db import setup_marei_csv_network
 
         setup_summary = setup_marei_csv_network(
             network=network,
@@ -214,7 +206,7 @@ if __name__ == "__main__":
 
     # Select subset of snapshots for optimization
     x = 100  # number of snapshots to select per year
-    snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+    snapshots_by_year: defaultdict[int, list] = defaultdict(list)
     for snap in network.snapshots:
         year = pd.Timestamp(snap).year
         if len(snapshots_by_year[year]) < x:

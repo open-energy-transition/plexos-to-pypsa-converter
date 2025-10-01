@@ -1,9 +1,10 @@
 import logging
 
-import pandas as pd  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum  # type: ignore
-from pypsa import Network  # type: ignore
+import numpy as np
+import pandas as pd
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
+from pypsa import Network
 
 from src.db.parse import (
     find_bus_for_object,
@@ -14,6 +15,7 @@ from src.db.parse import (
 )
 from src.network.carriers import parse_fuel_prices
 from src.network.costs import set_capital_costs_generic
+from src.utils.paths import contains_path_pattern, extract_filename, safe_join
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +23,7 @@ logger = logging.getLogger(__name__)
 def add_generators(
     network: Network, db: PlexosDB, generators_as_links=False, fuel_bus_prefix="fuel_"
 ):
-    """
-    Adds generators from a Plexos database to a PyPSA network.
+    """Add generators from a Plexos database to a PyPSA network.
 
     This function retrieves generator objects from the provided Plexos database,
     extracts their properties, and adds them to the PyPSA network. If a generator
@@ -199,20 +200,18 @@ def add_generators(
                         carrier=fuel_carrier,
                         marginal_cost=0.1,
                     )
-        else:
-            # Add as standard generator (renewables or when generators_as_links=False)
-            if p_max is not None:
-                if carrier is not None:
-                    network.add("Generator", gen, bus=bus, p_nom=p_max, carrier=carrier)
-                else:
-                    network.add("Generator", gen, bus=bus, p_nom=p_max)
-                for attr, val in gen_attrs.items():
-                    network.generators.loc[gen, attr] = val
+        # Add as standard generator (renewables or when generators_as_links=False)
+        elif p_max is not None:
+            if carrier is not None:
+                network.add("Generator", gen, bus=bus, p_nom=p_max, carrier=carrier)
             else:
-                if carrier is not None:
-                    network.add("Generator", gen, bus=bus, carrier=carrier)
-                else:
-                    network.add("Generator", gen, bus=bus)
+                network.add("Generator", gen, bus=bus, p_nom=p_max)
+            for attr, val in gen_attrs.items():
+                network.generators.loc[gen, attr] = val
+        elif carrier is not None:
+            network.add("Generator", gen, bus=bus, carrier=carrier)
+        else:
+            network.add("Generator", gen, bus=bus)
     # Report skipped generators
     if empty_generators:
         print(f"\nSkipped {len(empty_generators)} generators with no properties:")
@@ -226,8 +225,7 @@ def add_generators(
 
 
 def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
-    """
-    Parse generator ratings from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=generator names.
+    """Parse generator ratings from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=generator names.
     Applies rating values according to these rules:
     - If a property is linked to a timeslice, use the timeslice activity to set the property for the relevant snapshots (takes precedence over t_date_from/t_date_to).
     - If "Rating" is present (possibly time-dependent), use it as p_max_pu (normalized by Max Capacity).
@@ -246,7 +244,7 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
     - If Rating is available, use it (as p_max_pu = Rating / p_nom)
     - If neither is available, use Max Capacity (p_max_pu = Max Capacity / p_nom)
     - If no Max Capacity is available, fallback to p_max_pu = 1.0
-    - If no timeslice is defined, the property is always active, UNLESS it is overriden by a date-specific entry:
+    - If no timeslice is defined, the property is always active, UNLESS it is overridden by a date-specific entry:
     - If timeslice exists, use the timeslice timeseries file to determine and set when the property is active (if the timeslice doesn't exist in the timeslice file but has names like M1, M2, M3, .. M12, assume it is active for the full month).
     - "t_date_from" Only: Value is effective from this date onward, until superseded.
     - "t_date_to" Only: Value applies up to and including this date, starting from simulation start or last defined "Date From" or timeslice.
@@ -337,8 +335,7 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
         timeslice_activity=None,
         dataid_to_timeslice=None,
     ):
-        """
-        For each generator, create a time series for p_max_pu using Rating, Rating Factor, or Max Capacity, with timeslice and date logic.
+        """For each generator, create a time series for p_max_pu using Rating, Rating Factor, or Max Capacity, with timeslice and date logic.
         Returns a DataFrame: index=snapshots, columns=generator names, values=p_max_pu.
         """
         gen_series = {}
@@ -370,11 +367,9 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
                 )
 
             # Helper to build a time series for a property
-            def build_ts(prop_name, fallback=None):
+            def build_ts(prop_name, entries, fallback=None):
                 ts = pd.Series(index=snapshots, dtype=float)
-                prop_rows = prop_df_entries[
-                    prop_df_entries["property"] == prop_name
-                ].copy()
+                prop_rows = entries[entries["property"] == prop_name].copy()
                 prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
                 prop_rows = prop_rows.sort_values("from_sort", na_position="first")
                 # Track which snapshots have been set, to handle overrides
@@ -421,8 +416,8 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
                 maxcap = maxcap_entries.iloc[0]["value"]
 
             # Build time series for Rating and Rating Factor
-            rating_ts = build_ts("Rating")
-            rating_factor_ts = build_ts("Rating Factor")
+            rating_ts = build_ts("Rating", prop_df_entries)
+            rating_factor_ts = build_ts("Rating Factor", prop_df_entries)
             # Get p_nom for scaling Rating
             p_nom = (
                 network.generators.loc[gen, "p_nom"]
@@ -457,8 +452,7 @@ def parse_generator_ratings(db: PlexosDB, network, timeslice_csv=None):
 
 
 def set_capacity_ratings(network: Network, db: PlexosDB, timeslice_csv=None):
-    """
-    Sets the capacity ratings for generators in the PyPSA network based on the Plexos database.
+    """Set the capacity ratings for generators in the PyPSA network based on the Plexos database.
 
     This function retrieves generator ratings from the Plexos database and sets the
     `p_max_pu` attribute for relevant generators in the PyPSA network.
@@ -500,8 +494,7 @@ def set_capacity_ratings(network: Network, db: PlexosDB, timeslice_csv=None):
 
 
 def set_generator_efficiencies(network: Network, db: PlexosDB, use_incr: bool = True):
-    """
-    Sets the efficiency for each generator in the PyPSA network based on
+    """Set the efficiency for each generator in the PyPSA network based on
     'Heat Rate Base' and 'Heat Rate Incr*' properties from the PlexosDB.
 
     The efficiency is calculated as:
@@ -515,8 +508,6 @@ def set_generator_efficiencies(network: Network, db: PlexosDB, use_incr: bool = 
 
     The result is stored in network.generators['efficiency'].
     """
-    import numpy as np
-
     efficiencies = []
     for gen in network.generators.index:
         props = db.get_object_properties(ClassEnum.Generator, gen)
@@ -563,9 +554,8 @@ def set_generator_efficiencies(network: Network, db: PlexosDB, use_incr: bool = 
 
 
 def set_vre_profiles(network: Network, db: PlexosDB, path: str):
-    """
-    Adds time series profiles for solar and wind generators to the PyPSA network.
-    Also sets the generator's carrier to "Solar" or "Wind" if a profile is found.
+    """Add time series profiles for solar and wind generators to the PyPSA network.
+    Also set the generator's carrier to "Solar" or "Wind" if a profile is found.
 
     Parameters
     ----------
@@ -576,6 +566,12 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
     path : str
         Path to the folder containing generation profile files.
     """
+
+    def _raise_unsupported_resolution(filename: str):
+        """Raise unsupported resolution error."""
+        msg = f"Unsupported resolution in file: {filename}"
+        raise ValueError(msg)
+
     dispatch_dict = {}
     for gen in network.generators.index:
         # Skip Adelaide_Desal_FFP
@@ -585,9 +581,6 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
 
         # Retrieve generator properties from the database
         props = db.get_object_properties(ClassEnum.Generator, gen)
-
-        # Check if the generator has a solar or wind profile
-        from src.utils.paths import contains_path_pattern, extract_filename, safe_join
 
         filename = next(
             (
@@ -600,7 +593,6 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
         )
 
         if filename:
-            # print(f"Found profile for generator {gen}: {filename}")
             profile_type = (
                 "solar" if contains_path_pattern(filename, "Traces/solar/") else "wind"
             )
@@ -634,7 +626,7 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
                 elif len(non_date_columns) == 48:
                     resolution = 30
                 else:
-                    raise ValueError(f"Unsupported resolution in file: {filename}")
+                    _raise_unsupported_resolution(filename)
 
                 df_long = df.melt(
                     id_vars=["datetime"],
@@ -669,9 +661,6 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
 
             except Exception as e:
                 print(f"Failed to process profile for generator {gen}: {e}")
-        # else:
-        #     # If the generator does not have a solar or wind profile, skip it
-        #     print(f"Generator {gen} does not have a solar or wind profile. Skipping.")
 
     # Assign all dispatch columns at once to avoid fragmentation
     if dispatch_dict:
@@ -683,8 +672,7 @@ def set_vre_profiles(network: Network, db: PlexosDB, path: str):
 
 
 def set_capital_costs(network: Network, db: PlexosDB):
-    """
-    Sets the capital_cost for each generator in the PyPSA network.
+    """Set the capital_cost for each generator in the PyPSA network.
 
     This is a wrapper function that calls the generic capital cost function.
     For detailed documentation, see set_capital_costs_generic in costs.py.
@@ -700,8 +688,7 @@ def set_capital_costs(network: Network, db: PlexosDB):
 
 
 def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
-    """
-    Sets the marginal costs for generators in the PyPSA network based on fuel prices,
+    """Set the marginal costs for generators in the PyPSA network based on fuel prices,
     heat rates, and VO&M charges from the Plexos database.
 
     The marginal cost is calculated as:
@@ -756,9 +743,6 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
             carrier = find_fuel_for_generator(db, gen)
 
         if carrier is None or carrier not in fuel_prices.columns:
-            # logger.warning(
-            #     f"No carrier/fuel found for generator {gen} or no price data available"
-            # )
             skipped_generators.append(gen)
             continue
 
@@ -766,9 +750,6 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
         fuel_price_ts = fuel_prices[carrier]
 
         if fuel_price_ts.isna().all() or (fuel_price_ts == 0).all():
-            # logger.warning(
-            #     f"No valid fuel price found for carrier {carrier} (generator {gen})"
-            # )
             skipped_generators.append(gen)
             continue
 
@@ -853,8 +834,7 @@ def set_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
 
 
 def reassign_generators_to_node(network: Network, target_node: str):
-    """
-    Reassign all generators to a specific node.
+    """Reassign all generators to a specific node.
 
     This is useful when demand is aggregated to a single node and all generators
     need to be connected to the same node for a meaningful optimization.
@@ -872,7 +852,8 @@ def reassign_generators_to_node(network: Network, target_node: str):
         Summary information about the reassignment.
     """
     if target_node not in network.buses.index:
-        raise ValueError(f"Target node '{target_node}' not found in network buses")
+        msg = f"Target node '{target_node}' not found in network buses"
+        raise ValueError(msg)
 
     original_assignments = network.generators["bus"].copy()
     unique_original_buses = original_assignments.unique()
@@ -903,8 +884,7 @@ def port_generators(
     generators_as_links=False,
     fuel_bus_prefix="fuel_",
 ):
-    """
-    Comprehensive function to add generators and set all their properties in the PyPSA network.
+    """Comprehensive function to add generators and set all their properties in the PyPSA network.
 
     This function combines all generator-related operations:
     - Adds generators from the Plexos database

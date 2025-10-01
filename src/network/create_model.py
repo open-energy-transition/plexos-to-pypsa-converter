@@ -1,17 +1,15 @@
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.network.core import setup_network
 from src.network.electricity_sector import create_aemo_model_data_driven
 
 
-def create_aemo_model(use_data_driven: bool = False):
-    """
-    Create AEMO PyPSA model using traditional or data-driven approach.
+def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
+    """Create AEMO PyPSA model using traditional or data-driven approach.
 
     Parameters
     ----------
@@ -103,11 +101,6 @@ def create_aemo_model(use_data_driven: bool = False):
         print(f"  Storage with inflows: {len(n.storage_units_t.inflow.columns)}")
     print(f"  Total snapshots: {len(n.snapshots)}")
 
-    # # run consistency check on network
-    # print("\nRunning network consistency check...")
-    # n.consistency_check()
-    # print("  Network consistency check passed!")
-
     return n
 
 
@@ -118,7 +111,7 @@ if __name__ == "__main__":
     # select a subset of snapshots for optimization
     print("\nPreparing optimization subset...")
     x = 50  # number of snapshots to select per year
-    snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+    snapshots_by_year: defaultdict[int, list] = defaultdict(list)
     for snap in network.snapshots:
         year = pd.Timestamp(snap).year
         if len(snapshots_by_year[year]) < x:
@@ -131,10 +124,6 @@ if __name__ == "__main__":
     print(f"\nOptimizing network with {len(subset)} snapshots...")
     network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
     print("  Optimization complete!")
-
-    # save to file
-    # network.export_to_netcdf("aemo_network.nc")
-    # print("Network exported to aemo_network.nc")
 
 network = create_aemo_model()
 network.consistency_check()

@@ -1,17 +1,16 @@
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.network.core import setup_network
-from src.network.electricity_sector import create_caiso_model_data_driven
 
 
-def create_caiso_model(use_data_driven: bool = False):
-    """
-    Create CAISO PyPSA model using traditional or data-driven approach.
+def create_caiso_model(
+    use_data_driven: bool = False,
+) -> tuple[pypsa.Network, dict]:
+    """Create CAISO PyPSA model using traditional or data-driven approach.
 
     Parameters
     ----------
@@ -21,19 +20,12 @@ def create_caiso_model(use_data_driven: bool = False):
 
     Returns
     -------
-    pypsa.Network
-        Configured CAISO PyPSA network
+    tuple[pypsa.Network, dict]
+        Tuple containing configured CAISO PyPSA network and setup summary
     """
     # Define XML file path
     path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
     file_xml = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
-
-    if use_data_driven:
-        print("Creating CAISO PyPSA Model using data-driven approach...")
-        return create_caiso_model_data_driven(
-            xml_file_path=file_xml,
-            main_directory=f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517",
-        )
 
     # Legacy approach with hardcoded paths
     file_timeslice = None
@@ -99,12 +91,9 @@ if hasattr(n.storage_units_t, "inflow") and len(n.storage_units_t.inflow.columns
 # run consistency check on network
 n.consistency_check()
 
-# select a subset of snapshots
-# subset = n.snapshots[:50]  # the first 50 snapshots
-
 # in each year in the snapshots, select the first x snapshots
 x = 50  # number of snapshots to select per year
-snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+snapshots_by_year: defaultdict[int, list] = defaultdict(list)
 for snap in n.snapshots:
     year = pd.Timestamp(snap).year
     if len(snapshots_by_year[year]) < x:

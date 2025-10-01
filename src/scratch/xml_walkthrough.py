@@ -1,5 +1,3 @@
-from typing import Optional
-
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
 from src.db.models import INPUT_XMLS
@@ -95,7 +93,7 @@ print_properties(mod_db, ClassEnum.Generator, "BASTYAN", detailed=False)
 props = mod_db.get_object_properties(ClassEnum.Storage, "Anthony Pieman")
 
 
-def get_prop_value(name: str) -> Optional[str]:
+def get_prop_value(name: str) -> str | None:
     for p in props:
         if p.get("property") == name:
             return p.get("value")
@@ -117,9 +115,7 @@ if max_volume:
 
 
 def find_node_from_memberships(memberships):
-    """
-    Given a list of membership dicts, return the child_object_name of the first Node found.
-    """
+    """Given a list of membership dicts, return the child_object_name of the first Node found."""
     for m in memberships:
         # Check if the child is a Node
         if m.get("child_class_name") == "Node":
