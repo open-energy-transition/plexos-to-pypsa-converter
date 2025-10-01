@@ -1,5 +1,5 @@
-import os
 import re
+from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -15,8 +15,7 @@ file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/
 
 
 def create_aemo_model():
-    """
-    Examples
+    """Examples
     --------
     >>> network = create_aemo_model()
     >>> print(f"Network has {len(network.buses)} buses and {len(network.loads)} loads")
@@ -85,8 +84,7 @@ def create_aemo_model():
 
 
 def parse_generator_production_rates(db, snapshots, generator_list=None):
-    """
-    Parse generator production rates from the PlexosDB using SQL and return a DataFrame
+    """Parse generator production rates from the PlexosDB using SQL and return a DataFrame
     with index=snapshots, columns=generator names, values=production rates.
 
     This function is similar to parse_generator_ratings() but simplified to only handle
@@ -140,8 +138,8 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
 
     # 2. Get data_id for each generator (child_object_id) from t_membership
     membership_query = """
-        SELECT m.parent_object_id AS parent_object_id, 
-               m.child_object_id AS child_object_id, 
+        SELECT m.parent_object_id AS parent_object_id,
+               m.child_object_id AS child_object_id,
                m.membership_id AS membership_id
         FROM t_membership m
         JOIN t_object p ON m.parent_object_id = p.object_id
@@ -200,8 +198,7 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
     print(f"  Merged data contains {len(merged)} generator-property combinations")
 
     def build_generator_production_timeseries(merged, gen_df, snapshots):
-        """
-        For each generator, create a time series for production rates using simplified date logic.
+        """For each generator, create a time series for production rates using simplified date logic.
 
         Logic:
         - Single value: use across all snapshots
@@ -311,11 +308,8 @@ def parse_generator_production_rates(db, snapshots, generator_list=None):
     return production_timeseries
 
 
-def plot_production_rates(
-    production_rates, output_dir="src/figures/production-rates"
-):
-    """
-    Create individual plots for each generator showing production rate vs time.
+def plot_production_rates(production_rates, output_dir="src/figures/production-rates"):
+    """Create individual plots for each generator showing production rate vs time.
 
     Parameters
     ----------
@@ -332,7 +326,7 @@ def plot_production_rates(
     print("Creating production rate plots...")
 
     # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     print(f"  Output directory: {output_dir}")
 
     # Track plotting results
@@ -403,7 +397,7 @@ def plot_production_rates(
 
             # Save the plot
             filename = clean_filename(generator) + ".png"
-            filepath = os.path.join(output_dir, filename)
+            filepath = str(Path(output_dir) / filename)
             plt.savefig(filepath, dpi=300, bbox_inches="tight")
             plt.close()  # Close the figure to free memory
 
@@ -446,9 +440,7 @@ n = create_aemo_model()
 snapshots = n.snapshots
 generators = n.generators.index.tolist()
 production_rates = parse_generator_production_rates(db, snapshots, generators)
-plot_summary = plot_production_rates(
-    production_rates, "src/figures/production-rates"
-)
+plot_summary = plot_production_rates(production_rates, "src/figures/production-rates")
 
 print("\nPlot summary:")
 print(f"  Total generators processed: {plot_summary['total_generators']}")

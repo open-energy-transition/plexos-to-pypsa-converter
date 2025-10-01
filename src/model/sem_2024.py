@@ -1,17 +1,14 @@
 from collections import defaultdict
-from typing import DefaultDict
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.network.core import setup_network
-from src.network.electricity_sector import create_sem_model_data_driven
 
 
-def create_sem_model(use_data_driven: bool = False):
-    """
-    Create SEM PyPSA model using traditional or data-driven approach.
+def create_sem_model(use_data_driven: bool = False) -> tuple[pypsa.Network, dict]:
+    """Create SEM PyPSA model using traditional or data-driven approach.
 
     Parameters
     ----------
@@ -27,12 +24,6 @@ def create_sem_model(use_data_driven: bool = False):
     # Define XML file path
     path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
     file_xml = f"{path_root}/SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
-
-    if use_data_driven:
-        print("Creating SEM PyPSA Model using data-driven approach...")
-        return create_sem_model_data_driven(
-            xml_file_path=file_xml, main_directory=f"{path_root}/SEM/SEM 2024-2032"
-        )
 
     # Legacy approach with hardcoded paths
     file_timeslice = None
@@ -97,12 +88,9 @@ if hasattr(n.storage_units_t, "inflow") and len(n.storage_units_t.inflow.columns
 # run consistency check on network
 n.consistency_check()
 
-# select a subset of snapshots
-# subset = n.snapshots[:50]  # the first 50 snapshots
-
 # in each year in the snapshots, select the first x snapshots
 x = 60  # number of snapshots to select per year
-snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+snapshots_by_year: defaultdict[int, list] = defaultdict(list)
 for snap in n.snapshots:
     year = pd.Timestamp(snap).year
     if len(snapshots_by_year[year]) < x:

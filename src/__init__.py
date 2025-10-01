@@ -1,4 +1,6 @@
-# This file marks the directory as a Python package.
-# You can add package-level imports or metadata here.
+"""PLEXOS-PyPSA integration package.
+
+This package is a tool for converting PLEXOS XML files to PyPSA networks.
+"""
 
 __version__ = "0.1.0"

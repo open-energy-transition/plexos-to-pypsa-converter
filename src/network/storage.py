@@ -1,17 +1,18 @@
+import ast
 import logging
-import os
-from typing import Any, Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any
 
-import pandas as pd  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum  # type: ignore
-from pypsa import Network  # type: ignore
+import pandas as pd
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
+from pypsa import Network
 
 from src.db.parse import find_bus_for_object, find_bus_for_storage_via_generators
 from src.network.costs import set_battery_marginal_costs, set_capital_costs_generic
+from src.utils.paths import extract_filename, safe_join
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO)
 
 
 # PLEXOS Storage Model Constants
@@ -30,14 +31,13 @@ PLEXOS_END_EFFECTS = {
 
 
 def detect_storage_model_type(props: list) -> str:
-    """
-    Detect the PLEXOS storage model type from storage properties.
+    """Detect the PLEXOS storage model type from storage properties.
 
     Returns one of: 'energy', 'level', 'volume', 'battery', 'unknown'
     """
 
     # Helper to get property value by name
-    def get_prop_value(name: str) -> Optional[str]:
+    def get_prop_value(name: str) -> str | None:
         for p in props:
             if p.get("property") == name:
                 return p.get("value")
@@ -96,16 +96,9 @@ def get_end_effects_method(props: list) -> str:
             value = p.get("value")
 
             # Handle numeric values (PLEXOS enum)
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 value = int(value)
-                if value == 0:
-                    return "free"
-                elif value == 1:
-                    return "recycle"
-                elif value == 2:
-                    return "automatic"
-                else:
-                    return "automatic"  # Default for unknown numeric values
+                return {0: "free", 1: "recycle", 2: "automatic"}.get(value, "automatic")
 
             # Handle string values
             elif isinstance(value, str):
@@ -123,11 +116,10 @@ def get_end_effects_method(props: list) -> str:
 def convert_plexos_volume_to_energy(
     volume: float,
     model_type: str,
-    units: Optional[str] = None,
-    additional_props: Optional[Dict[str, Any]] = None,
-) -> Tuple[float, str]:
-    """
-    Convert PLEXOS volume/capacity to PyPSA energy units (MWh).
+    units: str | None = None,
+    additional_props: dict[str, Any] | None = None,
+) -> tuple[float, str]:
+    """Convert PLEXOS volume/capacity to PyPSA energy units (MWh).
 
     Returns (energy_mwh, conversion_method_used)
     """
@@ -174,9 +166,8 @@ def convert_plexos_volume_to_energy(
 
 def detect_pumped_hydro_pairs(
     storage_units: list, db: PlexosDB
-) -> Dict[str, Dict[str, str]]:
-    """
-    Detect HEAD/TAIL pairs for pumped hydro storage.
+) -> dict[str, dict[str, str]]:
+    """Detect HEAD/TAIL pairs for pumped hydro storage.
 
     Returns dict mapping storage names to their pumped hydro configuration.
     """
@@ -260,8 +251,7 @@ def detect_pumped_hydro_pairs(
 
 
 def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
-    """
-    Enhanced function to add PLEXOS storage units and batteries to PyPSA network.
+    """Enhanced function to add PLEXOS storage units and batteries to PyPSA network.
 
     Supports different PLEXOS storage representations:
     - PLEXOS Storage class: Energy-based (GWh/MWh), Volume-based (CMD/AF), Level-based (height), Pumped hydro (HEAD/TAIL pairs)
@@ -276,13 +266,12 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
     timeslice_csv : str, optional
         Path to timeslice CSV file for time-dependent properties
     """
-
     # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
     logger.info("Processing PLEXOS Storage class objects...")
 
     # Get all storage objects with their categories using SQL
     storage_query = """
-        SELECT 
+        SELECT
             o.name AS storage_name,
             o.object_id,
             c.name AS category_name
@@ -303,7 +292,7 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
         logger.info("No PLEXOS Storage units found in database")
         storage_units = []
     else:
-        for storage_name, object_id, category_name in storage_results:
+        for storage_name, _object_id, category_name in storage_results:
             carrier = category_name if category_name else "hydro"
             storage_categories[storage_name] = carrier
             unique_storage_carriers.add(carrier)
@@ -363,8 +352,8 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
                 else:
                     skipped_storage_units.append(config_name)
 
-        except Exception as e:
-            logger.error(f"Error processing storage configuration {config_name}: {e}")
+        except Exception:
+            logger.exception(f"Error processing storage configuration {config_name}")
             if config["type"] == "pumped_hydro_pair":
                 skipped_storage_units.extend([config["head"], config["tail"]])
             else:
@@ -407,8 +396,7 @@ def add_storage(network: Network, db: PlexosDB, timeslice_csv=None) -> None:
 def port_standalone_storage(
     network: Network, db: PlexosDB, storage_name: str, carrier: str = "hydro"
 ) -> bool:
-    """
-    Port a standalone PLEXOS storage unit to PyPSA StorageUnit.
+    """Port a standalone PLEXOS storage unit to PyPSA StorageUnit.
 
     Parameters
     ----------
@@ -430,13 +418,13 @@ def port_standalone_storage(
         props = db.get_object_properties(ClassEnum.Storage, storage_name)
 
         # Helper to get property value by name
-        def get_prop_value(name: str) -> Optional[str]:
+        def get_prop_value(name: str) -> str | None:
             for p in props:
                 if p.get("property") == name:
                     return p.get("value")
             return None
 
-        def get_prop_float(name: str) -> Optional[float]:
+        def get_prop_float(name: str) -> float | None:
             val = get_prop_value(name)
             if val is not None:
                 try:
@@ -543,16 +531,16 @@ def port_standalone_storage(
                 f"  Connection: via generator '{primary_generator}' to bus '{bus}'"
             )
         else:
-            logger.info(
-                f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, carrier={carrier}"
-            )
-            logger.info(f"  Connection: direct to bus '{bus}'")
+            logger.exception(f"Error porting standalone storage {storage_name}")
 
-        return True
-
-    except Exception as e:
-        logger.error(f"Error porting standalone storage {storage_name}: {e}")
+    except Exception:
+        logger.exception(f"Error porting standalone storage {storage_name}")
         return False
+    else:
+        logger.info(
+            f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, model={model_type}, carrier={carrier}"
+        )
+        return True
 
 
 def port_pumped_hydro_pair(
@@ -563,8 +551,7 @@ def port_pumped_hydro_pair(
     head_carrier: str = "pumped_hydro",
     tail_carrier: str = "pumped_hydro",
 ) -> bool:
-    """
-    Port a PLEXOS pumped hydro HEAD/TAIL pair to PyPSA StorageUnit.
+    """Port a PLEXOS pumped hydro HEAD/TAIL pair to PyPSA StorageUnit.
 
     Combines the two reservoirs into a single StorageUnit representing the system.
 
@@ -593,7 +580,7 @@ def port_pumped_hydro_pair(
         head_props = db.get_object_properties(ClassEnum.Storage, head_name)
         tail_props = db.get_object_properties(ClassEnum.Storage, tail_name)
 
-        def get_prop_float_from_props(props: list, name: str) -> Optional[float]:
+        def get_prop_float_from_props(props: list, name: str) -> float | None:
             for p in props:
                 if p.get("property") == name:
                     try:
@@ -631,16 +618,16 @@ def port_pumped_hydro_pair(
 
         # Get volumes for both reservoirs
         head_max = get_prop_float_from_props(head_props, "Max Volume") or 0.0
-        head_min = get_prop_float_from_props(head_props, "Min Volume") or 0.0
+        get_prop_float_from_props(head_props, "Min Volume") or 0.0
         head_initial = get_prop_float_from_props(head_props, "Initial Volume") or 0.0
 
         tail_max = get_prop_float_from_props(tail_props, "Max Volume") or 0.0
-        tail_min = get_prop_float_from_props(tail_props, "Min Volume") or 0.0
-        tail_initial = get_prop_float_from_props(tail_props, "Initial Volume") or 0.0
+        get_prop_float_from_props(tail_props, "Min Volume") or 0.0
+        get_prop_float_from_props(tail_props, "Initial Volume") or 0.0
 
         # Detect model types
         head_model_type = detect_storage_model_type(head_props)
-        tail_model_type = detect_storage_model_type(tail_props)
+        detect_storage_model_type(tail_props)
 
         # Convert to energy (use head reservoir as primary)
         max_energy, conversion_method = convert_plexos_volume_to_energy(
@@ -702,17 +689,15 @@ def port_pumped_hydro_pair(
             )
         else:
             logger.info(f"  Connection: direct to bus '{bus}'")
-
+    except Exception:
+        logger.exception(f"Error porting pumped hydro pair {head_name}/{tail_name}")
+        return False
+    else:
         return True
 
-    except Exception as e:
-        logger.error(f"Error porting pumped hydro pair {head_name}/{tail_name}: {e}")
-        return False
 
-
-def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
-    """
-    Enhanced function to add inflow time series for hydro storage units to PyPSA network.
+def add_hydro_inflows(network: Network, db: PlexosDB, path: str) -> None:
+    """Enhanced function to add inflow time series for hydro storage units to PyPSA network.
 
     Supports multiple inflow data formats:
     - Data file references in Natural Inflow property
@@ -750,9 +735,9 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
 
                 # Check which ones exist in the database
                 all_storage_names = db.list_objects_by_class(ClassEnum.Storage)
-                for name in potential_names:
-                    if name in all_storage_names:
-                        original_names.append(name)
+                original_names.extend(
+                    [name for name in potential_names if name in all_storage_names]
+                )
             else:
                 # Standalone storage - use the name directly
                 original_names = [storage_unit]
@@ -766,29 +751,30 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
                     try:
                         props = db.get_object_properties(ClassEnum.Storage, orig_name)
                         object_class = "Storage"
-                    except:
+                    except Exception:
                         try:
                             props = db.get_object_properties(
                                 ClassEnum.Battery, orig_name
                             )
                             object_class = "Battery"
-                        except:
+                        except Exception:
+                            logger.debug(
+                                f"Could not find Battery properties for {orig_name}"
+                            )
                             continue
 
                     if props:
                         inflow_data = process_storage_inflows(
-                            props, path, network.snapshots
+                            props, path, pd.DatetimeIndex(network.snapshots)
                         )
-
-                        if inflow_data is not None:
-                            # Add inflows to the PyPSA storage unit
-                            network.storage_units_t.inflow[storage_unit] = inflow_data
-                            logger.info(
-                                f"Added inflow data for storage {storage_unit} from {orig_name} ({object_class} class)"
-                            )
-                            added_inflows += 1
-                            inflow_added = True
-                            break  # Use first successful inflow data
+                        # Add inflows to the PyPSA storage unit
+                        network.storage_units_t.inflow[storage_unit] = inflow_data
+                        logger.info(
+                            f"Added inflow data for storage {storage_unit} from {orig_name} ({object_class} class)"
+                        )
+                        added_inflows += 1
+                        inflow_added = True
+                        break  # Use first successful inflow data
 
                 except Exception as e:
                     logger.warning(f"Error processing inflows for {orig_name}: {e}")
@@ -797,36 +783,34 @@ def add_hydro_inflows(network: Network, db: PlexosDB, path: str):
             if not inflow_added:
                 logger.info(f"No inflow data found for storage {storage_unit}")
 
-        except Exception as e:
-            logger.error(f"Error adding inflows for storage unit {storage_unit}: {e}")
+        except Exception:
+            logging.exception(f"Error adding inflows for storage unit {storage_unit}")
 
     logger.info(f"Added inflow data for {added_inflows} storage units")
 
 
 def process_storage_inflows(
     props: list, inflow_path: str, snapshots: pd.DatetimeIndex
-) -> Optional[pd.Series]:
-    """
-    Process PLEXOS storage inflow data from properties.
+) -> pd.Series | None:
+    """Process PLEXOS storage inflow data from properties.
 
     Returns inflow time series aligned with network snapshots, or None if no inflow data.
     """
-    from src.utils.paths import extract_filename
-
     # Look for Natural Inflow property with Data File reference
     for prop in props:
-        if prop.get("property") == "Natural Inflow":
+        if prop.get("property") == "Natural Inflow" and "Data File" in prop.get(
+            "texts", ""
+        ):
             # Check if it's a data file reference
-            if "Data File" in prop.get("texts", ""):
-                filename = (
-                    prop["texts"].split("Data File.")[1]
-                    if "Data File." in prop["texts"]
-                    else None
-                )
-                if filename:
-                    # Extract just the filename to avoid double path issues
-                    clean_filename = extract_filename(filename.strip())
-                    return load_inflow_from_file(clean_filename, inflow_path, snapshots)
+            filename = (
+                prop["texts"].split("Data File.")[1]
+                if "Data File." in prop["texts"]
+                else None
+            )
+            if filename:
+                # Extract just the filename to avoid double path issues
+                clean_filename = extract_filename(filename.strip())
+                return load_inflow_from_file(clean_filename, inflow_path, snapshots)
 
     # Also check for Filename property (common for hydro inflow files)
     for prop in props:
@@ -839,12 +823,9 @@ def process_storage_inflows(
 
             # Check if it's a timeslice array (list of values)
             value = prop.get("value")
-            if value and isinstance(value, (list, str)):
+            if value and isinstance(value, list | str):
                 try:
                     if isinstance(value, str):
-                        # Parse string representation of list
-                        import ast
-
                         value = (
                             ast.literal_eval(value)
                             if value.startswith("[")
@@ -862,15 +843,13 @@ def process_storage_inflows(
 
 def load_inflow_from_file(
     filename: str, inflow_path: str, snapshots: pd.DatetimeIndex
-) -> Optional[pd.Series]:
+) -> pd.Series | None:
     """Load inflow data from file and align with snapshots."""
-    from src.utils.paths import safe_join
-
     try:
         # Use cross-platform path joining
         file_path = safe_join(inflow_path, filename)
 
-        if not os.path.exists(file_path):
+        if not Path(file_path).exists():
             logger.warning(f"Inflow file not found: {file_path}")
             return None
 
@@ -918,12 +897,11 @@ def load_inflow_from_file(
                 .iloc[0]
             )
             inflows_resampled = inflows_resampled / time_instances_per_day
-
-        return inflows_resampled
-
-    except Exception as e:
-        logger.error(f"Error loading inflow file {filename}: {e}")
+    except Exception:
+        logger.exception(f"Error loading inflow file {filename}")
         return None
+    else:
+        return inflows_resampled
 
 
 def create_inflow_from_timeslice_array(
@@ -970,14 +948,13 @@ def create_inflow_from_timeslice_array(
 
         return pd.Series(inflow_data, index=snapshots)
 
-    except Exception as e:
-        logger.error(f"Error creating inflow from timeslice array: {e}")
+    except Exception:
+        logger.exception("Error creating inflow from timeslice array")
         return pd.Series(0.0, index=snapshots)  # Return zero inflows as fallback
 
 
 def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
-    """
-    Comprehensive function to add PLEXOS batteries as PyPSA StorageUnit components.
+    """Comprehensive function to add PLEXOS batteries as PyPSA StorageUnit components.
 
     This function converts PLEXOS Battery class objects to PyPSA StorageUnit components
     with the following property mappings:
@@ -1009,7 +986,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
 
     # Get all battery objects with their categories using SQL
     battery_query = """
-        SELECT 
+        SELECT
             o.name AS battery_name,
             o.object_id,
             c.name AS category_name
@@ -1028,7 +1005,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
 
     # Collect unique battery categories for carrier validation
     battery_carriers = set()
-    for battery_name, object_id, category_name in battery_results:
+    for _battery_name, _object_id, category_name in battery_results:
         carrier = category_name if category_name else "battery"
         battery_carriers.add(carrier)
 
@@ -1045,7 +1022,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
     added_count = 0
 
     def get_property_value(props, property_name, default=None):
-        """Helper function to extract property value by name."""
+        """Extract property value by name."""
         for prop in props:
             if prop["property"] == property_name:
                 try:
@@ -1056,7 +1033,7 @@ def port_batteries(network: Network, db: PlexosDB, timeslice_csv=None):
                     return default
         return default
 
-    for battery_name, object_id, category_name in battery_results:
+    for battery_name, _object_id, category_name in battery_results:
         try:
             print(f"  Processing battery: {battery_name}")
 

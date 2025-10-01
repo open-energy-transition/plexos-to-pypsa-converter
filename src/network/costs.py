@@ -1,19 +1,20 @@
 import logging
 
-import pandas as pd  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum  # type: ignore
-from pypsa import Network  # type: ignore
+import pandas as pd
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
+from pypsa import Network
 
 logger = logging.getLogger(__name__)
 
 
 def set_capital_costs_generic(
     network: Network, db: PlexosDB, component_type: str, component_class: ClassEnum
-):
-    """
-    Sets the capital_cost for components (generators or storage units) in the PyPSA network
-    based on 'Build Cost', 'WACC', 'Economic Life' (preferred), 'Technical Life', and
+) -> None:
+    """Set the capital_cost for components (generators or storage units) in the PyPSA network.
+
+
+    Based on 'Build Cost', 'WACC', 'Economic Life' (preferred), 'Technical Life', and
     'FO&M Charge' properties from the PlexosDB.
 
     The capital_cost is calculated as:
@@ -50,13 +51,13 @@ def set_capital_costs_generic(
     >>> set_capital_costs_generic(network, db, "Generator", ClassEnum.Generator)
     >>> set_capital_costs_generic(network, db, "StorageUnit", ClassEnum.Battery)
     """
-
     if component_type == "Generator":
         components = network.generators
     elif component_type == "StorageUnit":
         components = network.storage_units
     else:
-        raise ValueError(f"Unsupported component_type: {component_type}")
+        msg = f"Unsupported component_type: {component_type}"
+        raise ValueError(msg)
 
     print(f"Setting capital costs for {len(components)} {component_type.lower()}s...")
 
@@ -127,10 +128,12 @@ def set_capital_costs_generic(
     )
 
 
-def set_battery_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=None):
-    """
-    Sets the marginal costs for batteries in the PyPSA network based on VO&M charges
-    and efficiency losses from the Plexos database.
+def set_battery_marginal_costs(
+    network: Network, db: PlexosDB, timeslice_csv: str | None = None
+) -> None:
+    """Set marginal costs for batteries in the PyPSA network.
+
+    Based on VO&M charges and efficiency losses from the Plexos database.
 
     For batteries, marginal costs are typically much lower than generators since they
     don't consume fuel. The marginal cost includes:
@@ -158,7 +161,6 @@ def set_battery_marginal_costs(network: Network, db: PlexosDB, timeslice_csv=Non
     >>> db = PlexosDB("path/to/file.xml")
     >>> set_battery_marginal_costs(network, db)
     """
-
     if len(network.storage_units) == 0:
         print("No storage units found in network. Skipping marginal cost calculation.")
         return

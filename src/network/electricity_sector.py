@@ -1,15 +1,7 @@
-"""
-Data-driven model creation interface for PLEXOS-PyPSA conversion.
-
-This module provides a unified interface for creating PyPSA models from PLEXOS
-data using automatic file path discovery from the database.
-"""
-
 from pathlib import Path
-from typing import Dict, Optional
 
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.db.discovery import discover_model_paths
 from src.network.core import setup_network
@@ -17,14 +9,13 @@ from src.network.core import setup_network
 
 def create_model_from_xml(
     xml_file_path: str,
-    main_directory: Optional[str] = None,
-    demand_assignment_strategy: Optional[str] = None,
-    target_node: Optional[str] = None,
-    aggregate_node_name: Optional[str] = None,
-    **override_paths,
+    main_directory: str | None = None,
+    demand_assignment_strategy: str | None = None,
+    target_node: str | None = None,
+    aggregate_node_name: str | None = None,
+    **override_paths: str | None,
 ) -> pypsa.Network:
-    """
-    Create a PyPSA model from PLEXOS XML using automatic data discovery.
+    """Create a PyPSA model from PLEXOS XML using automatic data discovery.
 
     This function automatically discovers data file dependencies from the PLEXOS
     database and creates a complete PyPSA network model.
@@ -169,10 +160,9 @@ def create_model_from_xml(
 
 
 def create_aemo_model_data_driven(
-    xml_file_path: str, main_directory: Optional[str] = None
+    xml_file_path: str, main_directory: str | None = None
 ) -> pypsa.Network:
-    """
-    Create AEMO model using data-driven approach.
+    """Create AEMO model using data-driven approach.
 
     Parameters
     ----------
@@ -194,10 +184,9 @@ def create_aemo_model_data_driven(
 
 
 def create_caiso_model_data_driven(
-    xml_file_path: str, main_directory: Optional[str] = None
+    xml_file_path: str, main_directory: str | None = None
 ) -> pypsa.Network:
-    """
-    Create CAISO model using data-driven approach.
+    """Create CAISO model using data-driven approach.
 
     Parameters
     ----------
@@ -220,10 +209,9 @@ def create_caiso_model_data_driven(
 
 
 def create_sem_model_data_driven(
-    xml_file_path: str, main_directory: Optional[str] = None
+    xml_file_path: str, main_directory: str | None = None
 ) -> pypsa.Network:
-    """
-    Create SEM model using data-driven approach.
+    """Create SEM model using data-driven approach.
 
     Parameters
     ----------
@@ -246,10 +234,9 @@ def create_sem_model_data_driven(
 
 
 def validate_discovered_paths(
-    discovery_result: Dict, main_directory: str
-) -> Dict[str, bool]:
-    """
-    Validate that discovered file paths actually exist.
+    discovery_result: dict, main_directory: str
+) -> dict[str, bool]:
+    """Validate that discovered file paths actually exist.
 
     Parameters
     ----------

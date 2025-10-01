@@ -1,20 +1,18 @@
 import logging
 from statistics import mean
 
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum  # type: ignore
-from pypsa import Network  # type: ignore
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
+from pypsa import Network
 
 # Import enhanced constraint porting system
-from .constraint_porting import port_plexos_constraints
+from src.network.constraint_porting import port_plexos_constraints
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO)
 
 
 def add_constraints(network: Network, db: PlexosDB) -> None:
-    """
-    Adds constraints from the PLEXOS database to the PyPSA network.
+    """Add constraints from the PLEXOS database to the PyPSA network.
 
     The function infers the possible kinds of constraints, based on the constraint name, properties, and memberships:
 
@@ -154,12 +152,14 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
             # Apply constraints based on inferred type
             if inferred_type == "Emissions Budget":
                 # Apply emissions budget as a global constraint
-                network.global_constraints.loc[constraint] = {
-                    "type": "primary_energy",
-                    "sense": "<=" if sense == -1 else ">=",
-                    "constant": rhs,
-                    "carrier_attribute": "emissions",
-                }
+                network.global_constraints.loc[constraint, "type"] = "primary_energy"
+                network.global_constraints.loc[constraint, "sense"] = (
+                    "<=" if sense == -1 else ">="
+                )
+                network.global_constraints.loc[constraint, "constant"] = rhs
+                network.global_constraints.loc[constraint, "carrier_attribute"] = (
+                    "emissions"
+                )
                 logger.info(
                     f"Applied emissions budget of {rhs} to constraint {constraint}"
                 )
@@ -220,17 +220,18 @@ def add_constraints(network: Network, db: PlexosDB) -> None:
             else:
                 logger.warning(f"Unknown constraint type for {constraint}, skipping.")
 
-        except Exception as e:
-            logger.error(f"Failed to apply constraint {constraint}: {e}")
+        except Exception:
+            logger.exception(f"Failed to apply constraint {constraint}")
 
 
-def add_constraints_enhanced(network: Network, db: PlexosDB, verbose: bool = True) -> dict:
-    """
-    Enhanced constraint porting using the comprehensive constraint analysis system.
-    
+def add_constraints_enhanced(
+    network: Network, db: PlexosDB, verbose: bool = True
+) -> dict:
+    """Enhanced constraint porting using the comprehensive constraint analysis system.
+
     This function provides better constraint classification, implementation, and reporting
     compared to the original add_constraints function.
-    
+
     Parameters
     ----------
     network : pypsa.Network
@@ -239,12 +240,12 @@ def add_constraints_enhanced(network: Network, db: PlexosDB, verbose: bool = Tru
         The PLEXOS database containing constraint data
     verbose : bool, default True
         Whether to print detailed implementation messages and statistics
-    
+
     Returns
     -------
     dict
         Summary dictionary with implementation statistics and warnings
-        
+
     Examples
     --------
     >>> results = add_constraints_enhanced(network, db, verbose=True)

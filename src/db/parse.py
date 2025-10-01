@@ -1,17 +1,23 @@
+from typing import Any
+
 import pandas as pd
-from plexosdb.enums import ClassEnum  # type: ignore
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum
 
 
-def find_bus_for_object(db, object_name, object_class):
-    """
-    Finds the associated bus (Node) for a given object (e.g., Generator, Storage).
+def find_bus_for_object(
+    db: PlexosDB, object_name: str, object_class: ClassEnum
+) -> str | None:
+    """Find the associated bus (Node) for a given object (e.g., Generator, Storage).
 
-    Parameters:
+    Parameters
+    ----------
         db: PlexosDB instance
         object_name: Name of the object (e.g., generator name)
         object_class: ClassEnum for the object (e.g., ClassEnum.Generator)
 
-    Returns:
+    Returns
+    -------
         The name of the associated Node (bus), or None if not found.
     """
     try:
@@ -20,10 +26,8 @@ def find_bus_for_object(db, object_name, object_class):
         print(f"Error finding memberships for {object_name}: {e}")
         return None
 
-    def find_node_from_memberships(memberships):
-        """
-        Given a list of membership dicts, return the child_object_name of the first Node found.
-        """
+    def find_node_from_memberships(memberships: list) -> str | None:
+        """Given a list of membership dicts, return the child_object_name of the first Node found."""
         for m in memberships:
             # Check if the child is a Node
             if m.get("child_class_name") == "Node":
@@ -42,48 +46,38 @@ def find_bus_for_object(db, object_name, object_class):
     for m in memberships:
         if "node" in m.get("collection_name", "").lower():
             return m.get("name")
-
-    # Third pass: check child memberships if available (less common)
-    # try:
-    #     child_memberships = db.get_child_memberships(
-    #         object_name, object_class=object_class
-    #     )
-    #     for cm in child_memberships:
-    #         if cm.get("class") == "Node":
-    #             return cm.get("name")
-    # except Exception as e:
-    #     print(f"Error finding child memberships for {object_name}: {e}")
-
+    print(f"No associated bus found for {object_name}")
     print(f"No associated bus found for {object_name}")
     return None
 
 
-def find_bus_for_storage_via_generators(db, storage_name):
-    """
-    Find bus for storage unit by checking connected generators.
-    
+def find_bus_for_storage_via_generators(
+    db: PlexosDB, storage_name: str
+) -> tuple[str, str] | None:
+    """Find bus for storage unit by checking connected generators.
+
     PLEXOS storage units are often connected to generators as "Head Storage" or "Tail Storage"
     rather than directly to nodes. This function finds the bus by looking up connected generators.
-    
+
     Parameters
     ----------
     db : PlexosDB
         PlexosDB instance
     storage_name : str
         Name of the storage unit
-        
+
     Returns
     -------
     tuple
-        (bus_name, primary_generator_name) or (None, None) if not found
+        (bus_name, primary_generator_name) or None if not found
     """
     # Query database directly for generator-storage relationships
     # Based on earlier analysis: generators are parents, storage are children
     query = """
-        SELECT 
+        SELECT
             po.name as parent_object_name,
             pc.name as parent_class_name,
-            co.name as child_object_name, 
+            co.name as child_object_name,
             cc.name as child_class_name,
             col.name as collection_name
         FROM t_membership m
@@ -94,7 +88,7 @@ def find_bus_for_storage_via_generators(db, storage_name):
         JOIN t_collection col ON m.collection_id = col.collection_id
         WHERE (pc.name = 'Generator' AND co.name = ? AND cc.name = 'Storage' AND col.name LIKE '%Storage%')
     """
-    
+
     try:
         # Look for generators that have this storage unit as Head/Tail Storage
         rows = db.query(query, [storage_name])
@@ -103,46 +97,51 @@ def find_bus_for_storage_via_generators(db, storage_name):
             gen_name = row[0]  # parent_object_name (the generator)
             collection_name = row[4]  # collection_name
             connected_generators.append((gen_name, collection_name))
-                
+
     except Exception as e:
         print(f"Error querying generator-storage relationships for {storage_name}: {e}")
-        return None, None
-    
+        return None
+
     if not connected_generators:
         print(f"No connected generators found for storage {storage_name}")
-        return None, None
-    
-    print(f"Storage {storage_name} connected to generators: {[gen for gen, _ in connected_generators]}")
-    
+        return None
+
+    print(
+        f"Storage {storage_name} connected to generators: {[gen for gen, _ in connected_generators]}"
+    )
+
     # Find bus for connected generators (try in order)
     for gen_name, collection_name in connected_generators:
-        try:
-            gen_bus = find_bus_for_object(db, gen_name, ClassEnum.Generator)
-            if gen_bus:
-                print(f"Storage {storage_name}: found bus '{gen_bus}' via generator '{gen_name}' ({collection_name})")
-                return gen_bus, gen_name
-        except Exception as e:
-            print(f"Error finding bus for generator {gen_name}: {e}")
-            continue
-    
+        gen_bus = find_bus_for_object(db, gen_name, ClassEnum.Generator)
+        if gen_bus:
+            print(
+                f"Storage {storage_name}: found bus '{gen_bus}' via generator '{gen_name}' ({collection_name})"
+            )
+            return gen_bus, gen_name
+
     # No successful bus connection found
     generator_names = [gen for gen, _ in connected_generators]
-    print(f"Could not find bus for storage {storage_name} via any of its generators: {generator_names}")
-    return None, None
+    print(
+        f"Could not find bus for storage {storage_name} via any of its generators: {generator_names}"
+    )
+    return None
 
 
-def get_emission_rates(db, generator_name):
-    """
-    Extracts emission rate properties for a specific generator.
+def get_emission_rates(
+    db: PlexosDB, generator_name: str
+) -> dict[str, tuple[float, str]]:
+    """Extract emission rate properties for a specific generator.
 
-    Parameters:
+    Parameters
+    ----------
         db: PlexosDB instance
         generator_name: name of the generator (str)
 
-    Returns:
+    Returns
+    -------
         Dictionary of emission properties {emission_type: rate}
     """
-    emission_props = {}
+    emission_props: dict[str, tuple[float, str]] = {}
     try:
         properties = db.get_object_properties(ClassEnum.Generator, generator_name)
     except Exception as e:
@@ -162,15 +161,16 @@ def get_emission_rates(db, generator_name):
     return emission_props
 
 
-def find_fuel_for_generator(db, generator_name):
-    """
-    Finds the associated fuel for a given generator by searching its memberships.
+def find_fuel_for_generator(db: PlexosDB, generator_name: str) -> str | None:
+    """Find the associated fuel for a given generator by searching its memberships.
 
-    Parameters:
+    Parameters
+    ----------
         db: PlexosDB instance
         generator_name: Name of the generator (str)
 
-    Returns:
+    Returns
+    -------
         The name of the associated Fuel, or None if not found.
     """
     try:
@@ -184,17 +184,27 @@ def find_fuel_for_generator(db, generator_name):
     for m in memberships:
         if m.get("class") == "Fuel":
             return m.get("name")
-    # print(f"No associated fuel found for {generator_name}")
+    print(f"No associated fuel found for {generator_name}")
     return None
 
 
-def read_timeslice_activity(timeslice_csv, snapshots):
-    """
-    Reads a timeslice CSV and returns a DataFrame indexed by snapshots, columns=timeslice names, values=True/False for activity.
+def read_timeslice_activity(
+    timeslice_csv: str, snapshots: pd.DatetimeIndex | Any
+) -> pd.DataFrame:
+    """Read a timeslice CSV and return a parsed DataFrame.
+
     Assumes the CSV has columns: DATETIME, NAME, TIMESLICE (where TIMESLICE is -1 for active, 0 for inactive).
     Ensures that if the last setting before the first snapshot is present, it is carried over to the first snapshot.
-    """
 
+    Parameters
+    ----------
+        timeslice_csv: Path to the timeslice CSV file
+        snapshots: pd.DatetimeIndex of model snapshots
+
+    Returns
+    -------
+        pd.DataFrame with index=snapshots, columns=timeslice names, values=True/False for activity
+    """
     df = pd.read_csv(timeslice_csv)
     df["DATETIME"] = pd.to_datetime(df["DATETIME"], dayfirst=True)
     timeslice_names = df["NAME"].unique()
@@ -219,9 +229,16 @@ def read_timeslice_activity(timeslice_csv, snapshots):
     return activity
 
 
-def get_dataid_timeslice_map(db):
-    """
-    Returns a dict mapping data_id to timeslice object_id(s) (class_id=76) via the tag table.
+def get_dataid_timeslice_map(db: PlexosDB) -> dict[int, list[str]]:
+    """Return a dict mapping data_id to timeslice object_id(s) (class_id=76) via the tag table.
+
+    Parameters
+    ----------
+        db: PlexosDB instance
+
+    Returns
+    -------
+        dict mapping data_id to list of timeslice names
     """
     # Query for all data_id, tag_object_id pairs where tag_object_id is a timeslice
     query = """
@@ -233,18 +250,31 @@ def get_dataid_timeslice_map(db):
     """
     rows = db.query(query)
     # Map data_id to timeslice name(s)
-    dataid_to_timeslice = {}
-    for data_id, object_id, timeslice_name in rows:
+    dataid_to_timeslice: dict[int, list[str]] = {}
+    for data_id, _object_id, timeslice_name in rows:
         dataid_to_timeslice.setdefault(data_id, []).append(timeslice_name)
     return dataid_to_timeslice
 
 
 def get_property_active_mask(
-    row, snapshots, timeslice_activity=None, dataid_to_timeslice=None
-):
-    """
-    Returns a boolean mask indicating the periods (snapshots) during which a property entry is considered active,
-    based on its date range and optional timeslice activity.
+    row: pd.Series,
+    snapshots: pd.DatetimeIndex,
+    timeslice_activity: pd.DataFrame | None = None,
+    dataid_to_timeslice: dict[int, list[str]] | None = None,
+) -> pd.Series:
+    """Return a boolean mask indicating the periods (snapshots) during which a property entry is considered active.
+
+    Parameters
+    ----------
+        row: A row from the properties DataFrame (with 'from', 'to', 'data_id' fields)
+        snapshots: pd.DatetimeIndex of model snapshots
+        timeslice_activity: pd.DataFrame of timeslice activity (index=snapshots, columns
+            =timeslice names, values=True/False for activity)
+        dataid_to_timeslice: dict mapping data_id to list of timeslice names
+
+    Returns
+    -------
+        pd.Series of booleans indexed by snapshots, indicating if the property is active based on its date range and optional timeslice activity.
     """
     mask = pd.Series(True, index=snapshots)
     # Date logic
@@ -252,6 +282,7 @@ def get_property_active_mask(
         mask &= snapshots >= row["from"]
     if pd.notnull(row.get("to")):
         mask &= snapshots <= row["to"]
+
     # Timeslice logic
     if (
         timeslice_activity is not None
@@ -270,7 +301,7 @@ def get_property_active_mask(
                 mask &= ts_mask
             elif ts.startswith("M") and ts[1:].isdigit() and 1 <= int(ts[1:]) <= 12:
                 month = int(ts[1:])
-                ts_mask = snapshots.month == month
+                ts_mask = pd.Series(snapshots.month == month, index=snapshots)
                 if pd.notnull(row.get("from")):
                     ts_mask = ts_mask & (snapshots >= row["from"])
                 if pd.notnull(row.get("to")):
@@ -279,10 +310,3 @@ def get_property_active_mask(
             else:
                 mask &= True
     return mask
-
-
-# gen_name = "MURRAY10"
-# emissions = get_emission_rates(prog_db, gen_name)
-# print(f"Emission rates for {gen_name}:")
-# for k, v in emissions.items():
-#     print(f"  {k}: {v[0]} {v[1]}")

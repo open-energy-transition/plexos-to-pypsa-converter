@@ -1,7 +1,9 @@
 import logging
+from typing import Any
 
-import pandas as pd  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pandas as pd
+import pypsa
+from plexosdb import PlexosDB
 
 from src.db.parse import (
     get_dataid_timeslice_map,
@@ -12,9 +14,10 @@ from src.db.parse import (
 logger = logging.getLogger(__name__)
 
 
-def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
-    """
-    Parse fuel prices from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=carrier names.
+def parse_fuel_prices(
+    db: PlexosDB, network: pypsa.Network, timeslice_csv: str | None = None
+) -> pd.DataFrame:
+    """Parse fuel prices from the PlexosDB using SQL and return a DataFrame with index=network.snapshots, columns=carrier names.
 
     Applies price values according to these rules:
     - If a property is linked to a timeslice, use the timeslice activity to set the property for the relevant snapshots (takes precedence over t_date_from/t_date_to).
@@ -123,14 +126,13 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
     )
 
     def build_fuel_price_timeseries(
-        merged,
-        fuel_df,
-        snapshots,
-        timeslice_activity=None,
-        dataid_to_timeslice=None,
-    ):
-        """
-        For each fuel/carrier, create a time series for price using Price property, with timeslice and date logic.
+        merged: pd.DataFrame,
+        fuel_df: pd.DataFrame,
+        snapshots: pd.DatetimeIndex | Any,
+        timeslice_activity: pd.DataFrame | None = None,
+        dataid_to_timeslice: dict | None = None,
+    ) -> pd.DataFrame:
+        """For each fuel/carrier, create a time series for price using Price property, with timeslice and date logic.
         Returns a DataFrame: index=snapshots, columns=carrier names, values=prices.
         """
         fuel_series = {}
@@ -163,12 +165,14 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
                 )
 
             # Helper to build a time series for a property
-            def build_ts(prop_name, fallback=None):
+            def build_ts(
+                prop_name: str, entries: pd.DataFrame, fallback: float | None = None
+            ) -> pd.Series:
                 ts = pd.Series(index=snapshots, dtype=float)
                 already_set = pd.Series(False, index=snapshots)
 
                 # Get all rows for this property
-                prop_rows = prop_df_entries[prop_df_entries["property"] == prop_name]
+                prop_rows = entries[entries["property"] == prop_name]
 
                 # Time-specific entries first (these take precedence)
                 for _, row in prop_rows.iterrows():
@@ -207,7 +211,7 @@ def parse_fuel_prices(db: PlexosDB, network, timeslice_csv=None):
                 return ts
 
             # Build time series for Price
-            price_ts = build_ts("Price", fallback=0.0)
+            price_ts = build_ts("Price", prop_df_entries, fallback=0.0)
             fuel_series[fuel] = price_ts
 
         # Concatenate all fuel Series into a single DataFrame

@@ -1,14 +1,14 @@
-"""
-Multi-Sector Network Setup Functions (CSV-based)
+"""Multi-Sector Network Setup Functions (CSV-based).
 
 This module provides functions to set up PyPSA networks for multi-sector energy models
 using the exported CSV data from PLEXOS-COAD. This approach is more robust than trying
 to use ClassEnum for multi-sector classes that may not be available.
 """
 
+import ast
 import logging
-import os
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from pypsa import Network
@@ -16,9 +16,8 @@ from pypsa import Network
 logger = logging.getLogger(__name__)
 
 
-def setup_gas_electric_network_csv(network: Network, csv_path: str) -> Dict[str, Any]:
-    """
-    Set up a multi-sector PyPSA network for gas and electricity using CSV data.
+def setup_gas_electric_network_csv(network: Network, csv_path: str) -> dict[str, Any]:
+    """Set up a multi-sector PyPSA network for gas and electricity using CSV data.
 
     Parameters
     ----------
@@ -142,8 +141,8 @@ def setup_gas_electric_network_csv(network: Network, csv_path: str) -> Dict[str,
             [l for l in network.loads.index if "elec_load" in l]
         )
 
-    except Exception as e:
-        logger.error(f"Error setting up gas-electric network: {e}")
+    except Exception:
+        logger.exception("Error setting up gas-electric network")
         raise
 
     print("Gas-electric multi-sector network setup complete!")
@@ -154,8 +153,8 @@ def add_electricity_buses_csv(network: Network, csv_path: str) -> int:
     """Add electricity buses from Node.csv."""
     buses_added = 0
     try:
-        node_file = os.path.join(csv_path, "Node.csv")
-        if os.path.exists(node_file):
+        node_file = str(Path(csv_path) / "Node.csv")
+        if Path(node_file).exists():
             nodes_df = pd.read_csv(node_file)
 
             for _, node_row in nodes_df.iterrows():
@@ -174,8 +173,8 @@ def add_gas_buses_csv(network: Network, csv_path: str) -> int:
     """Add gas buses from Gas Node.csv."""
     buses_added = 0
     try:
-        gas_node_file = os.path.join(csv_path, "Gas Node.csv")
-        if os.path.exists(gas_node_file):
+        gas_node_file = str(Path(csv_path) / "Gas Node.csv")
+        if Path(gas_node_file).exists():
             gas_nodes_df = pd.read_csv(gas_node_file)
 
             # Add gas carrier if not exists
@@ -199,8 +198,8 @@ def add_electricity_generators_csv(network: Network, csv_path: str) -> int:
     """Add electricity generators from Generator.csv."""
     generators_added = 0
     try:
-        gen_file = os.path.join(csv_path, "Generator.csv")
-        if os.path.exists(gen_file):
+        gen_file = str(Path(csv_path) / "Generator.csv")
+        if Path(gen_file).exists():
             generators_df = pd.read_csv(gen_file)
 
             for _, gen_row in generators_df.iterrows():
@@ -218,7 +217,7 @@ def add_electricity_generators_csv(network: Network, csv_path: str) -> int:
                 # Convert capacity
                 try:
                     p_nom = float(max_capacity) if pd.notna(max_capacity) else 100.0
-                except:
+                except Exception:
                     p_nom = 100.0
 
                 if gen_name not in network.generators.index:
@@ -242,12 +241,12 @@ def add_electricity_lines_csv(network: Network, csv_path: str) -> int:
     """Add electricity transmission lines from Line.csv."""
     lines_added = 0
     try:
-        line_file = os.path.join(csv_path, "Line.csv")
-        if os.path.exists(line_file):
+        line_file = str(Path(csv_path) / "Line.csv")
+        if Path(line_file).exists():
             lines_df = pd.read_csv(line_file)
 
             for _, line_row in lines_df.iterrows():
-                line_name = line_row["object"]
+                line_row["object"]
 
                 # For now, create basic links between first few buses
                 # In practice, you'd extract the actual node connections from PLEXOS data
@@ -282,8 +281,8 @@ def add_electricity_storage_csv(network: Network, csv_path: str) -> int:
     """Add electricity storage from Storage.csv."""
     storage_added = 0
     try:
-        storage_file = os.path.join(csv_path, "Storage.csv")
-        if os.path.exists(storage_file):
+        storage_file = str(Path(csv_path) / "Storage.csv")
+        if Path(storage_file).exists():
             storage_df = pd.read_csv(storage_file)
 
             elec_buses = [
@@ -305,7 +304,7 @@ def add_electricity_storage_csv(network: Network, csv_path: str) -> int:
                     p_nom = float(max_power) if pd.notna(max_power) else 100.0
                     volume = float(max_volume) if pd.notna(max_volume) else 1000.0
                     max_hours = volume / p_nom if p_nom > 0 else 10.0
-                except:
+                except Exception:
                     p_nom = 100.0
                     max_hours = 10.0
 
@@ -331,15 +330,11 @@ def add_gas_pipelines_csv(network: Network, csv_path: str) -> int:
     """Add gas pipelines from Gas Pipeline.csv."""
     pipelines_added = 0
     try:
-        pipeline_file = os.path.join(csv_path, "Gas Pipeline.csv")
-        if os.path.exists(pipeline_file):
+        pipeline_file = str(Path(csv_path) / "Gas Pipeline.csv")
+        if Path(pipeline_file).exists():
             pipelines_df = pd.read_csv(pipeline_file)
 
-            gas_buses = [
-                b
-                for b in network.buses.index
-                if network.buses.at[b, "carrier"] == "Gas"
-            ]
+            [b for b in network.buses.index if network.buses.at[b, "carrier"] == "Gas"]
 
             for _, pipeline_row in pipelines_df.iterrows():
                 pipeline_name = pipeline_row["object"]
@@ -349,8 +344,6 @@ def add_gas_pipelines_csv(network: Network, csv_path: str) -> int:
                 if pd.notna(gas_nodes_str) and gas_nodes_str:
                     # Parse the gas nodes (they might be in format like "['AT', 'DE']")
                     try:
-                        import ast
-
                         if gas_nodes_str.startswith("["):
                             gas_nodes = ast.literal_eval(gas_nodes_str)
                         else:
@@ -375,7 +368,7 @@ def add_gas_pipelines_csv(network: Network, csv_path: str) -> int:
                                         if pd.notna(max_flow)
                                         else 1000.0
                                     )
-                                except:
+                                except Exception:
                                     p_nom = 1000.0
 
                                 link_name = f"gas_pipeline_{pipeline_name}"
@@ -390,7 +383,7 @@ def add_gas_pipelines_csv(network: Network, csv_path: str) -> int:
                                         carrier="Gas",
                                     )
                                     pipelines_added += 1
-                    except:
+                    except Exception:
                         pass
 
     except Exception as e:
@@ -403,8 +396,8 @@ def add_gas_storage_csv(network: Network, csv_path: str) -> int:
     """Add gas storage from Gas Storage.csv."""
     storage_added = 0
     try:
-        gas_storage_file = os.path.join(csv_path, "Gas Storage.csv")
-        if os.path.exists(gas_storage_file):
+        gas_storage_file = str(Path(csv_path) / "Gas Storage.csv")
+        if Path(gas_storage_file).exists():
             gas_storage_df = pd.read_csv(gas_storage_file)
 
             gas_buses = [
@@ -428,7 +421,7 @@ def add_gas_storage_csv(network: Network, csv_path: str) -> int:
                     p_nom = float(max_injection) if pd.notna(max_injection) else 200.0
                     volume = float(max_volume) if pd.notna(max_volume) else 10000.0
                     max_hours = volume / p_nom if p_nom > 0 else 50.0
-                except:
+                except Exception:
                     p_nom = 200.0
                     max_hours = 50.0
 
@@ -456,8 +449,8 @@ def add_gas_demand_csv(network: Network, csv_path: str) -> int:
     """Add gas demand from Gas Demand.csv."""
     demand_added = 0
     try:
-        gas_demand_file = os.path.join(csv_path, "Gas Demand.csv")
-        if os.path.exists(gas_demand_file):
+        gas_demand_file = str(Path(csv_path) / "Gas Demand.csv")
+        if Path(gas_demand_file).exists():
             gas_demand_df = pd.read_csv(gas_demand_file)
 
             gas_buses = [
@@ -494,8 +487,8 @@ def add_gas_fields_csv(network: Network, csv_path: str) -> int:
     """Add gas fields from Gas Field.csv."""
     fields_added = 0
     try:
-        gas_field_file = os.path.join(csv_path, "Gas Field.csv")
-        if os.path.exists(gas_field_file):
+        gas_field_file = str(Path(csv_path) / "Gas Field.csv")
+        if Path(gas_field_file).exists():
             gas_field_df = pd.read_csv(gas_field_file)
 
             gas_buses = [
@@ -516,7 +509,7 @@ def add_gas_fields_csv(network: Network, csv_path: str) -> int:
 
                 try:
                     p_nom = float(max_production) if pd.notna(max_production) else 500.0
-                except:
+                except Exception:
                     p_nom = 500.0
 
                 gen_name = f"gas_field_{field_name}"
@@ -537,13 +530,13 @@ def add_gas_fields_csv(network: Network, csv_path: str) -> int:
     return fields_added
 
 
-def add_gas_electric_coupling_csv(network: Network, csv_path: str) -> Dict[str, Any]:
+def add_gas_electric_coupling_csv(network: Network, csv_path: str) -> dict[str, Any]:
     """Add gas-to-electric conversion from Generator.csv with Gas Node connections."""
     coupling_stats = {"gas_generators": 0, "efficiency_range": "N/A"}
 
     try:
-        gen_file = os.path.join(csv_path, "Generator.csv")
-        if os.path.exists(gen_file):
+        gen_file = str(Path(csv_path) / "Generator.csv")
+        if Path(gen_file).exists():
             generators_df = pd.read_csv(gen_file)
 
             efficiency_values = []
@@ -590,7 +583,7 @@ def add_gas_electric_coupling_csv(network: Network, csv_path: str) -> Dict[str, 
                                     carrier="Gas2Electric",
                                 )
                                 coupling_stats["gas_generators"] += 1
-                        except:
+                        except Exception:
                             pass
 
             # Calculate efficiency range
@@ -606,7 +599,7 @@ def add_gas_electric_coupling_csv(network: Network, csv_path: str) -> Dict[str, 
 
 
 # Additional function for PLEXOS-MESSAGE flow network (hydrogen, ammonia)
-def setup_flow_network_csv(network: Network, csv_path: str) -> Dict[str, Any]:
+def setup_flow_network_csv(network: Network, csv_path: str) -> dict[str, Any]:
     """Set up multi-sector flow network from CSV data."""
     print(f"Setting up flow network from CSV data: {csv_path}")
 
@@ -644,20 +637,20 @@ def setup_flow_network_csv(network: Network, csv_path: str) -> Dict[str, Any]:
             if sectors[sector] > 0:  # Only if we have buses for this sector
                 add_flow_demand_csv(network, sector)
 
-    except Exception as e:
-        logger.error(f"Error setting up flow network: {e}")
+    except Exception:
+        logger.exception("Error setting up flow network")
         raise
 
     return setup_summary
 
 
-def add_flow_nodes_csv(network: Network, csv_path: str) -> Dict[str, int]:
+def add_flow_nodes_csv(network: Network, csv_path: str) -> dict[str, int]:
     """Add flow nodes from Flow Node.csv."""
     sectors = {}
 
     try:
-        flow_node_file = os.path.join(csv_path, "Flow Node.csv")
-        if os.path.exists(flow_node_file):
+        flow_node_file = str(Path(csv_path) / "Flow Node.csv")
+        if Path(flow_node_file).exists():
             flow_nodes_df = pd.read_csv(flow_node_file)
 
             for _, node_row in flow_nodes_df.iterrows():
@@ -691,13 +684,13 @@ def add_flow_nodes_csv(network: Network, csv_path: str) -> Dict[str, int]:
     return sectors
 
 
-def add_flow_paths_csv(network: Network, csv_path: str) -> Dict[str, int]:
+def add_flow_paths_csv(network: Network, csv_path: str) -> dict[str, int]:
     """Add flow paths from Flow Path.csv."""
     paths = {"Transport": 0, "Conversion": 0}
 
     try:
-        flow_path_file = os.path.join(csv_path, "Flow Path.csv")
-        if os.path.exists(flow_path_file):
+        flow_path_file = str(Path(csv_path) / "Flow Path.csv")
+        if Path(flow_path_file).exists():
             flow_paths_df = pd.read_csv(flow_path_file)
 
             for _, path_row in flow_paths_df.iterrows():
@@ -707,8 +700,6 @@ def add_flow_paths_csv(network: Network, csv_path: str) -> Dict[str, int]:
                 flow_nodes_str = path_row.get("Flow Node", "")
                 if pd.notna(flow_nodes_str) and flow_nodes_str:
                     try:
-                        import ast
-
                         if flow_nodes_str.startswith("["):
                             flow_nodes = ast.literal_eval(flow_nodes_str)
                         else:
@@ -739,7 +730,7 @@ def add_flow_paths_csv(network: Network, csv_path: str) -> Dict[str, int]:
                                         if pd.notna(efficiency) and efficiency != ""
                                         else 1.0
                                     )
-                                except:
+                                except Exception:
                                     p_nom = 1000.0
                                     eff = 1.0
 
@@ -764,7 +755,7 @@ def add_flow_paths_csv(network: Network, csv_path: str) -> Dict[str, int]:
                                         efficiency=eff,
                                     )
                                     paths[link_type] += 1
-                    except:
+                    except Exception:
                         pass
 
     except Exception as e:
@@ -773,13 +764,13 @@ def add_flow_paths_csv(network: Network, csv_path: str) -> Dict[str, int]:
     return paths
 
 
-def add_processes_csv(network: Network, csv_path: str) -> Dict[str, int]:
+def add_processes_csv(network: Network, csv_path: str) -> dict[str, int]:
     """Add processes from Process.csv."""
     processes = {}
 
     try:
-        process_file = os.path.join(csv_path, "Process.csv")
-        if os.path.exists(process_file):
+        process_file = str(Path(csv_path) / "Process.csv")
+        if Path(process_file).exists():
             process_df = pd.read_csv(process_file)
 
             for _, process_row in process_df.iterrows():
@@ -792,7 +783,7 @@ def add_processes_csv(network: Network, csv_path: str) -> Dict[str, int]:
                         if pd.notna(efficiency_val)
                         else 0.7
                     )
-                except:
+                except Exception:
                     efficiency = 0.7
 
                 # Determine process type and create links

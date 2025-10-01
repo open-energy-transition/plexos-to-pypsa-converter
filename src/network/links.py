@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def add_links(network: Network, db: PlexosDB):
-    """
-    Adds transmission links to the given network based on data from the database.
+    """Add transmission links to the given network based on data from the database.
 
     This function retrieves line objects from the database, extracts their properties,
     and adds them to the network as links. It ensures that the links connect valid buses.
@@ -54,16 +53,16 @@ def add_links(network: Network, db: PlexosDB):
         )
 
         # Ramp limits
-        def get_prop(prop, cond=lambda v: True):
+        def get_prop(prop, properties, cond=lambda v: True):
             vals = [
                 float(p["value"])
-                for p in props
+                for p in properties
                 if p["property"] == prop and cond(float(p["value"]))
             ]
             return max(vals) if vals else None
 
-        ramp_limit_up = get_prop("Max Ramp Up", lambda v: v > 0)
-        ramp_limit_down = get_prop("Max Ramp Down", lambda v: v > 0)
+        ramp_limit_up = get_prop("Max Ramp Up", props, lambda v: v > 0)
+        ramp_limit_down = get_prop("Max Ramp Down", props, lambda v: v > 0)
 
         # Add link (do not set p_nom, p_min_pu, p_max_pu here)
         network.add(
@@ -83,11 +82,10 @@ def add_links(network: Network, db: PlexosDB):
 
 
 def parse_lines_flow(db: PlexosDB, network, timeslice_csv=None):
-    """
-    Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return:
+    """Parse Min/Max Flow and Min/Max Rating for lines from the PlexosDB and return:
     - min_flow: index=network.snapshots, columns=line names
     - max_flow: index=network.snapshots, columns=line names
-    - fallback_val: dict mapping line name to fallback value used for p_nom
+    - fallback_val: dict mapping line name to fallback value used for p_nom.
 
     Uses time-specified values if available; otherwise, defaults to non-time-specified values.
     If a property is linked to a timeslice, use the timeslice activity to set the property for the relevant snapshots (takes precedence over t_date_from/t_date_to).
@@ -232,8 +230,7 @@ def parse_lines_flow(db: PlexosDB, network, timeslice_csv=None):
 
 
 def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
-    """
-    Set the flow limits for links in the network based on data from the database.
+    """Set the flow limits for links in the network based on data from the database.
 
     This function retrieves the Min/Max Flow and Min/Max Rating for each link from the
     database and sets the corresponding attributes in the network.
@@ -289,8 +286,7 @@ def set_link_flows(network: Network, db: PlexosDB, timeslice_csv=None):
 
 
 def port_links(network: Network, db: PlexosDB, timeslice_csv=None, target_node=None):
-    """
-    Comprehensive function to add links and set all their properties in the PyPSA network.
+    """Comprehensive function to add links and set all their properties in the PyPSA network.
 
     This function combines all link-related operations:
     - Adds transmission links from the Plexos database
@@ -344,8 +340,7 @@ def port_links(network: Network, db: PlexosDB, timeslice_csv=None, target_node=N
 
 
 def reassign_links_to_node(network: Network, target_node: str):
-    """
-    Reassign all links to connect a specific node.
+    """Reassign all links to connect a specific node.
 
     This is useful when demand is aggregated to a single node and all links
     need to be connected to the same node for a meaningful optimization.
@@ -364,7 +359,8 @@ def reassign_links_to_node(network: Network, target_node: str):
         Summary information about the reassignment.
     """
     if target_node not in network.buses.index:
-        raise ValueError(f"Target node '{target_node}' not found in network buses")
+        msg = f"Target node '{target_node}' not found in network buses"
+        raise ValueError(msg)
 
     if len(network.links) == 0:
         print("No links found in network. Skipping link reassignment.")
@@ -376,7 +372,9 @@ def reassign_links_to_node(network: Network, target_node: str):
 
     original_bus0 = network.links["bus0"].copy()
     original_bus1 = network.links["bus1"].copy()
-    original_connections = [(b0, b1) for b0, b1 in zip(original_bus0, original_bus1)]
+    original_connections = [
+        (b0, b1) for b0, b1 in zip(original_bus0, original_bus1, strict=False)
+    ]
     unique_original_connections = list(set(original_connections))
 
     # Reassign all links to connect the target node

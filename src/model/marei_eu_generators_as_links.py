@@ -1,5 +1,4 @@
-"""
-MaREI-EU Multi-Sector Model with Generators-as-Links Option
+"""MaREI-EU Multi-Sector Model with Generators-as-Links Option.
 
 This script creates a PyPSA network from the MaREI-EU PLEXOS model where conventional
 generators (coal, gas, nuclear, etc.) can be represented as Links instead of Generators.
@@ -8,14 +7,17 @@ efficiency conversions.
 """
 
 from collections import defaultdict
-from typing import DefaultDict
+from typing import Any
 
 import pandas as pd
-import pypsa  # type: ignore
-from plexosdb import PlexosDB  # type: ignore
+import pypsa
+from plexosdb import PlexosDB
 
 from src.db.models import INPUT_XMLS
-from src.network.multi_sector_db import setup_gas_electric_network_db
+from src.network.multi_sector_db import (
+    setup_gas_electric_network_db,
+    setup_marei_csv_network,
+)
 
 
 def create_marei_eu_generators_as_links_model(
@@ -25,9 +27,8 @@ def create_marei_eu_generators_as_links_model(
     csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
     infrastructure_scenario: str = "PCI",
     pricing_scheme: str = "Production",
-):
-    """
-    Create MaREI-EU PyPSA model with optional generators-as-links conversion.
+) -> tuple[pypsa.Network, dict[str, Any]]:
+    """Create MaREI-EU PyPSA model with optional generators-as-links conversion.
 
     The MaREI-EU model includes:
     - Electricity network (Node, Generator, Line, Storage)
@@ -98,8 +99,6 @@ def create_marei_eu_generators_as_links_model(
             print("   Enabling multi-sector coupling through fuel buses")
         else:
             print("   Using standard Generator representation")
-
-        from src.network.multi_sector_db import setup_marei_csv_network
 
         setup_summary = setup_marei_csv_network(
             network=network,
@@ -302,7 +301,7 @@ if __name__ == "__main__":
     # Select subset of snapshots for optimization
     if len(network.snapshots) > 0:
         x = 8760  # number of snapshots to select per year
-        snapshots_by_year: DefaultDict[int, list] = defaultdict(list)
+        snapshots_by_year: defaultdict[int, list] = defaultdict(list)
         for snap in network.snapshots:
             year = pd.Timestamp(snap).year
             if len(snapshots_by_year[year]) < x:

@@ -15,7 +15,7 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from .progress import BatchProgressTracker, create_progress_tracker
+from src.network.progress import BatchProgressTracker, create_progress_tracker
 
 logger = logging.getLogger(__name__)
 
