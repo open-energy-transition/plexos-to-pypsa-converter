@@ -113,7 +113,8 @@ ignore = [
     'PLR0912',
     'PT011',
     'PLW2901',
-    'G004',   # Logging statement uses f-string (TODO: fix gradually)
+    'G004',    # Logging statement uses f-string (TODO: fix gradually)
+    'PERF203', # try-except in loop (TODO: intentional for data processing)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -149,6 +150,13 @@ ignore = [
 ]
 
 "src/scratch/**" = ['ALL']
+
+# Ignore S110/S112 for files with optional property parsing patterns
+"src/network/gas.py" = ['S110']
+"src/network/flows.py" = ['S110']
+"src/network/multi_sector*.py" = ['S110']
+"src/network/multi_sector_csv.py" = ['S110']
+"src/network/multi_sector_db.py" = ['S110']
 
 [tool.ruff.lint.flake8-tidy-imports]
 # Disallow all relative imports.
