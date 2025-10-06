@@ -1,0 +1,404 @@
+{
+  "features": [
+    "Generators",
+    "Loads",
+    "Storage",
+    "Lines",
+    "Buses",
+    "Carriers",
+    "Costs",
+    "Time-varying emission factors"
+  ],
+  "coverage": [
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-green",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Generators",
+      "status": "converted"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Loads",
+      "status": "converted"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Storage",
+      "status": "partial"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Lines",
+      "status": "partial"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Buses",
+      "status": "converted"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Carriers",
+      "status": "converted"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Costs",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "aemo-2024-isp-progressive",
+      "feature": "Time-varying emission factors",
+      "status": "feature_not_covered"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "aemo-2024-isp-step",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Generators",
+      "status": "partial"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Loads",
+      "status": "converted"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Storage",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Lines",
+      "status": "partial"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Buses",
+      "status": "converted"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Carriers",
+      "status": "partial"
+    },
+    {
+      "model_id": "caiso-irp23",
+      "feature": "Costs",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "caiso-sa25",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "nrel-118",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Generators",
+      "status": "partial"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Loads",
+      "status": "converted"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Storage",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Lines",
+      "status": "partial"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Buses",
+      "status": "converted"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Carriers",
+      "status": "partial"
+    },
+    {
+      "model_id": "sem-2024-2032",
+      "feature": "Costs",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Generators",
+      "status": "partial"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Loads",
+      "status": "partial"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Storage",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Lines",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Buses",
+      "status": "partial"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Carriers",
+      "status": "partial"
+    },
+    {
+      "model_id": "marei-eu",
+      "feature": "Costs",
+      "status": "not_yet_implemented"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-2015",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Generators",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Loads",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Storage",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Lines",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Buses",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Carriers",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-world-spatial",
+      "feature": "Costs",
+      "status": "not_applicable"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Generators",
+      "status": "converted"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Loads",
+      "status": "converted"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Storage",
+      "status": "partial"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Lines",
+      "status": "converted"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Buses",
+      "status": "converted"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Carriers",
+      "status": "converted"
+    },
+    {
+      "model_id": "plexos-message",
+      "feature": "Costs",
+      "status": "not_yet_implemented"
+    }
+  ]
+}

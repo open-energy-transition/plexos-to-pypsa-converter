@@ -1,0 +1,59 @@
+{
+  "models": [
+    {
+      "id": "aemo-2024-green",
+      "name": "AEMO 2024 ISP - Green Energy Exports",
+      "conversion_pct": 0
+    },
+    {
+      "id": "aemo-2024-isp-progressive",
+      "name": "AEMO 2024 ISP - Progressive Change",
+      "conversion_pct": 65
+    },
+    {
+      "id": "aemo-2024-isp-step",
+      "name": "AEMO 2024 ISP - Step Change",
+      "conversion_pct": 0
+    },
+    {
+      "id": "caiso-irp23",
+      "name": "CAISO IRP 2023 Stochastic",
+      "conversion_pct": 30
+    },
+    {
+      "id": "caiso-sa25",
+      "name": "CAISO 2025 Summer Assessment",
+      "conversion_pct": 0
+    },
+    {
+      "id": "nrel-118",
+      "name": "NREL Extended IEEE 118-bus",
+      "conversion_pct": 0
+    },
+    {
+      "id": "sem-2024-2032",
+      "name": "SEM 2024-2032 Validation Model",
+      "conversion_pct": 35
+    },
+    {
+      "id": "marei-eu",
+      "name": "European Power & Gas Model",
+      "conversion_pct": 25
+    },
+    {
+      "id": "plexos-world-2015",
+      "name": "PLEXOS-World 2015 Gold V1.1",
+      "conversion_pct": 0
+    },
+    {
+      "id": "plexos-world-spatial",
+      "name": "PLEXOS-World Spatial Resolution",
+      "conversion_pct": 0
+    },
+    {
+      "id": "plexos-message",
+      "name": "MESSAGEix-GLOBIOM",
+      "conversion_pct": 50
+    }
+  ]
+}
