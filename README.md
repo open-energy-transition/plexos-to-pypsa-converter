@@ -78,6 +78,12 @@ The following table lists PLEXOS XML models that are being converted or will be 
 - 🟡 **In-progress** - Conversion currently underway
 - 🔴 **Not yet converted** - Planned for future conversion
 
+### Model × Feature Coverage Matrix
+
+![Model Coverage Heatmap](doc/visualization/image/coverage_heatmap.png)
+
+The heatmap above shows the conversion status of different features across all models. Each cell represents the implementation status for a specific model-feature combination.
+
 ## Input Files & Data Structure
 
 ### Required Files
