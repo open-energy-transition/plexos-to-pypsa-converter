@@ -1,1 +1,0 @@
-"""Visualization data package."""
