@@ -137,6 +137,38 @@ def create_heatmap_figure(models_data: dict, coverage_data: dict) -> go.Figure:
         col=2,
     )
 
+    # Add legend traces (invisible markers for legend only)
+    legend_statuses = [
+        {"status": "converted", "label": "Fully converted", "color": "green"},
+        {"status": "partial", "label": "Partially converted", "color": "yellow"},
+        {
+            "status": "not_yet_implemented",
+            "label": "Not yet converted",
+            "color": "orange",
+        },
+        {
+            "status": "feature_not_covered",
+            "label": "Feature not mapped yet",
+            "color": "red",
+        },
+        {"status": "not_applicable", "label": "Not applicable", "color": "lightgray"},
+    ]
+
+    for legend_item in legend_statuses:
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker={"size": 10, "color": legend_item["color"]},
+                name=legend_item["label"],
+                showlegend=True,
+                legendgroup="status",
+            ),
+            row=1,
+            col=1,
+        )
+
     # Update layout
     fig.update_layout(
         title={
@@ -147,7 +179,16 @@ def create_heatmap_figure(models_data: dict, coverage_data: dict) -> go.Figure:
         height=600,
         width=1200,
         autosize=False,
-        margin={"l": 250, "r": 100, "t": 80, "b": 150},
+        margin={"l": 250, "r": 180, "t": 80, "b": 150},
+        showlegend=True,
+        legend={
+            "title": {"text": "Status"},
+            "orientation": "v",
+            "yanchor": "top",
+            "y": 0.99,
+            "xanchor": "left",
+            "x": 1.02,
+        },
     )
 
     # Update x-axis for heatmap
@@ -159,7 +200,8 @@ def create_heatmap_figure(models_data: dict, coverage_data: dict) -> go.Figure:
     # Update axes for percentage column
     fig.update_xaxes(
         showticklabels=False,
-        title="% Converted",
+        title={"text": "% Converted", "standoff": 0},
+        side="top",
         range=[0, 1],
         showgrid=False,
         zeroline=False,
