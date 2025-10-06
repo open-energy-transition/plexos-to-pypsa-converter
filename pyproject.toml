@@ -129,6 +129,20 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    'D',     # pydocstyle
+    'ERA',   # eradicate
+    'S',     # flake8-bandit
+    'B',     # flake8-bugbear
+    'EM',    # flake8-errmsg
+    'T20',   # flake8-print
+    'SIM',   # flake8-simplify
+    'ARG',   # flake8-unused-arguments
+    'PL',    # pylint
+    'TRY',   # tryceratops
+    'ANN',   # flake8-annotations (tests don't need strict typing)
+    'PERF',  # perflint (performance optimizations not critical in tests)
+]
 "{test,examples}/**" = [
     'D',     # pydocstyle
     'ERA',   # eradicate
@@ -139,7 +153,9 @@ ignore = [
     'SIM',   # flake8-simplify
     'ARG',   # flake8-unused-arguments
     'PL',    # pylint
-    'TRY'    # tryceratops
+    'TRY',   # tryceratops
+    'ANN',   # flake8-annotations (tests don't need strict typing)
+    'PERF',  # perflint (performance optimizations not critical in tests)
 ]
 
 # Gradual adoption - relaxed rules for existing code
