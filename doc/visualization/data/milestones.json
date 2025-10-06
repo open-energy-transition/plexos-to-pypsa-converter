@@ -1,0 +1,89 @@
+{
+  "milestones": [
+    {
+      "id": "M001",
+      "date": "2025-05-01",
+      "title": "Core Network",
+      "description": "Buses, Snapshots, Carriers",
+      "category": "core"
+    },
+    {
+      "id": "M002",
+      "date": "2025-05-15",
+      "title": "Demand Loading",
+      "description": "Flexible load strategies",
+      "category": "core"
+    },
+    {
+      "id": "M003",
+      "date": "2025-05-28",
+      "title": "Conventional Generators",
+      "description": "Thermal, nuclear, hydro plants",
+      "category": "generation"
+    },
+    {
+      "id": "M004",
+      "date": "2025-06-10",
+      "title": "Renewable Generators",
+      "description": "Solar, wind VRE",
+      "category": "generation"
+    },
+    {
+      "id": "M005",
+      "date": "2025-06-20",
+      "title": "VRE Profiles",
+      "description": "Time-varying capacity factors",
+      "category": "generation"
+    },
+    {
+      "id": "M006",
+      "date": "2025-07-01",
+      "title": "Transmission Lines",
+      "description": "AC lines & DC links",
+      "category": "network"
+    },
+    {
+      "id": "M007",
+      "date": "2025-07-15",
+      "title": "Generator Costs",
+      "description": "Capital & marginal costs",
+      "category": "costs"
+    },
+    {
+      "id": "M008",
+      "date": "2025-07-25",
+      "title": "Battery Storage",
+      "description": "Electrochemical storage",
+      "category": "storage"
+    },
+    {
+      "id": "M009",
+      "date": "2025-08-05",
+      "title": "Pumped Hydro",
+      "description": "Pumped storage & inflows",
+      "category": "storage"
+    },
+    {
+      "id": "M010",
+      "date": "2025-08-18",
+      "title": "Gas Network",
+      "description": "Gas buses & pipelines",
+      "category": "multi_sector"
+    },
+    {
+      "id": "M011",
+        "date": "2025-08-28",
+      "title": "H2 Infrastructure",
+      "description": "Hydrogen pipelines & storage",
+      "category": "multi_sector"
+    },
+    {
+      "id": "M012",
+      "date": "2025-09-05",
+      "title": "Sector Coupling",
+      "description": "Electricity-gas-H2 links",
+      "category": "multi_sector"
+
+    }
+  ]
+}
