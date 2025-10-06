@@ -2,6 +2,9 @@
 
 A Python tool for converting PLEXOS input XML files and their associated data to create equivalent PyPSA networks.
 
+![Milestones chart](doc/visualization/image/milestones.png)
+
+
 ## Installation
 
 ```bash
