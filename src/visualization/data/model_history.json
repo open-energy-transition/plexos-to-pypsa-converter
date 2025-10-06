@@ -1,0 +1,52 @@
+{
+  "events": [
+    {
+      "date": "2024-08-15",
+      "model_id": "aemo-2024-isp-progressive",
+      "model_name": "AEMO 2024 ISP - Progressive Change",
+      "event": "started"
+    },
+    {
+      "date": "2024-09-02",
+      "model_id": "aemo-2024-isp-progressive",
+      "model_name": "AEMO 2024 ISP - Progressive Change",
+      "event": "completed"
+    },
+    {
+      "date": "2024-09-10",
+      "model_id": "sem-2024",
+      "model_name": "SEM 2024",
+      "event": "started"
+    },
+    {
+      "date": "2024-09-15",
+      "model_id": "caiso-irp-2023",
+      "model_name": "CAISO IRP 2023 Mid Baseline",
+      "event": "started"
+    },
+    {
+      "date": "2024-09-18",
+      "model_id": "marei-eu",
+      "model_name": "MAREI EU Reference Grid",
+      "event": "started"
+    },
+    {
+      "date": "2024-09-22",
+      "model_id": "plexos-message",
+      "model_name": "PLEXOS-MESSAGE",
+      "event": "started"
+    },
+    {
+      "date": "2024-09-28",
+      "model_id": "pypsa-eur",
+      "model_name": "PyPSA-Eur (reverse test)",
+      "event": "started"
+    },
+    {
+      "date": "2024-10-05",
+      "model_id": "pypsa-eur",
+      "model_name": "PyPSA-Eur (reverse test)",
+      "event": "completed"
+    }
+  ]
+}
