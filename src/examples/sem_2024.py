@@ -5,6 +5,7 @@ import pypsa
 from plexosdb import PlexosDB
 
 from src.network.core import setup_network
+from src.utils.model_paths import find_model_xml, get_model_directory
 
 
 def create_sem_model(use_data_driven: bool = False) -> tuple[pypsa.Network, dict]:
@@ -21,17 +22,32 @@ def create_sem_model(use_data_driven: bool = False) -> tuple[pypsa.Network, dict
     pypsa.Network
         Configured SEM PyPSA network
     """
-    # Define XML file path
-    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
-    file_xml = f"{path_root}/SEM/SEM 2024-2032/SEM PLEXOS Forecast Model 2024-2032( Public Version)/PUBLIC Validation 2024-2032 Model 2025-03-14.xml"
+    # Find model data in src/examples/data/
+    model_id = "sem-2024-2032"
+    file_xml = find_model_xml(model_id)
+    model_dir = get_model_directory(model_id)
 
-    # Legacy approach with hardcoded paths
+    if file_xml is None or model_dir is None:
+        msg = (
+            f"Model '{model_id}' not found in src/examples/data/. "
+            f"Please download and extract the SEM 2024-2032 model data to:\n"
+            f"  src/examples/data/sem-2024-2032/"
+        )
+        raise FileNotFoundError(msg)
+
+    # Convert to strings
+    file_xml = str(file_xml)
+    model_dir = str(model_dir)
+
+    # Set up paths
     file_timeslice = None
 
     # specify renewables profiles and demand paths
-    path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-    path_demand = f"{path_root}/SEM/SEM 2024-2032/demand"
-    path_hydro_inflows = f"{path_root}/SEM/SEM 2024-2032/hydro"
+    # Note: Uses AEMO VRE profiles - ensure AEMO model is also downloaded
+    aemo_dir = get_model_directory("aemo-2024-isp-progressive")
+    path_ren = str(aemo_dir) if aemo_dir else model_dir
+    path_demand = f"{model_dir}/demand"
+    path_hydro_inflows = f"{model_dir}/hydro"  # May not exist in actual data
 
     print("Creating SEM PyPSA Model using traditional approach...")
     print(f"XML file: {file_xml}")

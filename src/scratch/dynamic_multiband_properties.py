@@ -2,6 +2,8 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
+from src.utils.model_paths import find_model_xml
+
 
 def extract_properties(xml_file):
     tree = ET.parse(xml_file)
@@ -67,7 +69,17 @@ def extract_properties(xml_file):
 
 
 if __name__ == "__main__":
-    xml_file = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/AEMO/2024 ISP Model/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+    # Find model data in src/examples/data/
+    model_id = "aemo-2024-isp-progressive"
+    xml_path = find_model_xml(model_id)
+
+    if xml_path is None:
+        raise FileNotFoundError(
+            f"Model '{model_id}' not found in src/examples/data/. "
+            f"Please download and extract the AEMO 2024 ISP model data."
+        )
+
+    xml_file = str(xml_path)
     df = extract_properties(xml_file)
 
     print(df)

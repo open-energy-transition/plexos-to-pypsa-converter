@@ -3,10 +3,16 @@ from pathlib import Path
 from coad.COAD import COAD
 from coad.export_plexos_model import get_all_objects, write_object_report
 
-from src.db.models import INPUT_XMLS
+from src.db.models import get_model_xml_path
 
 sel_model = "plexos-world-spatial"
-file_xml = INPUT_XMLS[sel_model]
+file_xml = get_model_xml_path(sel_model)
+if file_xml is None:
+    raise FileNotFoundError(
+        f"Model '{sel_model}' not found in src/examples/data/. "
+        "Please download and extract the model data."
+    )
+file_xml = str(file_xml)
 save_folder = "src/data/models/coad/" + sel_model
 
 c = COAD(file_xml)

@@ -5,6 +5,7 @@ import pypsa
 from plexosdb import PlexosDB
 
 from src.network.core import setup_network
+from src.utils.model_paths import find_model_xml, get_model_directory
 
 
 def create_caiso_model(
@@ -23,16 +24,31 @@ def create_caiso_model(
     tuple[pypsa.Network, dict]
         Tuple containing configured CAISO PyPSA network and setup summary
     """
-    # Define XML file path
-    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
-    file_xml = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/CAISOIRP23Stochastic 20240517.xml"
+    # Find model data in src/examples/data/
+    model_id = "caiso-irp23"
+    file_xml = find_model_xml(model_id)
+    model_dir = get_model_directory(model_id)
 
-    # Legacy approach with hardcoded paths
+    if file_xml is None or model_dir is None:
+        msg = (
+            f"Model '{model_id}' not found in src/examples/data/. "
+            f"Please download and extract the CAISO IRP23 model data to:\n"
+            f"  src/examples/data/CAISO/IRP/..."
+        )
+        raise FileNotFoundError(msg)
+
+    # Convert to strings
+    file_xml = str(file_xml)
+    model_dir = str(model_dir)
+
+    # Set up paths
     file_timeslice = None
     # specify renewables profiles and demand paths
-    path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-    path_demand = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/LoadProfile"
-    path_hydro_inflows = f"{path_root}/CAISO/IRP/IRP23 - 25MMT Stochastic models with CEC 2023 IEPR Load Forecast/caiso-irp23-stochastic-2024-0517/hydro"
+    # Note: Uses AEMO VRE profiles - ensure AEMO model is also downloaded
+    aemo_dir = get_model_directory("aemo-2024-isp-progressive")
+    path_ren = str(aemo_dir) if aemo_dir else model_dir
+    path_demand = f"{model_dir}/LoadProfile"
+    path_hydro_inflows = f"{model_dir}/hydro"
 
     print("Creating CAISO PyPSA Model using traditional approach...")
     print(f"XML file: {file_xml}")

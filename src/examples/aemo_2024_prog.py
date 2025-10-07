@@ -3,10 +3,24 @@ from collections import defaultdict
 import pandas as pd
 
 from src.network.electricity_sector import create_model_from_xml
+from src.utils.model_paths import find_model_xml, get_model_directory
 
-path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models"
-main_dir = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-xml_file = f"{main_dir}/2024 ISP Progressive Change Model.xml"
+# Find model data in src/examples/data/
+model_id = "aemo-2024-isp-progressive"
+xml_file = find_model_xml(model_id)
+main_dir = get_model_directory(model_id)
+
+if xml_file is None or main_dir is None:
+    msg = (
+        f"Model '{model_id}' not found in src/examples/data/. "
+        f"Please download and extract the AEMO 2024 ISP model data to:\n"
+        f"  src/examples/data/AEMO/2024 ISP/2024 ISP Progressive Change/"
+    )
+    raise FileNotFoundError(msg)
+
+# Convert Path objects to strings for compatibility
+xml_file = str(xml_file)
+main_dir = str(main_dir)
 
 network = create_model_from_xml(
     xml_file_path=xml_file,

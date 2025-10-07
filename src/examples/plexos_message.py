@@ -1,14 +1,16 @@
 from collections import defaultdict
+from pathlib import Path
 
 import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from src.db.models import INPUT_XMLS
+from src.db.models import get_model_xml_path
 from src.network.multi_sector_db import (
     setup_enhanced_flow_network_with_csv,
     setup_flow_network_db,
 )
+from src.utils.model_paths import get_model_directory
 
 
 def create_plexos_message_model(
@@ -39,7 +41,17 @@ def create_plexos_message_model(
         Setup summary with model statistics
     """
     # Get XML file path from models registry
-    xml_file = INPUT_XMLS["plexos-message"]
+    xml_file = get_model_xml_path("plexos-message")
+
+    if xml_file is None:
+        msg = (
+            "Model 'plexos-message' not found in src/examples/data/. "
+            "Please download and extract the PLEXOS-MESSAGE model data to:\n"
+            "  src/examples/data/plexos-message/"
+        )
+        raise FileNotFoundError(msg)
+
+    xml_file = str(xml_file)
 
     print("Creating PLEXOS-MESSAGE Multi-Sector PyPSA Model...")
     print(f"XML file: {xml_file}")
@@ -63,8 +75,13 @@ def create_plexos_message_model(
             "   Creating sector coupling links (Electrolysis, H2Power, Haber-Bosch, Ammonia Cracking)"
         )
 
-        # Define inputs folder path
-        inputs_folder = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main/Inputs"
+        # Auto-determine inputs folder path
+        model_dir = get_model_directory("plexos-message")
+        if model_dir is None:
+            msg = "Could not determine model directory for plexos-message"
+            raise FileNotFoundError(msg)
+        # XML is in subdirectory, Inputs folder is relative to XML location
+        inputs_folder = str(Path(xml_file).parent / "Inputs")
 
         setup_summary = setup_enhanced_flow_network_with_csv(
             network=network,

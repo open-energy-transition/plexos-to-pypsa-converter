@@ -13,18 +13,19 @@ import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from src.db.models import INPUT_XMLS
+from src.db.models import get_model_xml_path
 from src.network.multi_sector_db import (
     setup_gas_electric_network_db,
     setup_marei_csv_network,
 )
+from src.utils.model_paths import get_model_directory
 
 
 def create_marei_eu_generators_as_links_model(
     generators_as_links: bool = True,
     testing_mode: bool = False,
     use_csv_integration: bool = False,
-    csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
+    csv_data_path: str | None = None,
     infrastructure_scenario: str = "PCI",
     pricing_scheme: str = "Production",
 ) -> tuple[pypsa.Network, dict[str, Any]]:
@@ -50,7 +51,8 @@ def create_marei_eu_generators_as_links_model(
         If True, integrates MaREI CSV data for detailed demand profiles and infrastructure.
         If False, uses PlexosDB-only approach (legacy behavior). Default False.
     csv_data_path : str, optional
-        Path to MaREI CSV Files directory containing demand, infrastructure, and pricing data
+        Path to MaREI CSV Files directory containing demand, infrastructure, and pricing data.
+        If None and use_csv_integration=True, automatically uses model_dir/CSV Files.
     infrastructure_scenario : str, optional
         Infrastructure scenario for gas network ('PCI', 'High', 'Low'). Default 'PCI'.
     pricing_scheme : str, optional
@@ -64,7 +66,26 @@ def create_marei_eu_generators_as_links_model(
         Setup summary with model statistics
     """
     # Get XML file path from models registry
-    xml_file = INPUT_XMLS["marei-eu"]
+    xml_file = get_model_xml_path("marei-eu")
+
+    if xml_file is None:
+        msg = (
+            "Model 'marei-eu' not found in src/examples/data/. "
+            "Please download and extract the MaREI EU model data to:\n"
+            "  src/examples/data/marei-eu/"
+        )
+        raise FileNotFoundError(msg)
+
+    xml_file = str(xml_file)
+
+    # Auto-determine csv_data_path if not provided
+    if csv_data_path is None and use_csv_integration:
+        model_dir = get_model_directory("marei-eu")
+        if model_dir:
+            csv_data_path = str(model_dir / "CSV Files")
+        else:
+            msg = "Could not locate MaREI model directory"
+            raise FileNotFoundError(msg)
 
     print("Creating MaREI-EU Multi-Sector PyPSA Model (Generators-as-Links Version)...")
     print(f"XML file: {xml_file}")
