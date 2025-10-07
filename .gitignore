@@ -183,3 +183,6 @@ src/data/
 
 # figures
 src/figures/
+
+# html versions of visualizations
+doc/visualization/html/

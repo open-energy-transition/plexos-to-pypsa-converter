@@ -2,6 +2,9 @@
 
 A Python tool for converting PLEXOS input XML files and their associated data to create equivalent PyPSA networks.
 
+![Milestones chart](doc/visualization/image/milestones.png)
+
+
 ## Installation
 
 ```bash
@@ -54,6 +57,35 @@ The converter ports the following PLEXOS components to PyPSA:
 - **Generation Constraints** - Unit commitment constraints
 - **Transmission Constraints** - Flow and capacity limits
 - **Policy Constraints** - Renewable targets, emissions limits
+
+## Supported PLEXOS Models
+
+The following table lists PLEXOS XML models that are being converted or will be converted to PyPSA networks:
+
+| Model Name | Source | Status | Download |
+|------------|--------|--------|----------|
+| AEMO 2024 ISP - Green Energy Exports | AEMO | 🔴 Not yet converted | [Download](https://aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip) |
+| AEMO 2024 ISP - Progressive Change | AEMO | 🟡 In-progress | [Download](https://aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip) |
+| AEMO 2024 ISP - Step Change | AEMO | 🔴 Not yet converted | [Download](https://aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip) |
+| CAISO IRP 2023 Stochastic (25 MMT) | CAISO | 🟡 In-progress | [Download](https://www.caiso.com/documents/caiso-irp23-stochastic-2024-0517.zip) |
+| CAISO 2025 Summer Assessment | CAISO | 🔴 Not yet converted | [Download](https://www.caiso.com/documents/2025-summer-loads-and-resources-assessment-public-stochastic-model.zip) |
+| NREL Extended IEEE 118-bus | NREL | 🔴 Not yet converted | [Download](https://db.bettergrids.org/bettergrids/handle/1001/120) |
+| SEM 2024-2032 Validation Model | SEM | 🟡 In-progress | [Download](https://www.semcommittee.com/publications/sem-25-010-sem-plexos-model-validation-2024-2032-and-backcast-report) |
+| European Power & Gas Model | UCC | 🟡 In-progress | [Download](https://www.dropbox.com/scl/fi/biv5n52x8s5pxeh06u2b1/EU-Power-Gas-Model.zip) |
+| PLEXOS-World 2015 Gold V1.1 | UCC | 🔴 Not yet converted | [Download](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/CBYXBY) |
+| PLEXOS-World Spatial Resolution | UCC | 🔴 Not yet converted | [Download](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/NY1QW0) |
+| MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link | UCC | 🟡 In-progress | [Download](https://github.com/DuncanDotPY/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link) |
+
+**Status Legend:**
+- 🟢 **Converted** - Model successfully converted to PyPSA network
+- 🟡 **In-progress** - Conversion currently underway
+- 🔴 **Not yet converted** - Planned for future conversion
+
+### Model × Feature Coverage Matrix
+
+![Model Coverage Heatmap](doc/visualization/image/coverage_heatmap.png)
+
+The heatmap above shows the conversion status of different features across all models. Each cell represents the implementation status for a specific model-feature combination.
 
 ## Input Files & Data Structure
 
