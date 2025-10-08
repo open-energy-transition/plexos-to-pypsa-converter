@@ -14,6 +14,26 @@ from pathlib import Path
 from src.db.models import MODEL_REGISTRY
 from src.utils.recipe_executor import RecipeExecutor
 
+# Model ID to directory mapping - centralized for easier maintenance
+MODEL_DIRECTORIES: dict[str, str] = {
+    "aemo-2024-green": "aemo-2024-green",
+    "aemo-2024-isp-progressive": "aemo-2024-isp-progressive",
+    "aemo-2024-isp-step": "aemo-2024-isp-step",
+    "caiso-irp23": "caiso-irp23",
+    "caiso-sa25": "caiso-sa25",
+    "nrel-118": "nrel-118",
+    "sem-2024-2032": "sem-2024-2032",
+    "marei-eu": "marei-eu",
+    "plexos-world-2015": "plexos-world-2015",
+    "plexos-world-spatial": "plexos-world-spatial",
+    "plexos-message": "plexos-message",
+}
+
+# Special subdirectories for certain models
+MODEL_SUBDIRECTORIES: dict[str, str] = {
+    "plexos-message": "MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main",
+}
+
 
 def get_data_root() -> Path:
     """Get the root directory for model data.
@@ -66,11 +86,12 @@ def find_model_xml(
     if xml_path is not None:
         return xml_path
 
-    # Model not found - check if auto-download is enabled
-    auto_download = auto_download and _auto_download_enabled()
+    # Model not found - check if auto-download should proceed
+    if not (auto_download and _auto_download_enabled() and _has_recipe(model_id)):
+        return None
 
-    if auto_download and _has_recipe(model_id) and _execute_recipe(model_id):
-        # Recipe succeeded - try to find model again
+    # Attempt to execute recipe and retry
+    if _execute_recipe(model_id):
         return _find_existing_model(model_id, xml_filename)
 
     return None
@@ -93,35 +114,18 @@ def _find_existing_model(model_id: str, xml_filename: str | None = None) -> Path
     Path or None
         Path to XML file if found, None otherwise
     """
-    data_root = get_data_root()
-
-    # Model ID to subdirectory mapping
-    # Note: The directory structure uses model IDs as top-level folder names
-    model_dirs = {
-        "aemo-2024-green": "aemo-2024-green",
-        "aemo-2024-isp-progressive": "aemo-2024-isp-progressive",
-        "aemo-2024-isp-step": "aemo-2024-isp-step",
-        "caiso-irp23": "caiso-irp23",
-        "caiso-sa25": "caiso-sa25",
-        "nrel-118": "nrel-118",
-        "sem-2024-2032": "sem-2024-2032",
-        "marei-eu": "marei-eu",
-        "plexos-world-2015": "plexos-world-2015",
-        "plexos-world-spatial": "plexos-world-spatial",
-        "plexos-message": "plexos-message",
-    }
-
-    if model_id not in model_dirs:
+    if model_id not in MODEL_DIRECTORIES:
         return None
 
-    model_dir = data_root / model_dirs[model_id]
+    data_root = get_data_root()
+    model_dir = data_root / MODEL_DIRECTORIES[model_id]
 
     if not model_dir.exists():
         return None
 
-    # Special case: plexos-message has XML in a subdirectory
-    if model_id == "plexos-message":
-        subdir = model_dir / "MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main"
+    # Handle special subdirectories
+    if model_id in MODEL_SUBDIRECTORIES:
+        subdir = model_dir / MODEL_SUBDIRECTORIES[model_id]
         if subdir.exists():
             model_dir = subdir
 
@@ -166,7 +170,11 @@ def _has_recipe(model_id: str) -> bool:
     bool
         True if model has a recipe, False otherwise
     """
-    return "recipe" in MODEL_REGISTRY.get(model_id, {})
+    model_config = MODEL_REGISTRY.get(model_id, {})
+    # Type check to ensure we have a dict-like object
+    if not isinstance(model_config, dict):
+        return False
+    return "recipe" in model_config
 
 
 def _execute_recipe(model_id: str) -> bool:
@@ -183,7 +191,10 @@ def _execute_recipe(model_id: str) -> bool:
         True if recipe executed successfully, False otherwise
     """
     model_config = MODEL_REGISTRY.get(model_id)
-    if not model_config or "recipe" not in model_config:
+    if not model_config or not isinstance(model_config, dict):
+        return False
+
+    if "recipe" not in model_config:
         return False
 
     recipe = model_config["recipe"]
@@ -221,3 +232,30 @@ def get_model_directory(model_id: str) -> Path | None:
     """
     xml_path = find_model_xml(model_id)
     return xml_path.parent if xml_path else None
+
+
+def is_model_available(model_id: str) -> bool:
+    """Check if a model is available (locally or via recipe).
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier
+
+    Returns
+    -------
+    bool
+        True if model is available, False otherwise
+    """
+    return model_id in MODEL_DIRECTORIES
+
+
+def list_available_models() -> list[str]:
+    """List all available model IDs.
+
+    Returns
+    -------
+    list[str]
+        List of available model identifiers
+    """
+    return list(MODEL_DIRECTORIES.keys())

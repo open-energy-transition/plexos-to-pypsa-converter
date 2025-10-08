@@ -42,6 +42,11 @@ from tqdm import tqdm
 
 from src.db.models import MODEL_REGISTRY
 
+# Constants
+SEPARATOR_LINE = "=" * 70
+DOWNLOAD_CHUNK_SIZE = 8192
+REQUEST_TIMEOUT = 30
+
 
 class RecipeExecutionError(Exception):
     """Raised when recipe execution fails."""
@@ -78,6 +83,20 @@ class RecipeExecutor:
         self.verbose = verbose
         self.steps_completed: list[int] = []
 
+        # Step handler mapping for better performance and clarity
+        self._step_handlers = {
+            "download": self._step_download,
+            "extract": self._step_extract,
+            "move": self._step_move,
+            "copy": self._step_copy,
+            "rename": self._step_rename,
+            "delete": self._step_delete,
+            "create_dir": self._step_create_dir,
+            "flatten": self._step_flatten,
+            "validate": self._step_validate,
+            "manual": self._step_manual,
+        }
+
     def execute_recipe(self, recipe: list[dict[str, Any]]) -> bool:
         """Execute all steps in recipe.
 
@@ -96,6 +115,12 @@ class RecipeExecutor:
         RecipeExecutionError
             If a step fails during execution
         """
+        if not recipe:
+            if self.verbose:
+                print("⚠ Empty recipe provided - nothing to execute")
+            return True
+
+        i = 0  # Initialize for exception handling
         try:
             # Ensure directories exist
             self.model_dir.mkdir(parents=True, exist_ok=True)
@@ -103,10 +128,7 @@ class RecipeExecutor:
 
             total_steps = len(recipe)
             if self.verbose:
-                print(f"\n{'=' * 70}")
-                print(f"Executing recipe for model: {self.model_id}")
-                print(f"Total steps: {total_steps}")
-                print(f"{'=' * 70}\n")
+                self._print_header(total_steps)
 
             # Execute each step
             for i, instruction in enumerate(recipe, 1):
@@ -121,22 +143,16 @@ class RecipeExecutor:
                 self.steps_completed.append(i)
 
             if self.verbose:
-                print(f"\n{'=' * 70}")
-                print("✓ Recipe completed successfully!")
-                print(f"Model installed to: {self.model_dir}")
-                print(f"{'=' * 70}\n")
+                self._print_success()
 
         except Exception as e:
             if self.verbose:
-                print(f"\n{'=' * 70}")
-                print(f"❌ Recipe failed at step {i}/{total_steps}")
-                print(f"Error: {e}")
-                print(f"{'=' * 70}\n")
+                self._print_error(i, len(recipe), e)
 
             # Note: We don't rollback to allow inspection of partial state
             # User can delete the model directory and try again
 
-            msg = f"Recipe execution failed at step {i}/{total_steps}: {e}"
+            msg = f"Recipe execution failed at step {i}/{len(recipe)}: {e}"
             raise RecipeExecutionError(msg) from e
 
         else:
@@ -145,6 +161,27 @@ class RecipeExecutor:
         finally:
             # Always clean up temp directory
             self._cleanup_temp()
+
+    def _print_header(self, total_steps: int) -> None:
+        """Print recipe execution header."""
+        print(f"\n{SEPARATOR_LINE}")
+        print(f"Executing recipe for model: {self.model_id}")
+        print(f"Total steps: {total_steps}")
+        print(f"{SEPARATOR_LINE}\n")
+
+    def _print_success(self) -> None:
+        """Print success message."""
+        print(f"\n{SEPARATOR_LINE}")
+        print("✓ Recipe completed successfully!")
+        print(f"Model installed to: {self.model_dir}")
+        print(f"{SEPARATOR_LINE}\n")
+
+    def _print_error(self, step: int, total_steps: int, error: Exception) -> None:
+        """Print error message."""
+        print(f"\n{SEPARATOR_LINE}")
+        print(f"❌ Recipe failed at step {step}/{total_steps}")
+        print(f"Error: {error}")
+        print(f"{SEPARATOR_LINE}\n")
 
     def _execute_step(self, instruction: dict[str, Any]) -> None:
         """Execute a single instruction.
@@ -161,16 +198,12 @@ class RecipeExecutor:
         """
         step_type = instruction["step"]
 
-        # Dispatch to appropriate handler
-        handler_name = f"_step_{step_type}"
-        handler = getattr(self, handler_name, None)
+        # Use mapping for better performance
+        handler = self._step_handlers.get(step_type)
 
         if handler is None:
-            msg = (
-                f"Unknown step type: {step_type}. "
-                f"Available types: download, extract, move, copy, rename, delete, "
-                f"create_dir, flatten, validate, manual"
-            )
+            available_types = ", ".join(self._step_handlers.keys())
+            msg = f"Unknown step type: {step_type}. Available types: {available_types}"
             raise ValueError(msg)
 
         handler(instruction)
@@ -469,7 +502,7 @@ class RecipeExecutor:
             If download fails
         """
         try:
-            response = requests.get(url, stream=True, timeout=30)
+            response = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
             total_size = int(response.headers.get("content-length", 0))
@@ -483,12 +516,14 @@ class RecipeExecutor:
                         unit_scale=True,
                         desc=f"  Downloading {target.name}",
                     ) as pbar:
-                        for chunk in response.iter_content(chunk_size=8192):
+                        for chunk in response.iter_content(
+                            chunk_size=DOWNLOAD_CHUNK_SIZE
+                        ):
                             f.write(chunk)
                             pbar.update(len(chunk))
                 else:
                     # No content-length header
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
                         f.write(chunk)
 
         except requests.RequestException as e:
@@ -519,31 +554,13 @@ class RecipeExecutor:
 
         # Auto-detect format from filename
         if format is None:
-            if archive_path.suffix == ".zip":
-                format = "zip"
-            elif archive_path.name.endswith(".tar.gz") or archive_path.suffix == ".tgz":
-                format = "tar.gz"
-            elif archive_path.name.endswith(".tar.bz2"):
-                format = "tar.bz2"
-            elif archive_path.suffix == ".tar":
-                format = "tar"
-            else:
-                msg = f"Cannot auto-detect archive format for: {archive_path}"
-                raise RecipeExecutionError(msg)
+            format = self._detect_archive_format(archive_path)
 
         try:
             if format == "zip":
-                with zipfile.ZipFile(archive_path, "r") as zip_ref:
-                    zip_ref.extractall(target_dir)  # noqa: S202
+                self._extract_zip(archive_path, target_dir)
             elif format in ("tar", "tar.gz", "tar.bz2"):
-                mode = "r"
-                if format == "tar.gz":
-                    mode = "r:gz"
-                elif format == "tar.bz2":
-                    mode = "r:bz2"
-
-                with tarfile.open(str(archive_path), mode) as tar_ref:  # type: ignore[arg-type]
-                    tar_ref.extractall(target_dir)  # noqa: S202
+                self._extract_tar(archive_path, target_dir, format)
             else:
                 msg = f"Unsupported archive format: {format}"
                 raise RecipeExecutionError(msg)
@@ -551,6 +568,37 @@ class RecipeExecutor:
         except (zipfile.BadZipFile, tarfile.TarError) as e:
             msg = f"Failed to extract archive {archive_path}: {e}"
             raise RecipeExecutionError(msg) from e
+
+    def _detect_archive_format(self, archive_path: Path) -> str:
+        """Detect archive format from file extension."""
+        if archive_path.suffix == ".zip":
+            return "zip"
+        elif archive_path.name.endswith(".tar.gz") or archive_path.suffix == ".tgz":
+            return "tar.gz"
+        elif archive_path.name.endswith(".tar.bz2"):
+            return "tar.bz2"
+        elif archive_path.suffix == ".tar":
+            return "tar"
+        else:
+            msg = f"Cannot auto-detect archive format for: {archive_path}"
+            raise RecipeExecutionError(msg)
+
+    def _extract_zip(self, archive_path: Path, target_dir: Path) -> None:
+        """Extract ZIP archive."""
+        with zipfile.ZipFile(archive_path, "r") as zip_ref:
+            zip_ref.extractall(target_dir)  # noqa: S202
+
+    def _extract_tar(self, archive_path: Path, target_dir: Path, format: str) -> None:
+        """Extract TAR archive."""
+        mode_map = {
+            "tar": "r",
+            "tar.gz": "r:gz",
+            "tar.bz2": "r:bz2",
+        }
+        mode = mode_map[format]
+
+        with tarfile.open(str(archive_path), mode) as tar_ref:  # type: ignore[call-overload]
+            tar_ref.extractall(target_dir)  # noqa: S202
 
     def _cleanup_temp(self) -> None:
         """Clean up temporary directory."""
