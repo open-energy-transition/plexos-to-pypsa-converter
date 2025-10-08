@@ -2,9 +2,17 @@
 
 This module handles finding model data in src/examples/data/ and provides
 a consistent interface for model path lookup.
+
+If a model is not found locally and auto-download is enabled (default),
+the system will attempt to download and install the model using its recipe
+definition from MODEL_REGISTRY.
 """
 
+import os
 from pathlib import Path
+
+from src.db.models import MODEL_REGISTRY
+from src.utils.recipe_executor import RecipeExecutor
 
 
 def get_data_root() -> Path:
@@ -19,8 +27,13 @@ def get_data_root() -> Path:
     return Path(__file__).parent.parent / "examples" / "data"
 
 
-def find_model_xml(model_id: str, xml_filename: str | None = None) -> Path | None:
+def find_model_xml(
+    model_id: str, xml_filename: str | None = None, auto_download: bool = True
+) -> Path | None:
     """Find XML file for a given model in src/examples/data/.
+
+    If the model is not found locally and auto_download is enabled, this function
+    will attempt to download and install the model using its recipe definition.
 
     Parameters
     ----------
@@ -28,6 +41,9 @@ def find_model_xml(model_id: str, xml_filename: str | None = None) -> Path | Non
         Model identifier (e.g., 'aemo-2024-isp-progressive')
     xml_filename : str, optional
         Specific XML filename to look for. If None, searches for any .xml file.
+    auto_download : bool, default True
+        If True, automatically download missing models using their recipe.
+        Can be disabled globally with environment variable: PLEXOS_AUTO_DOWNLOAD=0
 
     Returns
     -------
@@ -40,7 +56,42 @@ def find_model_xml(model_id: str, xml_filename: str | None = None) -> Path | Non
     >>> if xml_path:
     ...     print(f"Found at: {xml_path}")
     ... else:
-    ...     print("Model not downloaded yet")
+    ...     print("Model not available")
+
+    >>> # Disable auto-download for this call
+    >>> xml_path = find_model_xml("model-id", auto_download=False)
+    """
+    # First try to find existing model
+    xml_path = _find_existing_model(model_id, xml_filename)
+    if xml_path is not None:
+        return xml_path
+
+    # Model not found - check if auto-download is enabled
+    auto_download = auto_download and _auto_download_enabled()
+
+    if auto_download and _has_recipe(model_id) and _execute_recipe(model_id):
+        # Recipe succeeded - try to find model again
+        return _find_existing_model(model_id, xml_filename)
+
+    return None
+
+
+def _find_existing_model(model_id: str, xml_filename: str | None = None) -> Path | None:
+    """Find existing model in src/examples/data/.
+
+    This is a helper function that looks for models without triggering downloads.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier
+    xml_filename : str, optional
+        Specific XML filename to look for
+
+    Returns
+    -------
+    Path or None
+        Path to XML file if found, None otherwise
     """
     data_root = get_data_root()
 
@@ -84,6 +135,69 @@ def find_model_xml(model_id: str, xml_filename: str | None = None) -> Path | Non
         f for f in model_dir.rglob("*.xml") if not f.name.startswith("PLEXOS_")
     ]
     return xml_files[0] if xml_files else None
+
+
+def _auto_download_enabled() -> bool:
+    """Check if auto-download is enabled via environment variable.
+
+    Returns
+    -------
+    bool
+        True if auto-download is enabled, False otherwise
+
+    Notes
+    -----
+    Auto-download can be disabled by setting environment variable:
+    PLEXOS_AUTO_DOWNLOAD=0
+    """
+    return os.getenv("PLEXOS_AUTO_DOWNLOAD", "1") != "0"
+
+
+def _has_recipe(model_id: str) -> bool:
+    """Check if model has a recipe defined in MODEL_REGISTRY.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier
+
+    Returns
+    -------
+    bool
+        True if model has a recipe, False otherwise
+    """
+    return "recipe" in MODEL_REGISTRY.get(model_id, {})
+
+
+def _execute_recipe(model_id: str) -> bool:
+    """Execute recipe for a model.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier
+
+    Returns
+    -------
+    bool
+        True if recipe executed successfully, False otherwise
+    """
+    model_config = MODEL_REGISTRY.get(model_id)
+    if not model_config or "recipe" not in model_config:
+        return False
+
+    recipe = model_config["recipe"]
+    model_dir = get_data_root() / model_id
+
+    executor = RecipeExecutor(model_id, model_dir, verbose=True)
+
+    try:
+        return executor.execute_recipe(recipe)
+    except Exception as e:
+        print(f"\n❌ Failed to download model '{model_id}': {e}")
+        print("You may need to download this model manually.")
+        print(f"Place model files in: {model_dir}\n")
+        return False
 
 
 def get_model_directory(model_id: str) -> Path | None:
