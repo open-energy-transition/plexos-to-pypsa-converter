@@ -40,7 +40,7 @@ from typing import Any
 import requests
 from tqdm import tqdm
 
-from src.db.models import MODEL_REGISTRY
+from src.db.registry import MODEL_REGISTRY
 
 # Constants
 SEPARATOR_LINE = "=" * 70
