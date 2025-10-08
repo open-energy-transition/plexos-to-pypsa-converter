@@ -1,91 +1,22 @@
 from collections import defaultdict
 
 import pandas as pd
-import pypsa
-from plexosdb import PlexosDB
 
-from src.db.models import get_model_xml_path
-from src.network.multi_sector_db import (
-    setup_gas_electric_network_db,
-    setup_marei_csv_network,
-)
-from src.utils.model_paths import get_model_directory
+from network.conversion import create_model
 
 # Constants
 MODEL_ID = "marei-eu"
 SNAPSHOTS_PER_YEAR = 100
 
-
-def create_marei_eu_model(
-    use_csv_integration: bool = False,
-    csv_data_path: str | None = None,
-    infrastructure_scenario: str = "PCI",
-    pricing_scheme: str = "Production",
-) -> tuple[pypsa.Network, dict]:
-    """Create MaREI-EU PyPSA model with gas and electricity sectors.
-
-    Parameters
-    ----------
-    use_csv_integration : bool, default False
-        If True, integrates MaREI CSV data for enhanced model.
-    csv_data_path : str, optional
-        Path to MaREI CSV Files directory. Auto-determined if None.
-    infrastructure_scenario : str, default "PCI"
-        Infrastructure scenario ('PCI', 'High', 'Low')
-    pricing_scheme : str, default "Production"
-        Gas pricing mechanism ('Production', 'Postage', 'Trickle', 'Uniform')
-
-    Returns
-    -------
-    tuple[pypsa.Network, dict]
-        Multi-sector PyPSA network and setup summary
-    """
-    # Find and validate model data
-    xml_file = get_model_xml_path(MODEL_ID)
-    if xml_file is None:
-        msg = f"Model '{MODEL_ID}' not found. Please download and extract the MaREI EU model data."
-        raise FileNotFoundError(msg)
-
-    # Auto-determine CSV path if needed
-    if csv_data_path is None and use_csv_integration:
-        model_dir = get_model_directory(MODEL_ID)
-        if model_dir:
-            csv_data_path = str(model_dir / "CSV Files")
-        else:
-            msg = "Could not locate MaREI model directory"
-            raise FileNotFoundError(msg)
-
-    print("Creating MaREI-EU Multi-Sector PyPSA Model...")
-    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
-
-    # Load database and initialize network
-    plexos_db = PlexosDB.from_xml(str(xml_file))
-    network = pypsa.Network()
-
-    # Set up network based on integration type
-    if use_csv_integration:
-        setup_summary = setup_marei_csv_network(
-            network=network,
-            db=plexos_db,
-            csv_data_path=csv_data_path,
-            infrastructure_scenario=infrastructure_scenario,
-            pricing_scheme=pricing_scheme,
-            generators_as_links=False,
-        )
-    else:
-        setup_summary = setup_gas_electric_network_db(network=network, db=plexos_db)
-
-    return network, setup_summary
-
-
 if __name__ == "__main__":
-    # Configuration
+    # Configuration - can override defaults from MODEL_REGISTRY
     use_csv_integration = True
     infrastructure_scenario = "PCI"
     pricing_scheme = "Production"
 
-    # Create model
-    network, setup_summary = create_marei_eu_model(
+    # Create model using unified factory
+    network, setup_summary = create_model(
+        MODEL_ID,
         use_csv_integration=use_csv_integration,
         infrastructure_scenario=infrastructure_scenario,
         pricing_scheme=pricing_scheme,
