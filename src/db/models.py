@@ -2,6 +2,24 @@
 
 This module provides model metadata and path resolution for supported PLEXOS models.
 Model data should be placed in src/examples/data/.
+
+Each model can optionally include a "recipe" - a list of instructions for automatically
+downloading, extracting, and organizing model files. Recipes are executed when a model
+is requested but not found locally (if auto_download is enabled).
+
+Recipe Instruction Types:
+- download: Download file from URL
+- extract: Extract archive to target directory
+- move: Move files/directories (supports glob patterns)
+- copy: Copy files/directories
+- rename: Rename file/directory
+- delete: Delete files/directories
+- create_dir: Create directory
+- flatten: Flatten nested directory structure
+- validate: Validate model installation
+- manual: Display manual download instructions
+
+See recipe_executor.py for detailed instruction schema and examples.
 """
 
 import warnings
@@ -30,6 +48,30 @@ MODEL_REGISTRY = {
         "name": "CAISO IRP 2023 Stochastic",
         "source": "CAISO",
         "xml_filename": "CAISOIRP23Stochastic 20240517.xml",
+        "recipe": [
+            {
+                "step": "download",
+                "url": "https://www.caiso.com/documents/caiso-irp23-stochastic-2024-0517.zip",
+                "target": "caiso-irp23.zip",
+                "description": "Downloading CAISO IRP23 Stochastic model",
+            },
+            {
+                "step": "extract",
+                "source": "caiso-irp23.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "delete",
+                "pattern": "caiso-irp23.zip",
+                "description": "Removing archive",
+            },
+            {
+                "step": "validate",
+                "checks": ["xml_exists", "required_dir:LoadProfile"],
+                "description": "Validating installation",
+            },
+        ],
     },
     "caiso-sa25": {
         "name": "CAISO 2025 Summer Assessment",
@@ -40,6 +82,7 @@ MODEL_REGISTRY = {
         "name": "NREL Extended IEEE 118-bus",
         "source": "NREL",
         "xml_filename": "mti-118-mt-da-rt-reserves-all-generators.xml",
+        # TODO: Add recipe when download URL is available
     },
     "sem-2024-2032": {
         "name": "SEM 2024-2032 Validation Model",
