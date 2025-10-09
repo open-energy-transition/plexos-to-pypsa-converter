@@ -767,7 +767,7 @@ def setup_gas_electric_network_db(
         print("  TESTING MODE: Processing limited subsets for faster development")
     if generators_as_links:
         print(
-            "🔗 GENERATORS-AS-LINKS: Converting conventional generators to fuel→electric Links"
+            "GENERATORS-AS-LINKS: Converting conventional generators to fuel->electric Links"
         )
 
     # Initialize tracking

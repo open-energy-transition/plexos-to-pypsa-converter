@@ -857,9 +857,9 @@ def port_gas_components(
         f"Gas sector porting complete! Added {summary['buses']} buses, {summary['fields']} fields, {summary['pipelines']} pipelines, {summary['storage']} storage, {summary['plants']} plants, {summary['demand']} loads."
     )
     print(
-        f"  → Total Store components: {total_stores} (following PyPSA multi-sector patterns)"
+        f"  -> Total Store components: {total_stores} (following PyPSA multi-sector patterns)"
     )
     print(
-        f"  → Total Link components: {summary['pipelines'] + summary['plants']} (transport + conversion)"
+        f"  -> Total Link components: {summary['pipelines'] + summary['plants']} (transport + conversion)"
     )
     return summary

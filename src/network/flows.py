@@ -697,7 +697,7 @@ def add_flow_paths(
                                             f"     Added {link_type.lower()} link: {link_name}"
                                         )
                                         print(
-                                            f"      {bus0} ({bus0_carrier}) → {bus1} ({bus1_carrier})"
+                                            f"      {bus0} ({bus0_carrier}) -> {bus1} ({bus1_carrier})"
                                         )
                                         print(
                                             f"      Efficiency: {efficiency:.1%}, Capacity: {p_nom}"
@@ -1078,7 +1078,7 @@ def add_facilities(
                                 if facility_stats["conversion_links"] <= 5:
                                     print(f"     Added conversion link: {link_name}")
                                     print(
-                                        f"      {bus0} → {bus1} (efficiency: {process_info['efficiency']:.1%})"
+                                        f"      {bus0} -> {bus1} (efficiency: {process_info['efficiency']:.1%})"
                                     )
                         else:
                             facility_stats["skipped"] += 1
