@@ -3,7 +3,7 @@ from pathlib import Path
 from coad.COAD import COAD
 from coad.export_plexos_model import get_all_objects, write_object_report
 
-from src.db.models import get_model_xml_path
+from src.utils.model_paths import get_model_xml_path
 
 sel_model = "plexos-world-spatial"
 file_xml = get_model_xml_path(sel_model)

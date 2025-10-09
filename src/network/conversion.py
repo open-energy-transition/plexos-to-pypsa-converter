@@ -12,7 +12,6 @@ import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from src.db.models import get_model_xml_path
 from src.db.registry import MODEL_REGISTRY
 from src.network.core import setup_network
 from src.network.multi_sector_db import (
@@ -21,7 +20,7 @@ from src.network.multi_sector_db import (
     setup_gas_electric_network_db,
     setup_marei_csv_network,
 )
-from src.utils.model_paths import get_model_directory
+from src.utils.model_paths import get_model_directory, get_model_xml_path
 
 
 def _merge_configs(default_config: dict, overrides: dict) -> dict:
