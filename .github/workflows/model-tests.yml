@@ -1,0 +1,180 @@
+name: Model Conversion Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel outdated runs on same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Set to 'true' to enable consistency checks (disabled during development)
+  RUN_CONSISTENCY_CHECKS: 'false'
+  # Specify which models to test (user will configure these)
+  MODEL_1: 'sem-2024-2032'
+  MODEL_2: 'marei-eu'
+
+jobs:
+  model-conversion:
+    name: Test Model Conversion
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[development,solvers]"
+
+    - name: Cache PLEXOS models
+      id: cache-models
+      uses: actions/cache@v4
+      with:
+        path: src/examples/data/
+          # Cache key includes registry hash (detects recipe changes) and model IDs
+        key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}
+        restore-keys: |
+          models-${{ hashFiles('src/db/registry.py') }}-
+          models-
+
+    - name: Display cache status
+      run: |
+        if [ "${{ steps.cache-models.outputs.cache-hit }}" == "true" ]; then
+          echo "✅ Cache hit! Using cached models from previous run."
+          echo "Cache key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}"
+        else
+          echo "⬇️ Cache miss. Models will be downloaded."
+          echo "This is expected on first run or after registry changes."
+        fi
+
+        echo ""
+        echo "### Cache Information" >> $GITHUB_STEP_SUMMARY
+        echo "- Cache hit: ${{ steps.cache-models.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Cache key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}" >> $GITHUB_STEP_SUMMARY
+
+    - name: Test Model 1 Conversion
+      id: test-model-1
+      run: |
+        echo "Testing conversion of model: ${{ env.MODEL_1 }}"
+        python -c "
+        from src.network.conversion import create_model
+        import sys
+
+        model_id = '${{ env.MODEL_1 }}'
+
+        try:
+            # Create the model (will auto-download if not cached)
+            network, setup_summary = create_model(model_id)
+
+            # Print summary
+            print(f'\n✅ Model {model_id} converted successfully!')
+            print(f'   Buses: {len(network.buses)}')
+            print(f'   Generators: {len(network.generators)}')
+            print(f'   Storage units: {len(network.storage_units)}')
+            print(f'   Snapshots: {len(network.snapshots)}')
+
+            # Optional: Run consistency check if enabled
+            if '${{ env.RUN_CONSISTENCY_CHECKS }}' == 'true':
+                print('\nRunning consistency check...')
+                network.consistency_check()
+                print('✅ Consistency check passed!')
+            else:
+                print('\n⚠️  Consistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
+
+            # Save stats for summary
+            with open('model1_stats.txt', 'w') as f:
+                f.write(f'buses={len(network.buses)}\n')
+                f.write(f'generators={len(network.generators)}\n')
+                f.write(f'storage={len(network.storage_units)}\n')
+                f.write(f'snapshots={len(network.snapshots)}\n')
+
+        except Exception as e:
+            print(f'\n❌ Model {model_id} conversion failed: {e}')
+            sys.exit(1)
+        "
+
+    - name: Test Model 2 Conversion
+      id: test-model-2
+      run: |
+        echo "Testing conversion of model: ${{ env.MODEL_2 }}"
+        python -c "
+        from src.network.conversion import create_model
+        import sys
+
+        model_id = '${{ env.MODEL_2 }}'
+
+        try:
+            # Create the model (will auto-download if not cached)
+            network, setup_summary = create_model(model_id)
+
+            # Print summary
+            print(f'\n✅ Model {model_id} converted successfully!')
+            print(f'   Buses: {len(network.buses)}')
+            print(f'   Generators: {len(network.generators)}')
+            print(f'   Storage units: {len(network.storage_units)}')
+            print(f'   Snapshots: {len(network.snapshots)}')
+
+            # Optional: Run consistency check if enabled
+            if '${{ env.RUN_CONSISTENCY_CHECKS }}' == 'true':
+                print('\nRunning consistency check...')
+                network.consistency_check()
+                print('✅ Consistency check passed!')
+            else:
+                print('\n⚠️  Consistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
+
+            # Save stats for summary
+            with open('model2_stats.txt', 'w') as f:
+                f.write(f'buses={len(network.buses)}\n')
+                f.write(f'generators={len(network.generators)}\n')
+                f.write(f'storage={len(network.storage_units)}\n')
+                f.write(f'snapshots={len(network.snapshots)}\n')
+
+        except Exception as e:
+            print(f'\n❌ Model {model_id} conversion failed: {e}')
+            sys.exit(1)
+        "
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        echo "### Model Conversion Test Results :electric_plug:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Model 1 summary
+        if [ -f model1_stats.txt ]; then
+          echo "**Model 1: ${{ env.MODEL_1 }}** ✅" >> $GITHUB_STEP_SUMMARY
+          while IFS='=' read -r key value; do
+            echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
+          done < model1_stats.txt
+        else
+          echo "**Model 1: ${{ env.MODEL_1 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        # Model 2 summary
+        if [ -f model2_stats.txt ]; then
+          echo "**Model 2: ${{ env.MODEL_2 }}** ✅" >> $GITHUB_STEP_SUMMARY
+          while IFS='=' read -r key value; do
+            echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
+          done < model2_stats.txt
+        else
+          echo "**Model 2: ${{ env.MODEL_2 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
+        fi
+
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}" >> $GITHUB_STEP_SUMMARY
