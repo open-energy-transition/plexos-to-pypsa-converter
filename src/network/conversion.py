@@ -116,6 +116,16 @@ def _create_electricity_model(
         "transmission_as_lines": config.get("transmission_as_lines", False),
     }
 
+    # Check for explicit demand file configuration (takes precedence over auto-detection)
+    if config.get("demand_file") and setup_args["snapshots_source"] is None:
+        demand_file_path = model_dir / config["demand_file"]
+        if demand_file_path.exists():
+            setup_args["snapshots_source"] = str(demand_file_path)
+            setup_args["demand_source"] = str(demand_file_path)
+        else:
+            msg = f"Configured demand_file not found: {demand_file_path}"
+            raise FileNotFoundError(msg)
+
     # Auto-determine paths if not explicitly provided
     if setup_args["snapshots_source"] is None:
         # Check for common snapshot directories (including nested paths for AEMO)
