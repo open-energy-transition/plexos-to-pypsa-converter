@@ -64,7 +64,7 @@ jobs:
         import os
 
         cache_hit = '${{ steps.cache-models.outputs.cache-hit }}' == 'true'
-        cache_key = 'models-${{ runner.os }}-${{ hashFiles(\"src/db/registry.py\") }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}'
+        cache_key = 'models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}'
 
         # Print to console
         if cache_hit:
