@@ -21,7 +21,8 @@ requires-python = ">=3.10"
 dependencies = [
     "pypsa>=0.34",
     "pandas>=2.2",
-    "numpy>=2.2",
+    "numpy>=2.2; python_version>='3.11'",
+    "numpy>=1.22,<2; python_version<'3.11'",
     "scipy>=1.15",
     "xarray>=2025.1",
     "netcdf4>=1.7",
@@ -33,6 +34,7 @@ dependencies = [
     "openpyxl>=3.1",
     "deprecation",
     "validators",
+    "plexosdb",
 ]
 
 [project.urls]
