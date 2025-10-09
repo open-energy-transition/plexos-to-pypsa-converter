@@ -14,6 +14,10 @@ concurrency:
 env:
   # Set to 'true' to enable consistency checks (disabled during development)
   RUN_CONSISTENCY_CHECKS: 'false'
+  # Set to 'true' to enable solve tests (disabled during development)
+  RUN_SOLVE_TESTS: 'false'
+  # Number of snapshots to use for solve tests
+  SOLVE_SNAPSHOT_LIMIT: '50'
   # Specify which models to test (user will configure these)
   MODEL_1: 'sem-2024-2032'
   MODEL_2: 'marei-eu'
@@ -147,6 +151,90 @@ jobs:
             sys.exit(1)
         "
 
+    - name: Solve Model 1 (Optional)
+      if: env.RUN_SOLVE_TESTS == 'true'
+      run: |
+        echo "Solving model: ${{ env.MODEL_1 }}"
+        python -c "
+        from src.network.conversion import create_model
+        import sys
+
+        model_id = '${{ env.MODEL_1 }}'
+        snapshot_limit = int('${{ env.SOLVE_SNAPSHOT_LIMIT }}')
+
+        try:
+            network, _ = create_model(model_id)
+
+            # Take subset of snapshots
+            snapshots_subset = network.snapshots[:snapshot_limit]
+
+            print(f'\nSolving {model_id} with {len(snapshots_subset)} snapshots using HiGHS solver...')
+
+            # Solve with HiGHS (PyPSA default, cross-platform)
+            network.optimize(
+                solver_name='highs',
+                snapshots=snapshots_subset
+            )
+
+            print(f'✅ Model {model_id} solved successfully!')
+            print(f'   Objective value: {network.objective:.2f}')
+            print(f'   Status: {network.status}')
+
+            # Save solve stats
+            with open('model1_solve.txt', 'w') as f:
+                f.write(f'objective={network.objective:.2f}\n')
+                f.write(f'status={network.status}\n')
+                f.write(f'snapshots_solved={len(snapshots_subset)}\n')
+
+        except Exception as e:
+            print(f'\n❌ Solve failed for {model_id}: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        "
+
+    - name: Solve Model 2 (Optional)
+      if: env.RUN_SOLVE_TESTS == 'true'
+      run: |
+        echo "Solving model: ${{ env.MODEL_2 }}"
+        python -c "
+        from src.network.conversion import create_model
+        import sys
+
+        model_id = '${{ env.MODEL_2 }}'
+        snapshot_limit = int('${{ env.SOLVE_SNAPSHOT_LIMIT }}')
+
+        try:
+            network, _ = create_model(model_id)
+
+            # Take subset of snapshots
+            snapshots_subset = network.snapshots[:snapshot_limit]
+
+            print(f'\nSolving {model_id} with {len(snapshots_subset)} snapshots using HiGHS solver...')
+
+            # Solve with HiGHS (PyPSA default, cross-platform)
+            network.optimize(
+                solver_name='highs',
+                snapshots=snapshots_subset
+            )
+
+            print(f'✅ Model {model_id} solved successfully!')
+            print(f'   Objective value: {network.objective:.2f}')
+            print(f'   Status: {network.status}')
+
+            # Save solve stats
+            with open('model2_solve.txt', 'w') as f:
+                f.write(f'objective={network.objective:.2f}\n')
+                f.write(f'status={network.status}\n')
+                f.write(f'snapshots_solved={len(snapshots_subset)}\n')
+
+        except Exception as e:
+            print(f'\n❌ Solve failed for {model_id}: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        "
+
     - name: Generate test summary
       if: always()
       run: |
@@ -159,6 +247,15 @@ jobs:
           while IFS='=' read -r key value; do
             echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
           done < model1_stats.txt
+
+          # Add solve results if available
+          if [ -f model1_solve.txt ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "  **Solve Results:**" >> $GITHUB_STEP_SUMMARY
+            while IFS='=' read -r key value; do
+              echo "  - ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
+            done < model1_solve.txt
+          fi
         else
           echo "**Model 1: ${{ env.MODEL_1 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
         fi
@@ -171,6 +268,15 @@ jobs:
           while IFS='=' read -r key value; do
             echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
           done < model2_stats.txt
+
+          # Add solve results if available
+          if [ -f model2_solve.txt ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "  **Solve Results:**" >> $GITHUB_STEP_SUMMARY
+            while IFS='=' read -r key value; do
+              echo "  - ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
+            done < model2_solve.txt
+          fi
         else
           echo "**Model 2: ${{ env.MODEL_2 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
         fi
@@ -178,3 +284,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
         echo "Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}" >> $GITHUB_STEP_SUMMARY
+        echo "Solve tests: ${{ env.RUN_SOLVE_TESTS }}" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ env.RUN_SOLVE_TESTS }}" == "true" ]; then
+          echo "Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}" >> $GITHUB_STEP_SUMMARY
+        fi
