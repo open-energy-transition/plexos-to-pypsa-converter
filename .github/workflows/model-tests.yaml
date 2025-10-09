@@ -68,10 +68,10 @@ jobs:
 
         # Print to console
         if cache_hit:
-            print('✅ Cache hit! Using cached models from previous run.')
+            print('Cache hit! Using cached models from previous run.')
             print(f'Cache key: {cache_key}')
         else:
-            print('⬇️ Cache miss. Models will be downloaded.')
+            print('Cache miss. Models will be downloaded.')
             print('This is expected on first run or after registry changes.')
 
         # Write to GitHub Step Summary
@@ -99,7 +99,7 @@ jobs:
             network, setup_summary = create_model(model_id)
 
             # Print summary
-            print(f'\n✅ Model {model_id} converted successfully!')
+            print(f'\nModel {model_id} converted successfully!')
             print(f'   Buses: {len(network.buses)}')
             print(f'   Generators: {len(network.generators)}')
             print(f'   Storage units: {len(network.storage_units)}')
@@ -109,9 +109,9 @@ jobs:
             if '${{ env.RUN_CONSISTENCY_CHECKS }}' == 'true':
                 print('\nRunning consistency check...')
                 network.consistency_check()
-                print('✅ Consistency check passed!')
+                print('Consistency check passed!')
             else:
-                print('\n⚠️  Consistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
+                print('\nConsistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
 
             # Save stats for summary
             with open('model1_stats.txt', 'w') as f:
@@ -121,7 +121,7 @@ jobs:
                 f.write(f'snapshots={len(network.snapshots)}\n')
 
         except Exception as e:
-            print(f'\n❌ Model {model_id} conversion failed: {e}')
+            print(f'\nModel {model_id} conversion failed: {e}')
             sys.exit(1)
         "
 
@@ -140,7 +140,7 @@ jobs:
             network, setup_summary = create_model(model_id)
 
             # Print summary
-            print(f'\n✅ Model {model_id} converted successfully!')
+            print(f'\nModel {model_id} converted successfully!')
             print(f'   Buses: {len(network.buses)}')
             print(f'   Generators: {len(network.generators)}')
             print(f'   Storage units: {len(network.storage_units)}')
@@ -150,9 +150,9 @@ jobs:
             if '${{ env.RUN_CONSISTENCY_CHECKS }}' == 'true':
                 print('\nRunning consistency check...')
                 network.consistency_check()
-                print('✅ Consistency check passed!')
+                print('Consistency check passed!')
             else:
-                print('\n⚠️  Consistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
+                print('\nConsistency check skipped (RUN_CONSISTENCY_CHECKS=false)')
 
             # Save stats for summary
             with open('model2_stats.txt', 'w') as f:
@@ -162,7 +162,7 @@ jobs:
                 f.write(f'snapshots={len(network.snapshots)}\n')
 
         except Exception as e:
-            print(f'\n❌ Model {model_id} conversion failed: {e}')
+            print(f'\nModel {model_id} conversion failed: {e}')
             sys.exit(1)
         "
 
@@ -191,7 +191,7 @@ jobs:
                 snapshots=snapshots_subset
             )
 
-            print(f'✅ Model {model_id} solved successfully!')
+            print(f'Model {model_id} solved successfully!')
             print(f'   Objective value: {network.objective:.2f}')
             print(f'   Status: {network.status}')
 
@@ -202,7 +202,7 @@ jobs:
                 f.write(f'snapshots_solved={len(snapshots_subset)}\n')
 
         except Exception as e:
-            print(f'\n❌ Solve failed for {model_id}: {e}')
+            print(f'\nSolve failed for {model_id}: {e}')
             import traceback
             traceback.print_exc()
             sys.exit(1)
@@ -233,7 +233,7 @@ jobs:
                 snapshots=snapshots_subset
             )
 
-            print(f'✅ Model {model_id} solved successfully!')
+            print(f'Model {model_id} solved successfully!')
             print(f'   Objective value: {network.objective:.2f}')
             print(f'   Status: {network.status}')
 
@@ -244,7 +244,7 @@ jobs:
                 f.write(f'snapshots_solved={len(snapshots_subset)}\n')
 
         except Exception as e:
-            print(f'\n❌ Solve failed for {model_id}: {e}')
+            print(f'\nSolve failed for {model_id}: {e}')
             import traceback
             traceback.print_exc()
             sys.exit(1)
@@ -262,12 +262,12 @@ jobs:
             exit(0)
 
         with open(summary_file, 'a') as summary:
-            summary.write('### Model Conversion Test Results :electric_plug:\n')
+            summary.write('### Model Conversion Test Results\n')
             summary.write('\n')
 
             # Model 1 summary
             if os.path.exists('model1_stats.txt'):
-                summary.write('**Model 1: ${{ env.MODEL_1 }}** ✅\n')
+                summary.write('**Model 1: ${{ env.MODEL_1 }}** (Success)\n')
                 with open('model1_stats.txt', 'r') as f:
                     for line in f:
                         if '=' in line:
@@ -284,13 +284,13 @@ jobs:
                                 key, value = line.strip().split('=', 1)
                                 summary.write(f'  - {key}: {value}\n')
             else:
-                summary.write('**Model 1: ${{ env.MODEL_1 }}** ❌ (Conversion failed)\n')
+                summary.write('**Model 1: ${{ env.MODEL_1 }}** (Conversion failed)\n')
 
             summary.write('\n')
 
             # Model 2 summary
             if os.path.exists('model2_stats.txt'):
-                summary.write('**Model 2: ${{ env.MODEL_2 }}** ✅\n')
+                summary.write('**Model 2: ${{ env.MODEL_2 }}** (Success)\n')
                 with open('model2_stats.txt', 'r') as f:
                     for line in f:
                         if '=' in line:
@@ -307,7 +307,7 @@ jobs:
                                 key, value = line.strip().split('=', 1)
                                 summary.write(f'  - {key}: {value}\n')
             else:
-                summary.write('**Model 2: ${{ env.MODEL_2 }}** ❌ (Conversion failed)\n')
+                summary.write('**Model 2: ${{ env.MODEL_2 }}** (Conversion failed)\n')
 
             summary.write('\n')
             summary.write('---\n')

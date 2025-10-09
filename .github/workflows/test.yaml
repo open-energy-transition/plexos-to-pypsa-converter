@@ -43,11 +43,11 @@ jobs:
     - name: Generate test summary
       if: always()
       run: |
-        echo "### Test Results :test_tube:" >> $GITHUB_STEP_SUMMARY
+        echo "### Test Results" >> $GITHUB_STEP_SUMMARY
         echo "Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         if [ $? -eq 0 ]; then
-          echo "✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+          echo "All tests passed!" >> $GITHUB_STEP_SUMMARY
         else
-          echo "❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
+          echo "Some tests failed" >> $GITHUB_STEP_SUMMARY
         fi
