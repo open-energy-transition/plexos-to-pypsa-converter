@@ -1,6 +1,5 @@
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
-from src.db.models import INPUT_XMLS
 from src.db.plexosdb import PlexosDB  # type: ignore
 from src.db.read import (
     check_valid_properties,
@@ -10,8 +9,15 @@ from src.db.read import (
     print_properties,
     save_properties,
 )
+from src.utils.model_paths import get_model_xml_path
 
-file_xml = INPUT_XMLS["plexos-message"]
+file_xml = get_model_xml_path("plexos-message")
+if file_xml is None:
+    raise FileNotFoundError(
+        "Model 'plexos-message' not found in src/examples/data/. "
+        "Please download and extract the model data."
+    )
+file_xml = str(file_xml)
 
 # load PlexosDB from XML file
 mod_db = PlexosDB.from_xml(file_xml)

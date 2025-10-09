@@ -6,6 +6,7 @@ from plexosdb import PlexosDB
 
 from src.network.core import setup_network
 from src.network.electricity_sector import create_aemo_model_data_driven
+from src.utils.model_paths import find_model_xml, get_model_directory
 
 
 def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
@@ -28,26 +29,37 @@ def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
     >>> print(f"Network has {len(network.buses)} buses and {len(network.loads)} loads")
     >>> network.optimize(solver_name="highs")
     """
-    # Define XML file path
-    path_root = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/Plexos Converter/Input Models"
-    file_xml = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/2024 ISP Progressive Change Model.xml"
+    # Find model data in src/examples/data/
+    model_id = "aemo-2024-isp-progressive"
+    file_xml = find_model_xml(model_id)
+    main_dir = get_model_directory(model_id)
+
+    if file_xml is None or main_dir is None:
+        msg = (
+            f"Model '{model_id}' not found in src/examples/data/. "
+            f"Please download and extract the AEMO 2024 ISP model data to:\n"
+            f"  src/examples/data/aemo-2024-isp-progressive/"
+        )
+        raise FileNotFoundError(msg)
+
+    # Convert Path objects to strings for compatibility
+    file_xml = str(file_xml)
+    main_dir = str(main_dir)
 
     if use_data_driven:
         print("Creating AEMO PyPSA Model using data-driven approach...")
         return create_aemo_model_data_driven(
             xml_file_path=file_xml,
-            main_directory=f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change",
+            main_directory=main_dir,
         )
 
-    # Legacy approach with hardcoded paths
-    file_timeslice = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/timeslice/timeslice_RefYear4006.csv"
+    # Legacy approach with model-relative paths
+    file_timeslice = f"{main_dir}/Traces/timeslice/timeslice_RefYear4006.csv"
 
     # specify renewables profiles and demand paths
-    path_ren = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change"
-    path_demand = f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/demand"
-    path_hydro_inflows = (
-        f"{path_root}/AEMO/2024 ISP/2024 ISP Progressive Change/Traces/hydro"
-    )
+    path_ren = main_dir
+    path_demand = f"{main_dir}/Traces/demand"
+    path_hydro_inflows = f"{main_dir}/Traces/hydro"
 
     print("Creating AEMO PyPSA Model using traditional approach...")
     print(f"XML file: {file_xml}")

@@ -1,4 +1,4 @@
-"""Cross-platform path handling utilities for PLEXOS-PyPSA.
+"""Cross-platform path handling utilities.
 
 This module provides consistent path handling across Windows, Mac, and Linux systems,
 particularly for dealing with PLEXOS database paths that may contain Windows-style backslashes.

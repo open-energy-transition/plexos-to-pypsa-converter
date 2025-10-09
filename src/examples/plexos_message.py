@@ -1,100 +1,22 @@
 from collections import defaultdict
 
 import pandas as pd
-import pypsa
-from plexosdb import PlexosDB
 
-from src.db.models import INPUT_XMLS
-from src.network.multi_sector_db import (
-    setup_enhanced_flow_network_with_csv,
-    setup_flow_network_db,
-)
+from network.conversion import create_model
 
-
-def create_plexos_message_model(
-    testing_mode: bool = False, use_csv_integration: bool = True
-) -> tuple[pypsa.Network, dict]:
-    """Create PLEXOS-MESSAGE PyPSA model with electricity, hydrogen, and ammonia sectors.
-
-    The PLEXOS-MESSAGE model includes:
-    - Flow Network represented as PyPSA Nodes and Links
-    - Process-based conversions as PyPSA Links for sector coupling
-    - Multi-sector representation (Electricity, Hydrogen, Ammonia)
-    - CSV data integration for costs, demand profiles, and infrastructure
-
-    Parameters
-    ----------
-    testing_mode : bool, optional
-        If True, process only limited subsets of components for faster testing.
-        Default False creates complete model.
-    use_csv_integration : bool, optional
-        If True, use enhanced setup with CSV data integration following PyPSA best practices.
-        If False, use traditional flow network setup. Default True.
-
-    Returns
-    -------
-    pypsa.Network
-        Multi-sector PyPSA network
-    dict
-        Setup summary with model statistics
-    """
-    # Get XML file path from models registry
-    xml_file = INPUT_XMLS["plexos-message"]
-
-    print("Creating PLEXOS-MESSAGE Multi-Sector PyPSA Model...")
-    print(f"XML file: {xml_file}")
-    print(f"CSV Integration: {'Enabled' if use_csv_integration else 'Disabled'}")
-
-    # Load PLEXOS database
-    print("\nLoading PLEXOS database...")
-    plexos_db = PlexosDB.from_xml(xml_file)
-
-    # Initialize PyPSA network
-    network = pypsa.Network()
-
-    if use_csv_integration:
-        # Use enhanced setup with CSV data integration
-        print(
-            "\nSetting up enhanced multi-sector flow network with CSV data integration..."
-        )
-        print("   Following PyPSA best practices for sector coupling")
-        print("   Integrating BuildCosts.csv, Load.csv, H2_Demand_With_Blending.csv")
-        print(
-            "   Creating sector coupling links (Electrolysis, H2Power, Haber-Bosch, Ammonia Cracking)"
-        )
-
-        # Define inputs folder path
-        inputs_folder = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main/Inputs"
-
-        setup_summary = setup_enhanced_flow_network_with_csv(
-            network=network,
-            db=plexos_db,
-            inputs_folder=inputs_folder,
-            testing_mode=testing_mode,
-        )
-    else:
-        # Use traditional flow network setup
-        print(
-            "\nSetting up multi-sector flow network (Electricity + Hydrogen + Ammonia)..."
-        )
-        print("   Using direct database queries to discover Flow Network components")
-        print("   Representing all sectors through PyPSA Links and Nodes")
-
-        setup_summary = setup_flow_network_db(
-            network=network, db=plexos_db, testing_mode=testing_mode
-        )
-
-    return network, setup_summary
-
+# Constants
+MODEL_ID = "plexos-message"
 
 if __name__ == "__main__":
-    # Create the multi-sector model
-    # Set testing_mode=True for faster development, False for complete model
-    testing_mode = True  # Change to True for testing
+    # Configuration - can override defaults from MODEL_REGISTRY
+    testing_mode = True  # Set to True for faster testing, False for complete model
     use_csv_integration = True  # Enable CSV data integration with PyPSA best practices
 
-    network, setup_summary = create_plexos_message_model(
-        testing_mode=testing_mode, use_csv_integration=use_csv_integration
+    # Create model using unified factory
+    network, setup_summary = create_model(
+        MODEL_ID,
+        testing_mode=testing_mode,
+        use_csv_integration=use_csv_integration,
     )
 
     # Print setup summary

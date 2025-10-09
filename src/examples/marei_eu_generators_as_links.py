@@ -7,132 +7,16 @@ efficiency conversions.
 """
 
 from collections import defaultdict
-from typing import Any
 
 import pandas as pd
-import pypsa
-from plexosdb import PlexosDB
 
-from src.db.models import INPUT_XMLS
-from src.network.multi_sector_db import (
-    setup_gas_electric_network_db,
-    setup_marei_csv_network,
-)
+from network.conversion import create_model
 
-
-def create_marei_eu_generators_as_links_model(
-    generators_as_links: bool = True,
-    testing_mode: bool = False,
-    use_csv_integration: bool = False,
-    csv_data_path: str = "/Users/meas/Library/CloudStorage/GoogleDrive-measrainsey.meng@openenergytransition.org/Shared drives/OET Shared Drive/Projects/[008] ENTSOE - Open TYNDP I/2 - interim deliverables (working files)/2_Modeling/Plexos Converter/Input Models/University College Cork/MaREI/EU Power & Gas Model/CSV Files",
-    infrastructure_scenario: str = "PCI",
-    pricing_scheme: str = "Production",
-) -> tuple[pypsa.Network, dict[str, Any]]:
-    """Create MaREI-EU PyPSA model with optional generators-as-links conversion.
-
-    The MaREI-EU model includes:
-    - Electricity network (Node, Generator, Line, Storage)
-    - Gas network represented as PyPSA Links and Nodes
-    - Conventional generators optionally as Links for multi-sector coupling
-    - Sector coupling through fuel-to-electric conversion Links
-    - Optional CSV data integration for enhanced demand profiles and infrastructure
-
-    Parameters
-    ----------
-    generators_as_links : bool, optional
-        If True, represent conventional generators (coal, gas, nuclear, etc.) as Links
-        connecting fuel buses to electric buses. If False, use standard Generators.
-        Default True.
-    testing_mode : bool, optional
-        If True, process only limited subsets of components for faster testing.
-        Default False creates complete model.
-    use_csv_integration : bool, optional
-        If True, integrates MaREI CSV data for detailed demand profiles and infrastructure.
-        If False, uses PlexosDB-only approach (legacy behavior). Default False.
-    csv_data_path : str, optional
-        Path to MaREI CSV Files directory containing demand, infrastructure, and pricing data
-    infrastructure_scenario : str, optional
-        Infrastructure scenario for gas network ('PCI', 'High', 'Low'). Default 'PCI'.
-    pricing_scheme : str, optional
-        Gas pricing mechanism ('Production', 'Postage', 'Trickle', 'Uniform'). Default 'Production'.
-
-    Returns
-    -------
-    pypsa.Network
-        Multi-sector PyPSA network with gas and electricity
-    dict
-        Setup summary with model statistics
-    """
-    # Get XML file path from models registry
-    xml_file = INPUT_XMLS["marei-eu"]
-
-    print("Creating MaREI-EU Multi-Sector PyPSA Model (Generators-as-Links Version)...")
-    print(f"XML file: {xml_file}")
-    print(f"Generators as links: {generators_as_links}")
-    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
-
-    if testing_mode:
-        print("⚠️  TESTING MODE: Processing limited subsets for faster development")
-
-    if use_csv_integration:
-        print(f"CSV data path: {csv_data_path}")
-        print(f"Infrastructure scenario: {infrastructure_scenario}")
-        print(f"Pricing scheme: {pricing_scheme}")
-
-    # Load PLEXOS database
-    print("\nLoading PLEXOS database...")
-    plexos_db = PlexosDB.from_xml(xml_file)
-
-    # Initialize PyPSA network
-    network = pypsa.Network()
-
-    if use_csv_integration:
-        # Enhanced setup with CSV data integration
-        print("\nSetting up enhanced multi-sector network with CSV data integration...")
-        print(
-            "   Combining PLEXOS database topology with MaREI CSV demand and infrastructure data"
-        )
-        print("   Following PyPSA multi-sector patterns for gas/electricity coupling")
-
-        if generators_as_links:
-            print("   Representing conventional generators as fuel-to-electric Links")
-            print("   Enabling multi-sector coupling through fuel buses")
-        else:
-            print("   Using standard Generator representation")
-
-        setup_summary = setup_marei_csv_network(
-            network=network,
-            db=plexos_db,
-            csv_data_path=csv_data_path,
-            infrastructure_scenario=infrastructure_scenario,
-            pricing_scheme=pricing_scheme,
-            generators_as_links=generators_as_links,
-        )
-    else:
-        # Traditional PlexosDB-only setup
-        print("\nSetting up multi-sector network (Gas + Electricity)...")
-        print(
-            "   Using direct database queries to discover gas and electricity components"
-        )
-
-        if generators_as_links:
-            print("   Representing conventional generators as fuel-to-electric Links")
-            print("   Enabling multi-sector coupling through fuel buses")
-        else:
-            print("   Using standard Generator representation")
-
-        setup_summary = setup_gas_electric_network_db(
-            network=network,
-            db=plexos_db,
-            generators_as_links=generators_as_links,
-            testing_mode=testing_mode,
-        )
-
-    return network, setup_summary
-
+# Constants
+MODEL_ID = "marei-eu"
 
 if __name__ == "__main__":
-    # Create the multi-sector model
+    # Configuration - can override defaults from MODEL_REGISTRY
     # Set generators_as_links=True to use Link representation for conventional generators
     # Set testing_mode=True for faster development, False for complete model
     # Set use_csv_integration=True to enable MaREI CSV data integration
@@ -144,7 +28,9 @@ if __name__ == "__main__":
         "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
     )
 
-    network, setup_summary = create_marei_eu_generators_as_links_model(
+    # Create model using unified factory
+    network, setup_summary = create_model(
+        MODEL_ID,
         generators_as_links=generators_as_links,
         testing_mode=testing_mode,
         use_csv_integration=use_csv_integration,
