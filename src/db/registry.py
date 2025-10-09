@@ -122,6 +122,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "target_node",
             "target_node": "SEM",
             "model_name": "Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
+            "demand_file": "CSV Files (1 of 2)/AI Demand_2023-2033_5base years.csv",
             "cross_model_dependencies": {
                 "vre_profiles_model_id": "aemo-2024-isp-progressive",
             },
