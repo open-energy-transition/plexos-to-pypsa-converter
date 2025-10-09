@@ -44,8 +44,26 @@ jobs:
 
     - name: Check for uncommitted changes
       run: |
-        if ! git diff --quiet; then
-          echo "::error::Pre-commit hooks made changes. Please run 'pre-commit run --all-files' locally and commit the changes."
-          git diff
-          exit 1
-        fi
+        python -c "
+        import subprocess
+        import sys
+
+        # Check if there are any uncommitted changes
+        result = subprocess.run(
+            ['git', 'diff', '--quiet'],
+            capture_output=True
+        )
+
+        if result.returncode != 0:
+            # There are uncommitted changes
+            print('::error::Pre-commit hooks made changes. Please run pre-commit run --all-files locally and commit the changes.')
+
+            # Show the diff
+            diff_result = subprocess.run(
+                ['git', 'diff'],
+                capture_output=True,
+                text=True
+            )
+            print(diff_result.stdout)
+            sys.exit(1)
+        "

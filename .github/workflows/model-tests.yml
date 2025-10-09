@@ -24,9 +24,13 @@ env:
 
 jobs:
   model-conversion:
-    name: Cache and Conversion
-    runs-on: ubuntu-latest
+    name: Cache and Conversion (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
     - name: Checkout code
@@ -48,26 +52,37 @@ jobs:
       uses: actions/cache@v4
       with:
         path: src/examples/data/
-          # Cache key includes registry hash (detects recipe changes) and model IDs
-        key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}
+          # Cache key includes OS, registry hash (detects recipe changes) and model IDs
+        key: models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}
         restore-keys: |
-          models-${{ hashFiles('src/db/registry.py') }}-
-          models-
+          models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-
+          models-${{ runner.os }}-
 
     - name: Display cache status
       run: |
-        if [ "${{ steps.cache-models.outputs.cache-hit }}" == "true" ]; then
-          echo "✅ Cache hit! Using cached models from previous run."
-          echo "Cache key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}"
-        else
-          echo "⬇️ Cache miss. Models will be downloaded."
-          echo "This is expected on first run or after registry changes."
-        fi
+        python -c "
+        import os
 
-        echo ""
-        echo "### Cache Information" >> $GITHUB_STEP_SUMMARY
-        echo "- Cache hit: ${{ steps.cache-models.outputs.cache-hit }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Cache key: models-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}" >> $GITHUB_STEP_SUMMARY
+        cache_hit = '${{ steps.cache-models.outputs.cache-hit }}' == 'true'
+        cache_key = 'models-${{ runner.os }}-${{ hashFiles(\"src/db/registry.py\") }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}'
+
+        # Print to console
+        if cache_hit:
+            print('✅ Cache hit! Using cached models from previous run.')
+            print(f'Cache key: {cache_key}')
+        else:
+            print('⬇️ Cache miss. Models will be downloaded.')
+            print('This is expected on first run or after registry changes.')
+
+        # Write to GitHub Step Summary
+        summary_file = os.getenv('GITHUB_STEP_SUMMARY')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('\\n### Cache Information\\n')
+                f.write(f'- Cache hit: ${{ steps.cache-models.outputs.cache-hit }}\\n')
+                f.write(f'- Cache key: {cache_key}\\n')
+        "
+
 
     - name: Test Model 1 Conversion
       id: test-model-1
@@ -238,53 +253,66 @@ jobs:
     - name: Generate test summary
       if: always()
       run: |
-        echo "### Model Conversion Test Results :electric_plug:" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
+        python -c "
+        import os
 
-        # Model 1 summary
-        if [ -f model1_stats.txt ]; then
-          echo "**Model 1: ${{ env.MODEL_1 }}** ✅" >> $GITHUB_STEP_SUMMARY
-          while IFS='=' read -r key value; do
-            echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
-          done < model1_stats.txt
+        summary_file = os.getenv('GITHUB_STEP_SUMMARY')
+        if not summary_file:
+            print('Warning: GITHUB_STEP_SUMMARY not available')
+            exit(0)
 
-          # Add solve results if available
-          if [ -f model1_solve.txt ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "  **Solve Results:**" >> $GITHUB_STEP_SUMMARY
-            while IFS='=' read -r key value; do
-              echo "  - ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
-            done < model1_solve.txt
-          fi
-        else
-          echo "**Model 1: ${{ env.MODEL_1 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
-        fi
+        with open(summary_file, 'a') as summary:
+            summary.write('### Model Conversion Test Results :electric_plug:\n')
+            summary.write('\n')
 
-        echo "" >> $GITHUB_STEP_SUMMARY
+            # Model 1 summary
+            if os.path.exists('model1_stats.txt'):
+                summary.write('**Model 1: ${{ env.MODEL_1 }}** ✅\n')
+                with open('model1_stats.txt', 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            summary.write(f'- {key}: {value}\n')
 
-        # Model 2 summary
-        if [ -f model2_stats.txt ]; then
-          echo "**Model 2: ${{ env.MODEL_2 }}** ✅" >> $GITHUB_STEP_SUMMARY
-          while IFS='=' read -r key value; do
-            echo "- ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
-          done < model2_stats.txt
+                # Add solve results if available
+                if os.path.exists('model1_solve.txt'):
+                    summary.write('\n')
+                    summary.write('  **Solve Results:**\n')
+                    with open('model1_solve.txt', 'r') as f:
+                        for line in f:
+                            if '=' in line:
+                                key, value = line.strip().split('=', 1)
+                                summary.write(f'  - {key}: {value}\n')
+            else:
+                summary.write('**Model 1: ${{ env.MODEL_1 }}** ❌ (Conversion failed)\n')
 
-          # Add solve results if available
-          if [ -f model2_solve.txt ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "  **Solve Results:**" >> $GITHUB_STEP_SUMMARY
-            while IFS='=' read -r key value; do
-              echo "  - ${key}: ${value}" >> $GITHUB_STEP_SUMMARY
-            done < model2_solve.txt
-          fi
-        else
-          echo "**Model 2: ${{ env.MODEL_2 }}** ❌ (Conversion failed)" >> $GITHUB_STEP_SUMMARY
-        fi
+            summary.write('\n')
 
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}" >> $GITHUB_STEP_SUMMARY
-        echo "Solve tests: ${{ env.RUN_SOLVE_TESTS }}" >> $GITHUB_STEP_SUMMARY
-        if [ "${{ env.RUN_SOLVE_TESTS }}" == "true" ]; then
-          echo "Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}" >> $GITHUB_STEP_SUMMARY
-        fi
+            # Model 2 summary
+            if os.path.exists('model2_stats.txt'):
+                summary.write('**Model 2: ${{ env.MODEL_2 }}** ✅\n')
+                with open('model2_stats.txt', 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            summary.write(f'- {key}: {value}\n')
+
+                # Add solve results if available
+                if os.path.exists('model2_solve.txt'):
+                    summary.write('\n')
+                    summary.write('  **Solve Results:**\n')
+                    with open('model2_solve.txt', 'r') as f:
+                        for line in f:
+                            if '=' in line:
+                                key, value = line.strip().split('=', 1)
+                                summary.write(f'  - {key}: {value}\n')
+            else:
+                summary.write('**Model 2: ${{ env.MODEL_2 }}** ❌ (Conversion failed)\n')
+
+            summary.write('\n')
+            summary.write('---\n')
+            summary.write('Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}\n')
+            summary.write('Solve tests: ${{ env.RUN_SOLVE_TESTS }}\n')
+            if '${{ env.RUN_SOLVE_TESTS }}' == 'true':
+                summary.write('Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}\n')
+        "
