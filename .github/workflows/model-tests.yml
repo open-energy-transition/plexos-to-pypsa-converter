@@ -1,4 +1,4 @@
-name: Model Conversion Tests
+name: Models
 
 on:
   push:
@@ -20,7 +20,7 @@ env:
 
 jobs:
   model-conversion:
-    name: Test Model Conversion
+    name: Cache and Conversion
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
