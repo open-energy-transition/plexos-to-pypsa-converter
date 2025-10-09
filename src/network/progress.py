@@ -56,7 +56,7 @@ class ProgressTracker:
         if self.config.testing_mode:
             self.items_to_process = min(total_items, self.config.test_limit)
             print(
-                f"⚠️  TESTING MODE: {description} limited to {self.items_to_process}/{total_items}"
+                f"  TESTING MODE: {description} limited to {self.items_to_process}/{total_items}"
             )
         else:
             self.items_to_process = total_items
@@ -166,12 +166,12 @@ class ProgressTracker:
                 (items_added / self.current_item * 100) if self.current_item > 0 else 0
             )
             print(
-                f"  ✓ {self.description} complete: {items_added} added "
+                f"   {self.description} complete: {items_added} added "
                 f"({success_rate:.1f}% success) in {elapsed_str}"
             )
         else:
             print(
-                f"  ✓ {self.description} complete: {self.current_item} processed in {elapsed_str}"
+                f"   {self.description} complete: {self.current_item} processed in {elapsed_str}"
             )
 
         if self.config.testing_mode and self.total_items > self.items_to_process:
@@ -268,7 +268,7 @@ class BatchProgressTracker:
         self.start_time = time.time()
 
         if testing_mode:
-            print(f"⚠️  TESTING MODE: {operation_name} - processing limited subsets")
+            print(f"  TESTING MODE: {operation_name} - processing limited subsets")
 
     def add_batch(
         self, total_items: int, description: str, test_limit: int = 100
@@ -288,7 +288,7 @@ class BatchProgressTracker:
         total_time = time.time() - self.start_time
         time_str = ProgressTracker._format_time(total_time)
 
-        print(f"\n✓ {self.operation_name} complete in {time_str}")
+        print(f"\n {self.operation_name} complete in {time_str}")
 
         if self.testing_mode:
-            print("  ⚠️  Testing mode was enabled - model may be incomplete")
+            print("    Testing mode was enabled - model may be incomplete")

@@ -117,7 +117,7 @@ class RecipeExecutor:
         """
         if not recipe:
             if self.verbose:
-                print("⚠ Empty recipe provided - nothing to execute")
+                print("Empty recipe provided - nothing to execute")
             return True
 
         i = 0  # Initialize for exception handling
@@ -172,14 +172,14 @@ class RecipeExecutor:
     def _print_success(self) -> None:
         """Print success message."""
         print(f"\n{SEPARATOR_LINE}")
-        print("✓ Recipe completed successfully!")
+        print(" Recipe completed successfully!")
         print(f"Model installed to: {self.model_dir}")
         print(f"{SEPARATOR_LINE}\n")
 
     def _print_error(self, step: int, total_steps: int, error: Exception) -> None:
         """Print error message."""
         print(f"\n{SEPARATOR_LINE}")
-        print(f"❌ Recipe failed at step {step}/{total_steps}")
+        print(f"Recipe failed at step {step}/{total_steps}")
         print(f"Error: {error}")
         print(f"{SEPARATOR_LINE}\n")
 
@@ -450,7 +450,7 @@ class RecipeExecutor:
                     raise RecipeExecutionError(msg)
 
         if self.verbose:
-            print("  ✓ Validation passed")
+            print("   Validation passed")
 
     def _step_manual(self, instruction: dict[str, Any]) -> None:
         """Handle manual step - display instructions and wait for user.

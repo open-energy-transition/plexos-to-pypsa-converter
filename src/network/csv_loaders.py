@@ -97,7 +97,7 @@ def load_country_demand_profiles(
 
             if hourly_profile is not None and len(hourly_profile) > 0:
                 demand_profiles[country_code] = hourly_profile
-                print(f"  ✓ Loaded {country_code}: {len(hourly_profile)} hourly values")
+                print(f"   Loaded {country_code}: {len(hourly_profile)} hourly values")
             else:
                 print(f"  Warning: Empty profile for {country_code}, skipping")
 
@@ -149,7 +149,7 @@ def load_vre_profiles_by_country(
                 vre_profiles[country] = {}
             vre_profiles[country].update(profiles)
 
-        print(f"  ✓ Loaded wind profiles for {len(wind_profiles)} countries")
+        print(f"   Loaded wind profiles for {len(wind_profiles)} countries")
 
     # Load solar profiles
     solar_path = Path(csv_dir) / solar_file
@@ -165,7 +165,7 @@ def load_vre_profiles_by_country(
                 vre_profiles[country] = {}
             vre_profiles[country].update(profiles)
 
-        print(f"  ✓ Loaded solar profiles for {len(solar_profiles)} countries")
+        print(f"   Loaded solar profiles for {len(solar_profiles)} countries")
 
     return vre_profiles
 
@@ -198,7 +198,7 @@ def load_cross_border_infrastructure(
     # Standardize infrastructure data format
     infrastructure_data = _standardize_infrastructure_format(df, infrastructure_type)
 
-    print(f"  ✓ Loaded {len(infrastructure_data)} {infrastructure_type} connections")
+    print(f"   Loaded {len(infrastructure_data)} {infrastructure_type} connections")
     return infrastructure_data
 
 
@@ -238,7 +238,7 @@ def load_marei_gas_pricing(
         print(f"Loading {pricing_scheme} gas pricing from {pricing_file}...")
         df = pd.read_csv(csv_path)
         pricing_data[pricing_scheme.lower()] = df
-        print(f"  ✓ Loaded {len(df)} pricing entries")
+        print(f"   Loaded {len(df)} pricing entries")
     else:
         print(f"  Warning: Pricing file not found: {csv_path}")
 
@@ -279,7 +279,7 @@ def load_marei_infrastructure_scenarios(
             try:
                 df = pd.read_csv(csv_path)
                 scenario_data[data_type] = df
-                print(f"  ✓ Loaded {scenario} {data_type}: {len(df)} entries")
+                print(f"   Loaded {scenario} {data_type}: {len(df)} entries")
             except Exception as e:
                 print(f"  Warning: Error loading {filename}: {e}")
         else:
@@ -360,9 +360,9 @@ def load_marei_full_dataset(
     hydro_file = Path(csv_base_dir) / "Hydro Monthly Profiles.csv"
     if hydro_file.exists():
         full_dataset["hydro_profiles"] = pd.read_csv(hydro_file)
-        print("  ✓ Loaded hydro monthly profiles")
+        print("   Loaded hydro monthly profiles")
 
-    print(f"✓ Complete MaREI dataset loaded with {len(full_dataset)} data categories")
+    print(f" Complete MaREI dataset loaded with {len(full_dataset)} data categories")
     return full_dataset
 
 

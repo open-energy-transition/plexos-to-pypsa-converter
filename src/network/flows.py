@@ -694,7 +694,7 @@ def add_flow_paths(
                                     # Debug logging for first few links
                                     if paths[link_type] <= 3:
                                         print(
-                                            f"    ✓ Added {link_type.lower()} link: {link_name}"
+                                            f"     Added {link_type.lower()} link: {link_name}"
                                         )
                                         print(
                                             f"      {bus0} ({bus0_carrier}) → {bus1} ({bus1_carrier})"
@@ -703,10 +703,10 @@ def add_flow_paths(
                                             f"      Efficiency: {efficiency:.1%}, Capacity: {p_nom}"
                                         )
                             elif path_index < 5:
-                                print(f"    ❌ Bus(es) not found: {bus0}, {bus1}")
+                                print(f"     Bus(es) not found: {bus0}, {bus1}")
                         elif path_index < 5:
                             print(
-                                f"    ❌ Insufficient connected nodes: {connected_nodes}"
+                                f"     Insufficient connected nodes: {connected_nodes}"
                             )
 
                         # Update progress
@@ -1076,14 +1076,14 @@ def add_facilities(
 
                                 # Debug logging for first few conversion links
                                 if facility_stats["conversion_links"] <= 5:
-                                    print(f"    ✓ Added conversion link: {link_name}")
+                                    print(f"     Added conversion link: {link_name}")
                                     print(
                                         f"      {bus0} → {bus1} (efficiency: {process_info['efficiency']:.1%})"
                                     )
                         else:
                             facility_stats["skipped"] += 1
                             if facility_index < 5:
-                                print(f"    ❌ Bus(es) not found: {bus0}, {bus1}")
+                                print(f"     Bus(es) not found: {bus0}, {bus1}")
 
                     elif len(flow_nodes) >= 1:
                         primary_bus = flow_nodes[0]
@@ -1177,12 +1177,12 @@ def add_facilities(
                         else:
                             facility_stats["skipped"] += 1
                             if facility_index < 5:
-                                print(f"    ❌ Primary bus not found: {primary_bus}")
+                                print(f"     Primary bus not found: {primary_bus}")
                     else:
                         facility_stats["skipped"] += 1
                         if facility_index < 5:
                             print(
-                                f"    ❌ No flow nodes found for facility: {facility_name}"
+                                f"     No flow nodes found for facility: {facility_name}"
                             )
 
                     # Update progress

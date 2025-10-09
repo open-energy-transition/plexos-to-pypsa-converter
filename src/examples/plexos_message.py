@@ -119,9 +119,9 @@ if __name__ == "__main__":
     print("\nRunning network consistency check...")
     try:
         network.consistency_check()
-        print("✓ Network consistency check passed!")
+        print("Network consistency check passed!")
     except Exception as e:
-        print(f"⚠ Network consistency check failed: {e}")
+        print(f"Network consistency check failed: {e}")
         print("Proceeding with caution...")
 
     # Select subset of snapshots for optimization
@@ -174,7 +174,7 @@ if __name__ == "__main__":
                     },
                 )  # type: ignore
 
-            print("✓ Optimization complete!")
+            print("Optimization complete!")
 
             # Print optimization results summary
             print("\nOptimization Results:")
@@ -225,7 +225,7 @@ if __name__ == "__main__":
             print("  Results saved!")
 
         except Exception as e:
-            print(f"⚠ Optimization failed: {e}")
+            print(f"Optimization failed: {e}")
             print("Network created successfully but optimization encountered issues.")
     else:
-        print("⚠ No snapshots found in network - skipping optimization")
+        print("No snapshots found in network - skipping optimization")

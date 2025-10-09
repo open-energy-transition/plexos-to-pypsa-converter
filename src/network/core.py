@@ -1789,10 +1789,10 @@ def setup_network(
     try:
         constraint_results = add_constraints_enhanced(network, db, verbose=True)
         print(
-            f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"
+            f" Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"
         )
     except Exception as e:
-        print(f"⚠️  Constraint porting failed: {e}")
+        print(f"  Constraint porting failed: {e}")
         constraint_results = {"implemented": 0, "skipped": 0, "warnings": []}
 
     print("\n" + "=" * 60)

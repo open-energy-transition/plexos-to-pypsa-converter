@@ -42,7 +42,7 @@ if __name__ == "__main__":
     # Run consistency check and optimize
     print("\nRunning consistency check...")
     network.consistency_check()
-    print("✓ Network consistency check passed!")
+    print("Network consistency check passed!")
 
     # Select subset of snapshots for optimization
     snapshots_by_year: defaultdict[int, list] = defaultdict(list)
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     try:
         print(f"\nOptimizing network with {len(subset)} snapshots...")
         network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
-        print("✓ Optimization complete!")
+        print("Optimization complete!")
 
         # Save results
         output_file = "marei_eu_results.nc"
@@ -66,5 +66,5 @@ if __name__ == "__main__":
         print("  Results saved!")
 
     except Exception as e:
-        print(f"⚠ Optimization failed: {e}")
+        print(f"Optimization failed: {e}")
         print("Network created successfully but optimization encountered issues.")

@@ -179,9 +179,9 @@ if __name__ == "__main__":
     print("\nRunning network consistency check...")
     try:
         network.consistency_check()
-        print("✓ Network consistency check passed!")
+        print("Network consistency check passed!")
     except Exception as e:
-        print(f"⚠ Network consistency check failed: {e}")
+        print(f"Network consistency check failed: {e}")
         print("Proceeding with caution...")
 
     # Select subset of snapshots for optimization
@@ -234,7 +234,7 @@ if __name__ == "__main__":
                     },
                 )  # type: ignore
 
-            print("✓ Optimization complete!")
+            print(" Optimization complete!")
 
             # Print optimization results summary
             print("\nOptimization Results:")
@@ -251,11 +251,11 @@ if __name__ == "__main__":
                         col for col in network.links_t.p0.columns if "gen_link" in col
                     ]
                     print(
-                        f"  🔍 DEBUG - Generator-link columns found: {len(gen_link_cols)}"
+                        f"   DEBUG - Generator-link columns found: {len(gen_link_cols)}"
                     )
                     if len(gen_link_cols) > 0:
                         print(
-                            f"  🔍 DEBUG - Sample gen-link columns: {gen_link_cols[:3]}"
+                            f"   DEBUG - Sample gen-link columns: {gen_link_cols[:3]}"
                         )
                         fuel_to_elec = network.links_t.p0[gen_link_cols].sum().sum()
                         print(f"  Fuel-to-electric conversion: {fuel_to_elec:.2f} MWh")
@@ -266,14 +266,12 @@ if __name__ == "__main__":
                         ).any()
                         active_count = active_gen_links.sum()
                         print(
-                            f"  🔍 DEBUG - Active generator-links: {active_count} out of {len(gen_link_cols)}"
+                            f"  DEBUG - Active generator-links: {active_count} out of {len(gen_link_cols)}"
                         )
                     else:
+                        print("  DEBUG - No generator-link columns found in links_t.p0")
                         print(
-                            "  🔍 DEBUG - No generator-link columns found in links_t.p0"
-                        )
-                        print(
-                            f"  🔍 DEBUG - Available link columns: {list(network.links_t.p0.columns[:5])}"
+                            f"  DEBUG - Available link columns: {list(network.links_t.p0.columns[:5])}"
                         )
                 else:
                     # Show gas-to-electric conversion
@@ -295,10 +293,10 @@ if __name__ == "__main__":
             print("  Results saved!")
 
         except Exception as e:
-            print(f"⚠ Optimization failed: {e}")
+            print(f"Optimization failed: {e}")
             print("Network created successfully but optimization encountered issues.")
     else:
-        print("⚠ No snapshots found in network - skipping optimization")
+        print("No snapshots found in network - skipping optimization")
 
     if testing_mode:
-        print("\n⚠️  Testing mode was enabled - model may be incomplete")
+        print("\nTesting mode was enabled - model may be incomplete")

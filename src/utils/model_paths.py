@@ -205,7 +205,7 @@ def _execute_recipe(model_id: str) -> bool:
     try:
         return executor.execute_recipe(recipe)
     except Exception as e:
-        print(f"\n❌ Failed to download model '{model_id}': {e}")
+        print(f"\nFailed to download model '{model_id}': {e}")
         print("You may need to download this model manually.")
         print(f"Place model files in: {model_dir}\n")
         return False

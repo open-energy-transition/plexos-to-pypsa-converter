@@ -573,7 +573,7 @@ def create_model_with_optimization(
     # Run consistency check
     print("\nRunning consistency check...")
     network.consistency_check()
-    print("✓ Consistency check passed")
+    print(" Consistency check passed")
 
     # Optimize
     print(f"\nOptimizing with {solver_name}...")
@@ -582,7 +582,7 @@ def create_model_with_optimization(
         optimize_args["solver_options"] = solver_options
 
     network.optimize(**optimize_args)  # type: ignore
-    print("✓ Optimization complete")
+    print(" Optimization complete")
     print(f"  Objective value: {network.objective:.2f}")
 
     return network, setup_summary
