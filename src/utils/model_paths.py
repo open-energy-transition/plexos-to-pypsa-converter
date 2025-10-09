@@ -259,3 +259,45 @@ def list_available_models() -> list[str]:
         List of available model identifiers
     """
     return list(MODEL_DIRECTORIES.keys())
+
+
+def get_model_xml_path(model_id: str) -> Path | None:
+    """Get XML path for a model, or None if not found.
+
+    This is a convenience wrapper around find_model_xml() that validates
+    the model_id against the registry first.
+
+    Parameters
+    ----------
+    model_id : str
+        Model identifier from MODEL_REGISTRY
+
+    Returns
+    -------
+    Path or None
+        Path to XML file if model data exists, None otherwise
+
+    Raises
+    ------
+    ValueError
+        If model_id is not in MODEL_REGISTRY
+
+    Examples
+    --------
+    >>> xml_path = get_model_xml_path("aemo-2024-isp-progressive")
+    >>> if xml_path:
+    ...     print(f"Found at: {xml_path}")
+    ... else:
+    ...     print("Model not found. Use recipe system to download.")
+    """
+    # Import here to avoid circular dependency
+
+    if model_id not in MODEL_REGISTRY:
+        available_models = ", ".join(MODEL_REGISTRY.keys())
+        error_msg = (
+            f"Unknown model ID: {model_id}. Available models: {available_models}"
+        )
+        raise ValueError(error_msg)
+
+    xml_filename = MODEL_REGISTRY[model_id].get("xml_filename")  # type: ignore[attr-defined]
+    return find_model_xml(model_id, xml_filename)
