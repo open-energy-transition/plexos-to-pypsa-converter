@@ -279,6 +279,36 @@ MODEL_REGISTRY = {
             "generators_as_links": False,
             "testing_mode": False,
         },
+        "recipe": [
+            {
+                "step": "download",
+                "url": "https://www.dropbox.com/scl/fi/biv5n52x8s5pxeh06u2b1/EU-Power-Gas-Model.zip?rlkey=hmscke4vsknxbj6w18vosfyxb&e=1&dl=1",
+                "target": "marei-eu.zip",
+                "description": "Downloading European Power & Gas Model",
+            },
+            {
+                "step": "extract",
+                "source": "marei-eu.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "flatten",
+                "source": "EU Power & Gas Model",
+                "levels": 1,
+                "description": "Moving contents to root directory",
+            },
+            {
+                "step": "delete",
+                "pattern": "marei-eu.zip",
+                "description": "Removing archive",
+            },
+            {
+                "step": "validate",
+                "checks": ["xml_exists", "required_dir:CSV Files"],
+                "description": "Validating installation",
+            },
+        ],
     },
     "plexos-world-2015": {
         "name": "PLEXOS-World 2015 Gold V1.1",
