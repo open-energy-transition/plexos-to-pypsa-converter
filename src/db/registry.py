@@ -1,8 +1,11 @@
-"""Central registry of PLEXOS model metadata.
+"""Central registry of example PLEXOS models' metadata.
 
 This module contains the MODEL_REGISTRY dictionary which stores metadata for all
-supported PLEXOS models. It's extracted into a separate module to avoid circular
-import dependencies.
+supported example PLEXOS models.
+
+Each model can optionally include a "recipe" - a list of instructions for automatically
+downloading, extracting, and organizing model files. Recipes are executed when a model
+is requested but not found locally (if auto_download is enabled).
 
 Each model entry includes:
 - name: Human-readable model name
@@ -12,7 +15,17 @@ Each model entry includes:
 - default_config: Default configuration parameters for the model
 - recipe (optional): Auto-download instructions for the model
 
-See models.py for functions that use this registry.
+Recipe Instruction Types:
+- download: Download file from URL
+- extract: Extract archive to target directory
+- move: Move files/directories (supports glob patterns)
+- copy: Copy files/directories
+- rename: Rename file/directory
+- delete: Delete files/directories
+- create_dir: Create directory
+- flatten: Flatten nested directory structure
+- validate: Validate model installation
+- manual: Display manual download instructions
 """
 
 # Model metadata registry
@@ -99,7 +112,6 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
-        # TODO: Add recipe when download URL is available
     },
     "sem-2024-2032": {
         "name": "SEM 2024-2032 Validation Model",
