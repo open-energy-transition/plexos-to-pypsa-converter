@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from network.conversion import create_model
+
 
 def run_model_solve_test(
     model_id: str,
@@ -20,7 +22,6 @@ def run_model_solve_test(
     output_file: str | None = None,
 ) -> dict:
     """Test model solving with a subset of snapshots."""
-    from src.network.conversion import create_model
 
     network, _ = create_model(model_id)
     snapshots_subset = network.snapshots[:snapshot_limit]

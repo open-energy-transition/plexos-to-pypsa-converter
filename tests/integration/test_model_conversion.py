@@ -12,12 +12,13 @@ from pathlib import Path
 
 import pytest
 
+from network.conversion import create_model
+
 
 def run_model_conversion_test(
     model_id: str, run_consistency_check: bool = True, output_file: str | None = None
 ) -> dict:
     """Test model conversion and optionally run consistency checks."""
-    from src.network.conversion import create_model
 
     network, _ = create_model(model_id)
 
