@@ -39,6 +39,9 @@ dependencies = [
 Homepage = "https://github.com/open-energy-transition/plexos-to-pypsa-converter"
 Source = "https://github.com/open-energy-transition/plexos-to-pypsa-converter"
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.optional-dependencies]
 jupyter = [
     "jupyter>=1.0",
