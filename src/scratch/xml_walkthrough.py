@@ -1,7 +1,7 @@
+from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
 
-from src.db.plexosdb import PlexosDB  # type: ignore
-from src.db.read import (
+from db.read import (
     check_valid_properties,
     list_and_print_objects,
     print_membership_data_entries,
@@ -9,7 +9,7 @@ from src.db.read import (
     print_properties,
     save_properties,
 )
-from src.utils.model_paths import get_model_xml_path
+from utils.model_paths import get_model_xml_path
 
 file_xml = get_model_xml_path("plexos-message")
 if file_xml is None:

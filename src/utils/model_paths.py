@@ -11,8 +11,8 @@ definition from MODEL_REGISTRY.
 import os
 from pathlib import Path
 
-from src.db.registry import MODEL_REGISTRY
-from src.utils.recipe_executor import RecipeExecutor
+from db.registry import MODEL_REGISTRY
+from utils.recipe_executor import RecipeExecutor
 
 # Model ID to directory mapping - centralized for easier maintenance
 MODEL_DIRECTORIES: dict[str, str] = {
@@ -205,7 +205,7 @@ def _execute_recipe(model_id: str) -> bool:
     try:
         return executor.execute_recipe(recipe)
     except Exception as e:
-        print(f"\n❌ Failed to download model '{model_id}': {e}")
+        print(f"\nFailed to download model '{model_id}': {e}")
         print("You may need to download this model manually.")
         print(f"Place model files in: {model_dir}\n")
         return False

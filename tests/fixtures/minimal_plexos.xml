@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal PLEXOS XML for testing purposes -->
+<model>
+  <info>
+    <title>Minimal Test Model</title>
+    <version>1.0</version>
+    <description>Minimal PLEXOS model for unit testing converter</description>
+  </info>
+
+  <!-- Classes definition -->
+  <classes>
+    <class id="1" name="System" />
+    <class id="2" name="Node" />
+    <class id="3" name="Generator" />
+    <class id="4" name="Line" />
+    <class id="5" name="Fuel" />
+    <class id="6" name="Storage" />
+  </classes>
+
+  <!-- Objects -->
+  <objects>
+    <!-- Nodes/Buses -->
+    <object class_id="2" id="101" name="Bus1">
+      <property name="Voltage" value="110" />
+    </object>
+    <object class_id="2" id="102" name="Bus2">
+      <property name="Voltage" value="110" />
+    </object>
+
+    <!-- Generators -->
+    <object class_id="3" id="201" name="Gen1_Gas">
+      <property name="Max Capacity" value="100" />
+      <property name="Min Capacity" value="0" />
+      <property name="Heat Rate Base" value="10" />
+      <property name="Heat Rate Incr1" value="9.5" />
+      <property name="VO&amp;M Charge" value="5" />
+      <property name="Build Cost" value="1000" />
+      <property name="WACC" value="0.08" />
+      <property name="Economic Life" value="30" />
+    </object>
+
+    <object class_id="3" id="202" name="Gen2_Solar">
+      <property name="Max Capacity" value="50" />
+      <property name="Build Cost" value="800" />
+      <property name="WACC" value="0.06" />
+      <property name="Economic Life" value="25" />
+    </object>
+
+    <!-- Transmission Line -->
+    <object class_id="4" id="301" name="Line1">
+      <property name="Max Flow" value="200" />
+      <property name="Min Flow" value="-200" />
+      <property name="Max Ramp Up" value="50" />
+      <property name="Max Ramp Down" value="50" />
+    </object>
+
+    <!-- Fuels -->
+    <object class_id="5" id="401" name="Natural Gas">
+      <property name="Price" value="5.0" />
+    </object>
+
+    <!-- Storage -->
+    <object class_id="6" id="501" name="Battery1">
+      <property name="Max Volume" value="100" />
+      <property name="Max Charge" value="25" />
+      <property name="Max Discharge" value="25" />
+      <property name="Charge Efficiency" value="0.95" />
+      <property name="Discharge Efficiency" value="0.95" />
+      <property name="Model" value="1" />
+    </object>
+  </objects>
+
+  <!-- Memberships (relationships between objects) -->
+  <memberships>
+    <!-- Generator to Node connections -->
+    <membership>
+      <parent class_id="3" object_id="201" />
+      <child class_id="2" object_id="101" />
+      <collection_name>Node</collection_name>
+    </membership>
+
+    <membership>
+      <parent class_id="3" object_id="202" />
+      <child class_id="2" object_id="102" />
+      <collection_name>Node</collection_name>
+    </membership>
+
+    <!-- Line connections (From/To) -->
+    <membership>
+      <parent class_id="4" object_id="301" />
+      <child class_id="2" object_id="101" />
+      <collection_name>Node From</collection_name>
+    </membership>
+
+    <membership>
+      <parent class_id="4" object_id="301" />
+      <child class_id="2" object_id="102" />
+      <collection_name>Node To</collection_name>
+    </membership>
+
+    <!-- Storage to Node connection -->
+    <membership>
+      <parent class_id="6" object_id="501" />
+      <child class_id="2" object_id="101" />
+      <collection_name>Node</collection_name>
+    </membership>
+
+    <!-- Generator to Fuel connection -->
+    <membership>
+      <parent class_id="3" object_id="201" />
+      <child class_id="5" object_id="401" />
+      <collection_name>Fuels</collection_name>
+    </membership>
+  </memberships>
+</model>

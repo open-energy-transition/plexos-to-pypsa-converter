@@ -1,0 +1,66 @@
+name: Unit tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel outdated runs on same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[development]"
+
+    - name: Run unit tests
+      id: tests
+      run: |
+        pytest tests/unit/ -v --tb=short
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        python -c "
+        import os
+
+        summary_file = os.getenv('GITHUB_STEP_SUMMARY')
+        test_outcome = '${{ steps.tests.outcome }}'
+
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('### Test Results\n')
+                f.write('Python ${{ matrix.python-version }}, ${{ matrix.os }}\n')
+                f.write('\n')
+                if test_outcome == 'success':
+                    f.write('All tests passed!\n')
+                elif test_outcome == 'failure':
+                    f.write('Some tests failed\n')
+                else:
+                    f.write('Tests completed with status: ' + test_outcome + '\n')
+        else:
+            print('GITHUB_STEP_SUMMARY environment variable not found')
+        "

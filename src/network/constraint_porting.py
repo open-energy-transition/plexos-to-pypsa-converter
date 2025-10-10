@@ -436,7 +436,7 @@ class ConstraintPorter:
                     )
 
                     logger.info(
-                        f"✓ Implemented emissions constraint '{name}': {rhs_value} tonnes CO2"
+                        f" Implemented emissions constraint '{name}': {rhs_value} tonnes CO2"
                     )
                     implemented += 1
                     self.implementation_stats["emissions_global"] += 1
@@ -475,7 +475,7 @@ class ConstraintPorter:
                                     rhs_value
                                 )
                                 logger.info(
-                                    f"✓ Applied generator constraint '{name}' to {gen_name}: {rhs_value} MW"
+                                    f" Applied generator constraint '{name}' to {gen_name}: {rhs_value} MW"
                                 )
                                 implemented += 1
                                 self.implementation_stats["generator_capacity"] += 1
@@ -521,7 +521,7 @@ class ConstraintPorter:
                         ):
                             self.network.lines.loc[member_name, "s_nom"] = rhs_value
                             logger.info(
-                                f"✓ Applied line constraint '{name}' to {member_name}: {rhs_value} MW"
+                                f" Applied line constraint '{name}' to {member_name}: {rhs_value} MW"
                             )
                             implemented += 1
                             self.implementation_stats["transmission_line"] += 1
@@ -529,7 +529,7 @@ class ConstraintPorter:
                         elif member_name in self.network.links.index:
                             self.network.links.loc[member_name, "p_nom"] = rhs_value
                             logger.info(
-                                f"✓ Applied link constraint '{name}' to {member_name}: {rhs_value} MW"
+                                f" Applied link constraint '{name}' to {member_name}: {rhs_value} MW"
                             )
                             implemented += 1
                             self.implementation_stats["transmission_link"] += 1
@@ -572,7 +572,7 @@ class ConstraintPorter:
                                         storage_name, "cyclic_state_of_charge"
                                     ] = True
                                     logger.info(
-                                        f"✓ Applied storage balance constraint '{name}' to {storage_name}"
+                                        f" Applied storage balance constraint '{name}' to {storage_name}"
                                     )
                                     implemented += 1
                                     self.implementation_stats["storage_balance"] += 1
@@ -586,7 +586,7 @@ class ConstraintPorter:
                                         storage_name, "p_nom"
                                     ] = rhs_value
                                     logger.info(
-                                        f"✓ Applied storage capacity constraint '{name}' to {storage_name}: {rhs_value} MW"
+                                        f" Applied storage capacity constraint '{name}' to {storage_name}: {rhs_value} MW"
                                     )
                                     implemented += 1
                                     self.implementation_stats["storage_capacity"] += 1
@@ -635,7 +635,7 @@ class ConstraintPorter:
             "message": message,
         }
         self.warnings.append(warning)
-        logger.warning(f"⚠️  {constraint['name']}: {message}")
+        logger.warning(f"  {constraint['name']}: {message}")
 
 
 def port_plexos_constraints(
@@ -667,7 +667,7 @@ def port_plexos_constraints(
 
     # Print summary
     if verbose:
-        print("\n📊 PLEXOS CONSTRAINT PORTING SUMMARY:")
+        print("\n PLEXOS CONSTRAINT PORTING SUMMARY:")
         print(f"Total constraints analyzed: {results['total_constraints']}")
         print(f"Successfully implemented: {results['implemented']}")
         print(f"Skipped (impossible/analysis needed): {results['skipped']}")
@@ -679,7 +679,7 @@ def port_plexos_constraints(
                 print(f"  {category}: {count}")
 
         if results["warnings"]:
-            print(f"\n⚠️  Warnings ({len(results['warnings'])}):")
+            print(f"\n  Warnings ({len(results['warnings'])}):")
             for warning in results["warnings"][:10]:  # Show first 10 warnings
                 print(f"  {warning['constraint_name']}: {warning['message']}")
             if len(results["warnings"]) > 10:

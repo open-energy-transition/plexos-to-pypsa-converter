@@ -8,9 +8,9 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.db.parse import find_bus_for_object, find_bus_for_storage_via_generators
-from src.network.costs import set_battery_marginal_costs, set_capital_costs_generic
-from src.utils.paths import extract_filename, safe_join
+from db.parse import find_bus_for_object, find_bus_for_storage_via_generators
+from network.costs import set_battery_marginal_costs, set_capital_costs_generic
+from utils.paths import extract_filename, safe_join
 
 logger = logging.getLogger(__name__)
 

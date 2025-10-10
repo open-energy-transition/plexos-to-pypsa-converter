@@ -1,0 +1,159 @@
+name: Models
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel outdated runs on same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Set to 'true' to enable consistency checks (disabled during development)
+  RUN_CONSISTENCY_CHECKS: 'false'
+  # Set to 'true' to enable solve tests (disabled during development)
+  RUN_SOLVE_TESTS: 'false'
+  # Number of snapshots to use for solve tests
+  SOLVE_SNAPSHOT_LIMIT: '50'
+  # Specify which models to test (user will configure these)
+  MODEL_1: 'sem-2024-2032'
+  MODEL_2: 'marei-eu'
+
+jobs:
+  model-conversion:
+    name: Cache and Conversion (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[development,solvers]"
+
+    - name: Cache PLEXOS models
+      id: cache-models
+      uses: actions/cache@v4
+      with:
+        path: src/examples/data/
+          # Cache key includes OS, registry hash (detects recipe changes) and model IDs
+        key: models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}
+        restore-keys: |
+          models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-
+          models-${{ runner.os }}-
+
+    - name: Display cache status
+      run: |
+        python -c "
+        import os
+
+        cache_hit = '${{ steps.cache-models.outputs.cache-hit }}' == 'true'
+        cache_key = 'models-${{ runner.os }}-${{ hashFiles('src/db/registry.py') }}-${{ env.MODEL_1 }}-${{ env.MODEL_2 }}'
+
+        # Print to console
+        if cache_hit:
+            print('Cache hit! Using cached models from previous run.')
+            print(f'Cache key: {cache_key}')
+        else:
+            print('Cache miss. Models will be downloaded.')
+            print('This is expected on first run or after registry changes.')
+
+        # Write to GitHub Step Summary
+        summary_file = os.getenv('GITHUB_STEP_SUMMARY')
+        if summary_file:
+            with open(summary_file, 'a') as f:
+                f.write('\\n### Cache Information\\n')
+                f.write(f'- Cache hit: ${{ steps.cache-models.outputs.cache-hit }}\\n')
+                f.write(f'- Cache key: {cache_key}\\n')
+        "
+
+
+    - name: Test Model Conversions
+      id: test-conversions
+      shell: bash
+      run: |
+        # Test Model 1
+        consistency_flag=""
+        if [ "${{ env.RUN_CONSISTENCY_CHECKS }}" != "true" ]; then
+          consistency_flag="--no-consistency-check"
+        fi
+
+        python tests/integration/test_model_conversion.py \
+          --model-id "${{ env.MODEL_1 }}" \
+          $consistency_flag \
+          --output-file model1_stats.txt
+
+        # Test Model 2  
+        python tests/integration/test_model_conversion.py \
+          --model-id "${{ env.MODEL_2 }}" \
+          $consistency_flag \
+          --output-file model2_stats.txt
+
+    - name: Test Model Solves (Optional)
+      if: env.RUN_SOLVE_TESTS == 'true'
+      shell: bash
+      run: |
+        python tests/integration/test_model_solve.py \
+          --model-id "${{ env.MODEL_1 }}" \
+          --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
+          --output-file model1_solve.txt
+
+        python tests/integration/test_model_solve.py \
+          --model-id "${{ env.MODEL_2 }}" \
+          --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
+          --output-file model2_solve.txt
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        python -c "
+        import os
+
+        def write_model_summary(summary, model_name, model_id, stats_file, solve_file):
+            if os.path.exists(stats_file):
+                summary.write(f'**{model_name}: {model_id}** (Success)\n')
+                with open(stats_file, 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            summary.write(f'- {key}: {value}\n')
+                
+                if os.path.exists(solve_file):
+                    summary.write('\n  **Solve Results:**\n')
+                    with open(solve_file, 'r') as f:
+                        for line in f:
+                            if '=' in line:
+                                key, value = line.strip().split('=', 1)
+                                summary.write(f'  - {key}: {value}\n')
+            else:
+                summary.write(f'**{model_name}: {model_id}** (Conversion failed)\n')
+            summary.write('\n')
+
+        summary_file = os.getenv('GITHUB_STEP_SUMMARY')
+        if summary_file:
+            with open(summary_file, 'a') as summary:
+                summary.write('### Model Conversion Test Results\n\n')
+                write_model_summary(summary, 'Model 1', '${{ env.MODEL_1 }}', 'model1_stats.txt', 'model1_solve.txt')
+                write_model_summary(summary, 'Model 2', '${{ env.MODEL_2 }}', 'model2_stats.txt', 'model2_solve.txt')
+                summary.write('---\n')
+                summary.write('Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}\n')
+                summary.write('Solve tests: ${{ env.RUN_SOLVE_TESTS }}\n')
+                if '${{ env.RUN_SOLVE_TESTS }}' == 'true':
+                    summary.write('Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}\n')
+        "

@@ -33,4 +33,4 @@ if __name__ == "__main__":
     subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
 
     # Optimize network
-    network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+    network.optimize(solver_name="highs", snapshots=subset)

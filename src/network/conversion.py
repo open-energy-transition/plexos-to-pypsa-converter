@@ -12,15 +12,15 @@ import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from src.db.registry import MODEL_REGISTRY
-from src.network.core import setup_network
-from src.network.multi_sector_db import (
+from db.registry import MODEL_REGISTRY
+from network.core import setup_network
+from network.multi_sector_db import (
     setup_enhanced_flow_network_with_csv,
     setup_flow_network_db,
     setup_gas_electric_network_db,
     setup_marei_csv_network,
 )
-from src.utils.model_paths import get_model_directory, get_model_xml_path
+from utils.model_paths import get_model_directory, get_model_xml_path
 
 
 def _merge_configs(default_config: dict, overrides: dict) -> dict:
@@ -115,6 +115,16 @@ def _create_electricity_model(
         "inflow_path": config.get("inflow_path"),
         "transmission_as_lines": config.get("transmission_as_lines", False),
     }
+
+    # Check for explicit demand file configuration (takes precedence over auto-detection)
+    if config.get("demand_file") and setup_args["snapshots_source"] is None:
+        demand_file_path = model_dir / config["demand_file"]
+        if demand_file_path.exists():
+            setup_args["snapshots_source"] = str(demand_file_path)
+            setup_args["demand_source"] = str(demand_file_path)
+        else:
+            msg = f"Configured demand_file not found: {demand_file_path}"
+            raise FileNotFoundError(msg)
 
     # Auto-determine paths if not explicitly provided
     if setup_args["snapshots_source"] is None:
@@ -563,7 +573,7 @@ def create_model_with_optimization(
     # Run consistency check
     print("\nRunning consistency check...")
     network.consistency_check()
-    print("✓ Consistency check passed")
+    print(" Consistency check passed")
 
     # Optimize
     print(f"\nOptimizing with {solver_name}...")
@@ -572,7 +582,7 @@ def create_model_with_optimization(
         optimize_args["solver_options"] = solver_options
 
     network.optimize(**optimize_args)  # type: ignore
-    print("✓ Optimization complete")
+    print(" Optimization complete")
     print(f"  Objective value: {network.objective:.2f}")
 
     return network, setup_summary

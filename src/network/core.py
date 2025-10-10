@@ -7,11 +7,11 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.network.constraints import add_constraints_enhanced
-from src.network.generators import port_generators, reassign_generators_to_node
-from src.network.lines import port_lines
-from src.network.links import port_links, reassign_links_to_node
-from src.network.storage import add_hydro_inflows, add_storage
+from network.constraints import add_constraints_enhanced
+from network.generators import port_generators, reassign_generators_to_node
+from network.lines import port_lines
+from network.links import port_links, reassign_links_to_node
+from network.storage import add_hydro_inflows, add_storage
 
 logger = logging.getLogger(__name__)
 
@@ -1789,10 +1789,10 @@ def setup_network(
     try:
         constraint_results = add_constraints_enhanced(network, db, verbose=True)
         print(
-            f"✓ Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"
+            f" Constraint porting completed: {constraint_results['implemented']} implemented, {constraint_results['skipped']} skipped"
         )
     except Exception as e:
-        print(f"⚠️  Constraint porting failed: {e}")
+        print(f"  Constraint porting failed: {e}")
         constraint_results = {"implemented": 0, "skipped": 0, "warnings": []}
 
     print("\n" + "=" * 60)

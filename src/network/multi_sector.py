@@ -15,10 +15,10 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.network.core import add_buses
-from src.network.generators import add_generators
-from src.network.links import add_links
-from src.network.storage import add_storage
+from network.core import add_buses
+from network.generators import add_generators
+from network.links import add_links
+from network.storage import add_storage
 
 logger = logging.getLogger(__name__)
 

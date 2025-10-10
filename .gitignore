@@ -189,3 +189,6 @@ doc/visualization/html/
 
 # example data
 src/examples/data/
+
+# claude
+CLAUDE.md
