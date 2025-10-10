@@ -86,6 +86,7 @@ jobs:
 
     - name: Test Model Conversions
       id: test-conversions
+      shell: bash
       run: |
         # Test Model 1
         consistency_flag=""
@@ -106,6 +107,7 @@ jobs:
 
     - name: Test Model Solves (Optional)
       if: env.RUN_SOLVE_TESTS == 'true'
+      shell: bash
       run: |
         python tests/integration/test_model_solve.py \
           --model-id "${{ env.MODEL_1 }}" \
