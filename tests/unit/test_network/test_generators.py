@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from plexosdb.enums import ClassEnum
 
-from src.network.generators import (
+from network.generators import (
     add_generators,
     parse_generator_ratings,
     port_generators,

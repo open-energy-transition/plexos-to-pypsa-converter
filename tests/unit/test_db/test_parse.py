@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from plexosdb.enums import ClassEnum
 
-from src.db.parse import (
+from db.parse import (
     find_bus_for_object,
     find_bus_for_storage_via_generators,
     find_fuel_for_generator,

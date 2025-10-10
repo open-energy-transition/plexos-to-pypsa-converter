@@ -14,7 +14,7 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.network.links import parse_lines_flow
+from network.links import parse_lines_flow
 
 logger = logging.getLogger(__name__)
 

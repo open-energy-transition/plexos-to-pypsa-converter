@@ -5,7 +5,7 @@ from plexosdb import PlexosDB  # type: ignore
 from plexosdb.enums import ClassEnum  # type: ignore
 from pypsa import Network  # type: ignore
 
-from src.db.parse import (
+from db.parse import (
     get_dataid_timeslice_map,
     get_property_active_mask,
     read_timeslice_activity,

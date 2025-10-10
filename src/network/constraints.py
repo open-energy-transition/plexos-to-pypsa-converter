@@ -6,7 +6,7 @@ from plexosdb.enums import ClassEnum
 from pypsa import Network
 
 # Import enhanced constraint porting system
-from src.network.constraint_porting import port_plexos_constraints
+from network.constraint_porting import port_plexos_constraints
 
 logger = logging.getLogger(__name__)
 

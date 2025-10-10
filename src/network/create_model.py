@@ -4,9 +4,9 @@ import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from src.network.core import setup_network
-from src.network.electricity_sector import create_aemo_model_data_driven
-from src.utils.model_paths import find_model_xml, get_model_directory
+from network.core import setup_network
+from network.electricity_sector import create_aemo_model_data_driven
+from utils.model_paths import find_model_xml, get_model_directory
 
 
 def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:

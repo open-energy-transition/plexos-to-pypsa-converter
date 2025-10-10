@@ -7,8 +7,8 @@ import pandas as pd
 import pypsa  # type: ignore
 from plexosdb import PlexosDB  # type: ignore
 
-from src.network.core import setup_network
-from src.utils.model_paths import find_model_xml, get_model_directory
+from network.core import setup_network
+from utils.model_paths import find_model_xml, get_model_directory
 
 # Find model data in src/examples/data/
 model_id = "aemo-2024-isp-progressive"

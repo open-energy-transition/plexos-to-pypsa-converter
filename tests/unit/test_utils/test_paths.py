@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.utils.paths import (
+from utils.paths import (
     contains_path_pattern,
     extract_filename,
     get_parent_directory,

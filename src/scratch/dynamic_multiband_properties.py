@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
-from src.utils.model_paths import find_model_xml
+from utils.model_paths import find_model_xml
 
 
 def extract_properties(xml_file):

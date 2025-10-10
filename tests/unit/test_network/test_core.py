@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 from plexosdb.enums import ClassEnum
 
-from src.network.core import (
+from network.core import (
     _create_datetime_index,
     _parse_demand_directory,
     _parse_demand_single_file,

@@ -6,16 +6,16 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.db.parse import (
+from db.parse import (
     find_bus_for_object,
     find_fuel_for_generator,
     get_dataid_timeslice_map,
     get_property_active_mask,
     read_timeslice_activity,
 )
-from src.network.carriers import parse_fuel_prices
-from src.network.costs import set_capital_costs_generic
-from src.utils.paths import contains_path_pattern, extract_filename, safe_join
+from network.carriers import parse_fuel_prices
+from network.costs import set_capital_costs_generic
+from utils.paths import contains_path_pattern, extract_filename, safe_join
 
 logger = logging.getLogger(__name__)
 

@@ -8,14 +8,14 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from src.network.core import discover_carriers_from_db
-from src.network.csv_loaders import load_marei_full_dataset
-from src.network.flows import port_flow_network
-from src.network.gas import port_gas_components
-from src.network.generators import port_generators
-from src.network.links import port_links
-from src.network.progress import create_progress_tracker
-from src.network.storage import add_storage
+from network.core import discover_carriers_from_db
+from network.csv_loaders import load_marei_full_dataset
+from network.flows import port_flow_network
+from network.gas import port_gas_components
+from network.generators import port_generators
+from network.links import port_links
+from network.progress import create_progress_tracker
+from network.storage import add_storage
 
 logger = logging.getLogger(__name__)
 

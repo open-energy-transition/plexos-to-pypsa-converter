@@ -11,8 +11,8 @@ definition from MODEL_REGISTRY.
 import os
 from pathlib import Path
 
-from src.db.registry import MODEL_REGISTRY
-from src.utils.recipe_executor import RecipeExecutor
+from db.registry import MODEL_REGISTRY
+from utils.recipe_executor import RecipeExecutor
 
 # Model ID to directory mapping - centralized for easier maintenance
 MODEL_DIRECTORIES: dict[str, str] = {

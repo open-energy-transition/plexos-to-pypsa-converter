@@ -3,8 +3,8 @@ from pathlib import Path
 import pypsa
 from plexosdb import PlexosDB
 
-from src.db.discovery import discover_model_paths
-from src.network.core import setup_network
+from db.discovery import discover_model_paths
+from network.core import setup_network
 
 
 def create_model_from_xml(
