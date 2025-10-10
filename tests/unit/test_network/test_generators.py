@@ -26,10 +26,8 @@ class TestAddGenerators:
     def test_adds_all_generators_from_db(self, empty_network, mock_plexos_db, mocker):
         """Test that all generators from database are added to network."""
         # Mock find_bus_for_object to return a bus
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
 
         empty_network.add("Bus", "Bus1", carrier="AC")
 
@@ -52,10 +50,8 @@ class TestAddGenerators:
 
     def test_sets_p_nom_from_max_capacity(self, empty_network, mock_plexos_db, mocker):
         """Test that p_nom is set from Max Capacity property."""
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value=None
-        )
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value=None)
 
         empty_network.add("Bus", "Bus1", carrier="AC")
 
@@ -70,10 +66,8 @@ class TestAddGenerators:
 
     def test_sets_all_generator_attributes(self, empty_network, mock_plexos_db, mocker):
         """Test that all generator attributes are set correctly."""
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value=None
-        )
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value=None)
 
         empty_network.add("Bus", "Bus1", carrier="AC")
 
@@ -105,11 +99,9 @@ class TestAddGenerators:
     ):
         """Test that bus is found via find_bus_for_object from parse.py."""
         mock_find_bus = mocker.patch(
-            "src.network.generators.find_bus_for_object", return_value="FoundBus"
+            "network.generators.find_bus_for_object", return_value="FoundBus"
         )
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value=None
-        )
+        mocker.patch("network.generators.find_fuel_for_generator", return_value=None)
 
         empty_network.add("Bus", "FoundBus", carrier="AC")
 
@@ -127,9 +119,9 @@ class TestAddGenerators:
         self, empty_network, mock_plexos_db, mocker
     ):
         """Test that carrier is found via find_fuel_for_generator."""
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
         mock_find_fuel = mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Natural Gas"
+            "network.generators.find_fuel_for_generator", return_value="Natural Gas"
         )
 
         empty_network.add("Bus", "Bus1", carrier="AC")
@@ -148,10 +140,8 @@ class TestAddGenerators:
         self, empty_network, mock_plexos_db, mocker, capsys
     ):
         """Test that generators without bus are skipped and reported."""
-        mocker.patch("src.network.generators.find_bus_for_object", return_value=None)
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value=None
-        )
+        mocker.patch("network.generators.find_bus_for_object", return_value=None)
+        mocker.patch("network.generators.find_fuel_for_generator", return_value=None)
 
         mock_plexos_db.list_objects_by_class.return_value = ["Gen1", "Gen2"]
         mock_plexos_db.get_object_properties.return_value = [
@@ -181,9 +171,9 @@ class TestAddGenerators:
 
     def test_generators_as_links_mode(self, empty_network, mock_plexos_db, mocker):
         """Test generators-as-links mode creates fuel buses and links."""
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator",
+            "network.generators.find_fuel_for_generator",
             return_value="Natural Gas CCGT",
         )
 
@@ -303,7 +293,7 @@ class TestParseGeneratorRatings:
 
         # Mock get_dataid_timeslice_map
         mocker.patch(
-            "src.network.generators.get_dataid_timeslice_map", return_value={1: ["TS1"]}
+            "network.generators.get_dataid_timeslice_map", return_value={1: ["TS1"]}
         )
 
         mock_plexos_db.query.side_effect = [
@@ -519,7 +509,7 @@ class TestSetCapacityRatings:
         )
         df.to_csv(timeslice_csv, index=False)
 
-        mocker.patch("src.network.generators.get_dataid_timeslice_map", return_value={})
+        mocker.patch("network.generators.get_dataid_timeslice_map", return_value={})
 
         mock_plexos_db.query.side_effect = [
             [(1, "Gen1")],
@@ -867,7 +857,7 @@ class TestSetCapitalCosts:
         self, network_with_generator, mock_plexos_db, mocker
     ):
         """Test that set_capital_costs calls generic function."""
-        mock_generic = mocker.patch("src.network.generators.set_capital_costs_generic")
+        mock_generic = mocker.patch("network.generators.set_capital_costs_generic")
 
         set_capital_costs(network_with_generator, mock_plexos_db)
 
@@ -877,7 +867,7 @@ class TestSetCapitalCosts:
         self, network_with_generator, mock_plexos_db, mocker
     ):
         """Test that correct ClassEnum.Generator is passed to generic function."""
-        mock_generic = mocker.patch("src.network.generators.set_capital_costs_generic")
+        mock_generic = mocker.patch("network.generators.set_capital_costs_generic")
 
         set_capital_costs(network_with_generator, mock_plexos_db)
 
@@ -902,12 +892,8 @@ class TestSetMarginalCosts:
 
         # Mock fuel prices
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
-        mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "Heat Rate Incr1", "value": "9.5"},
@@ -931,9 +917,7 @@ class TestSetMarginalCosts:
 
         # Gen1 already has carrier="Gas"
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "Heat Rate Incr1", "value": "9.5"},
@@ -960,11 +944,9 @@ class TestSetMarginalCosts:
         empty_network.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"Coal": [8.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
         mock_find_fuel = mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Coal"
+            "network.generators.find_fuel_for_generator", return_value="Coal"
         )
 
         mock_plexos_db.get_object_properties.return_value = [
@@ -986,9 +968,7 @@ class TestSetMarginalCosts:
         network_with_generator.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"UnknownFuel": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         # Gen1 has carrier="Gas" but fuel_prices doesn't have "Gas"
         mock_plexos_db.get_object_properties.return_value = []
@@ -1006,9 +986,7 @@ class TestSetMarginalCosts:
         network_with_generator.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "VO&M Charge", "value": "5"},  # No Heat Rate Inc
@@ -1028,9 +1006,7 @@ class TestSetMarginalCosts:
         network_with_generator.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "Heat Rate Incr1", "value": "9.5"},
@@ -1051,9 +1027,7 @@ class TestSetMarginalCosts:
         network_with_generator.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "Heat Rate Incr1", "value": "8"},
@@ -1078,9 +1052,7 @@ class TestSetMarginalCosts:
         network_with_generator.set_snapshots(snapshots)
 
         fuel_prices = pd.DataFrame({"Gas": [10.0] * 24}, index=snapshots)
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=fuel_prices
-        )
+        mocker.patch("network.generators.parse_fuel_prices", return_value=fuel_prices)
 
         mock_plexos_db.get_object_properties.return_value = [
             {"property": "Heat Rate Incr1", "value": "9.5"},
@@ -1154,15 +1126,13 @@ class TestPortGenerators:
         empty_network.set_snapshots(snapshots)
 
         # Mock all dependencies
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices",
+            "network.generators.parse_fuel_prices",
             return_value=pd.DataFrame({"Gas": [10] * 24}, index=snapshots),
         )
-        mocker.patch("src.network.generators.set_capital_costs_generic")
+        mocker.patch("network.generators.set_capital_costs_generic")
 
         mock_plexos_db.list_objects_by_class.return_value = ["Gen1"]
         mock_plexos_db.get_object_properties.return_value = [
@@ -1195,15 +1165,13 @@ class TestPortGenerators:
         snapshots = pd.date_range("2024-01-01", periods=24, freq="h")
         empty_network.set_snapshots(snapshots)
 
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices",
+            "network.generators.parse_fuel_prices",
             return_value=pd.DataFrame({"Gas": [10] * 24}, index=snapshots),
         )
-        mocker.patch("src.network.generators.set_capital_costs_generic")
+        mocker.patch("network.generators.set_capital_costs_generic")
 
         mock_plexos_db.list_objects_by_class.return_value = ["Gen1"]
         mock_plexos_db.get_object_properties.return_value = [
@@ -1229,18 +1197,18 @@ class TestPortGenerators:
         snapshots = pd.date_range("2024-01-01", periods=24, freq="h")
         empty_network.set_snapshots(snapshots)
 
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator",
+            "network.generators.find_fuel_for_generator",
             return_value="Natural Gas CCGT",
         )
         mocker.patch(
-            "src.network.generators.parse_fuel_prices", return_value=pd.DataFrame()
+            "network.generators.parse_fuel_prices", return_value=pd.DataFrame()
         )
-        mocker.patch("src.network.generators.set_capital_costs_generic")
+        mocker.patch("network.generators.set_capital_costs_generic")
         # Mock parse_generator_ratings to avoid empty concatenation error
         mocker.patch(
-            "src.network.generators.parse_generator_ratings",
+            "network.generators.parse_generator_ratings",
             return_value=pd.DataFrame(),
         )
 
@@ -1271,16 +1239,14 @@ class TestPortGenerators:
         vre_path = tmp_path / "vre"
         vre_path.mkdir()
 
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices",
+            "network.generators.parse_fuel_prices",
             return_value=pd.DataFrame({"Gas": [10] * 24}, index=snapshots),
         )
-        mocker.patch("src.network.generators.set_capital_costs_generic")
-        mocker.patch("src.network.generators.get_dataid_timeslice_map", return_value={})
+        mocker.patch("network.generators.set_capital_costs_generic")
+        mocker.patch("network.generators.get_dataid_timeslice_map", return_value={})
 
         mock_plexos_db.list_objects_by_class.return_value = ["Gen1"]
         mock_plexos_db.get_object_properties.return_value = [
@@ -1310,15 +1276,13 @@ class TestPortGenerators:
         snapshots = pd.date_range("2024-01-01", periods=24, freq="h")
         empty_network.set_snapshots(snapshots)
 
-        mocker.patch("src.network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_bus_for_object", return_value="Bus1")
+        mocker.patch("network.generators.find_fuel_for_generator", return_value="Gas")
         mocker.patch(
-            "src.network.generators.find_fuel_for_generator", return_value="Gas"
-        )
-        mocker.patch(
-            "src.network.generators.parse_fuel_prices",
+            "network.generators.parse_fuel_prices",
             return_value=pd.DataFrame({"Gas": [10] * 24}, index=snapshots),
         )
-        mocker.patch("src.network.generators.set_capital_costs_generic")
+        mocker.patch("network.generators.set_capital_costs_generic")
 
         mock_plexos_db.list_objects_by_class.return_value = ["Gen1"]
         mock_plexos_db.get_object_properties.return_value = [

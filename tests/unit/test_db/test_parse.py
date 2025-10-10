@@ -232,7 +232,7 @@ class TestFindBusForStorageViaGenerators:
         mock_plexos_db.query.return_value = query_result
 
         # Mock find_bus_for_object to return bus for generator
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = "Bus1"
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
@@ -250,7 +250,7 @@ class TestFindBusForStorageViaGenerators:
         ]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             # First generator returns bus
             mock_find_bus.return_value = "Bus1"
 
@@ -267,7 +267,7 @@ class TestFindBusForStorageViaGenerators:
         ]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             # Gen1 has no bus, Gen2 has bus
             mock_find_bus.side_effect = [None, "Bus2"]
 
@@ -282,7 +282,7 @@ class TestFindBusForStorageViaGenerators:
         query_result = [("Gen1", "Generator", "Storage1", "Storage", "Head Storage")]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = "Bus1"
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
@@ -294,7 +294,7 @@ class TestFindBusForStorageViaGenerators:
         query_result = [("Gen1", "Generator", "Storage1", "Storage", "Tail Storage")]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = "Bus1"
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
@@ -322,7 +322,7 @@ class TestFindBusForStorageViaGenerators:
         query_result = [("Gen1", "Generator", "Storage1", "Storage", "Head Storage")]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = None
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
@@ -337,7 +337,7 @@ class TestFindBusForStorageViaGenerators:
         ]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = None
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
@@ -351,7 +351,7 @@ class TestFindBusForStorageViaGenerators:
         query_result = [("Gen1", "Generator", "Storage1", "Storage", "Head Storage")]
         mock_plexos_db.query.return_value = query_result
 
-        with patch("src.db.parse.find_bus_for_object") as mock_find_bus:
+        with patch("db.parse.find_bus_for_object") as mock_find_bus:
             mock_find_bus.return_value = "Bus1"
 
             result = find_bus_for_storage_via_generators(mock_plexos_db, "Storage1")
