@@ -84,50 +84,37 @@ jobs:
         "
 
 
-    - name: Test Model 1 Conversion
-      id: test-model-1
+    - name: Test Model Conversions
+      id: test-conversions
       run: |
-        if [ "${{ env.RUN_CONSISTENCY_CHECKS }}" = "true" ]; then
-          python tests/integration/test_model_conversion.py \
-            --model-id "${{ env.MODEL_1 }}" \
-            --output-file model1_stats.txt
-        else
-          python tests/integration/test_model_conversion.py \
-            --model-id "${{ env.MODEL_1 }}" \
-            --no-consistency-check \
-            --output-file model1_stats.txt
+        # Test Model 1
+        consistency_flag=""
+        if [ "${{ env.RUN_CONSISTENCY_CHECKS }}" != "true" ]; then
+          consistency_flag="--no-consistency-check"
         fi
 
-    - name: Test Model 2 Conversion
-      id: test-model-2
-      run: |
-        if [ "${{ env.RUN_CONSISTENCY_CHECKS }}" = "true" ]; then
-          python tests/integration/test_model_conversion.py \
-            --model-id "${{ env.MODEL_2 }}" \
-            --output-file model2_stats.txt
-        else
-          python tests/integration/test_model_conversion.py \
-            --model-id "${{ env.MODEL_2 }}" \
-            --no-consistency-check \
-            --output-file model2_stats.txt
-        fi
+        python tests/integration/test_model_conversion.py \
+          --model-id "${{ env.MODEL_1 }}" \
+          $consistency_flag \
+          --output-file model1_stats.txt
 
-    - name: Solve Model 1 (Optional)
+        # Test Model 2  
+        python tests/integration/test_model_conversion.py \
+          --model-id "${{ env.MODEL_2 }}" \
+          $consistency_flag \
+          --output-file model2_stats.txt
+
+    - name: Test Model Solves (Optional)
       if: env.RUN_SOLVE_TESTS == 'true'
       run: |
         python tests/integration/test_model_solve.py \
           --model-id "${{ env.MODEL_1 }}" \
           --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
-          --solver highs \
           --output-file model1_solve.txt
 
-    - name: Solve Model 2 (Optional)
-      if: env.RUN_SOLVE_TESTS == 'true'
-      run: |
         python tests/integration/test_model_solve.py \
           --model-id "${{ env.MODEL_2 }}" \
           --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
-          --solver highs \
           --output-file model2_solve.txt
 
     - name: Generate test summary
@@ -136,63 +123,35 @@ jobs:
         python -c "
         import os
 
+        def write_model_summary(summary, model_name, model_id, stats_file, solve_file):
+            if os.path.exists(stats_file):
+                summary.write(f'**{model_name}: {model_id}** (Success)\n')
+                with open(stats_file, 'r') as f:
+                    for line in f:
+                        if '=' in line:
+                            key, value = line.strip().split('=', 1)
+                            summary.write(f'- {key}: {value}\n')
+                
+                if os.path.exists(solve_file):
+                    summary.write('\n  **Solve Results:**\n')
+                    with open(solve_file, 'r') as f:
+                        for line in f:
+                            if '=' in line:
+                                key, value = line.strip().split('=', 1)
+                                summary.write(f'  - {key}: {value}\n')
+            else:
+                summary.write(f'**{model_name}: {model_id}** (Conversion failed)\n')
+            summary.write('\n')
+
         summary_file = os.getenv('GITHUB_STEP_SUMMARY')
-        if not summary_file:
-            print('Warning: GITHUB_STEP_SUMMARY not available')
-            exit(0)
-
-        with open(summary_file, 'a') as summary:
-            summary.write('### Model Conversion Test Results\n')
-            summary.write('\n')
-
-            # Model 1 summary
-            if os.path.exists('model1_stats.txt'):
-                summary.write('**Model 1: ${{ env.MODEL_1 }}** (Success)\n')
-                with open('model1_stats.txt', 'r') as f:
-                    for line in f:
-                        if '=' in line:
-                            key, value = line.strip().split('=', 1)
-                            summary.write(f'- {key}: {value}\n')
-
-                # Add solve results if available
-                if os.path.exists('model1_solve.txt'):
-                    summary.write('\n')
-                    summary.write('  **Solve Results:**\n')
-                    with open('model1_solve.txt', 'r') as f:
-                        for line in f:
-                            if '=' in line:
-                                key, value = line.strip().split('=', 1)
-                                summary.write(f'  - {key}: {value}\n')
-            else:
-                summary.write('**Model 1: ${{ env.MODEL_1 }}** (Conversion failed)\n')
-
-            summary.write('\n')
-
-            # Model 2 summary
-            if os.path.exists('model2_stats.txt'):
-                summary.write('**Model 2: ${{ env.MODEL_2 }}** (Success)\n')
-                with open('model2_stats.txt', 'r') as f:
-                    for line in f:
-                        if '=' in line:
-                            key, value = line.strip().split('=', 1)
-                            summary.write(f'- {key}: {value}\n')
-
-                # Add solve results if available
-                if os.path.exists('model2_solve.txt'):
-                    summary.write('\n')
-                    summary.write('  **Solve Results:**\n')
-                    with open('model2_solve.txt', 'r') as f:
-                        for line in f:
-                            if '=' in line:
-                                key, value = line.strip().split('=', 1)
-                                summary.write(f'  - {key}: {value}\n')
-            else:
-                summary.write('**Model 2: ${{ env.MODEL_2 }}** (Conversion failed)\n')
-
-            summary.write('\n')
-            summary.write('---\n')
-            summary.write('Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}\n')
-            summary.write('Solve tests: ${{ env.RUN_SOLVE_TESTS }}\n')
-            if '${{ env.RUN_SOLVE_TESTS }}' == 'true':
-                summary.write('Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}\n')
+        if summary_file:
+            with open(summary_file, 'a') as summary:
+                summary.write('### Model Conversion Test Results\n\n')
+                write_model_summary(summary, 'Model 1', '${{ env.MODEL_1 }}', 'model1_stats.txt', 'model1_solve.txt')
+                write_model_summary(summary, 'Model 2', '${{ env.MODEL_2 }}', 'model2_stats.txt', 'model2_solve.txt')
+                summary.write('---\n')
+                summary.write('Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}\n')
+                summary.write('Solve tests: ${{ env.RUN_SOLVE_TESTS }}\n')
+                if '${{ env.RUN_SOLVE_TESTS }}' == 'true':
+                    summary.write('Snapshots per solve: ${{ env.SOLVE_SNAPSHOT_LIMIT }}\n')
         "
