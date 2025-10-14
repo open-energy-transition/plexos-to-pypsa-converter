@@ -440,6 +440,30 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            {
+                "step": "download",
+                "url": "https://www.caiso.com/documents/2025-summer-loads-and-resources-assessment-public-stochastic-model.zip",
+                "target": "caiso-sa25.zip",
+                "description": "Downloading CAISO 2025 Summer Assessment model",
+            },
+            {
+                "step": "extract",
+                "source": "caiso-sa25.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "delete",
+                "pattern": "caiso-sa25.zip",
+                "description": "Removing archive",
+            },
+            {
+                "step": "validate",
+                "checks": ["xml_exists"],
+                "description": "Validating installation",
+            },
+        ],
     },
     "nrel-118": {
         "name": "NREL Extended IEEE 118-bus",
