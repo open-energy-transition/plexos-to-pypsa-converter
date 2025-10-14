@@ -280,12 +280,8 @@ class RecipeExecutor:
 
         # Move each matched file/directory
         for source_path in sources:
-            if source_path.is_file():
-                shutil.move(str(source_path), str(target / source_path.name))
-            elif source_path.is_dir():
-                # Move directory contents
-                for item in source_path.iterdir():
-                    shutil.move(str(item), str(target / item.name))
+            # Move the file or directory itself (not just contents)
+            shutil.move(str(source_path), str(target / source_path.name))
 
     def _step_copy(self, instruction: dict[str, Any]) -> None:
         """Handle copy step.
@@ -502,7 +498,16 @@ class RecipeExecutor:
             If download fails
         """
         try:
-            response = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
+            # Use browser-like headers to bypass bot protection (e.g., Cloudflare)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Referer": "https://www.aemo.com.au/",
+            }
+            response = requests.get(
+                url, stream=True, timeout=REQUEST_TIMEOUT, headers=headers
+            )
             response.raise_for_status()
 
             total_size = int(response.headers.get("content-length", 0))
