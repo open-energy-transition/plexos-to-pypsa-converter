@@ -449,6 +449,32 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            {
+                "step": "manual",
+                "instructions": "Download 'mti-118-mt-da-rt-reserves-all-generators.xml' from https://db.bettergrids.org/bettergrids/handle/1001/120 and place it in this folder.",
+                "description": "Manual download required for NREL 118 XML file.",
+            },
+            {
+                "step": "manual",
+                "instructions": "Download 'Input-files.zip' from https://db.bettergrids.org/bettergrids/handle/1001/120, extract it, and place the resulting 'Input files' folder in this directory.",
+                "description": "Manual download and extraction required for NREL 118 input files.",
+            },
+            {
+                "step": "manual",
+                "instructions": "Download 'additional-files-mti-118.zip' from https://db.bettergrids.org/bettergrids/handle/1001/120, extract it, and place the resulting 'Additional Files MTI 118' folder in this directory.",
+                "description": "Manual download and extraction required for NREL 118 additional files.",
+            },
+            {
+                "step": "validate",
+                "checks": [
+                    "xml_exists",
+                    "required_dir:Input files",
+                    "required_dir:Additional Files MTI 118",
+                ],
+                "description": "Validating installation",
+            },
+        ],
     },
     "sem-2024-2032": {
         "name": "SEM 2024-2032 Validation Model",
