@@ -38,6 +38,122 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            # Download and extract main model ZIP (contains all 3 models)
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip",
+                "target": "aemo-models.zip",
+                "description": "Downloading AEMO 2024 ISP models",
+            },
+            {
+                "step": "extract",
+                "source": "aemo-models.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            # Download solar traces and move into nested model folder
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-solar-traces.zip",
+                "target": "solar-traces.zip",
+                "description": "Downloading solar traces",
+            },
+            {
+                "step": "extract",
+                "source": "solar-traces.zip",
+                "target": ".",
+                "description": "Extracting solar traces",
+            },
+            {
+                "step": "move",
+                "source": "solar",
+                "target": "2024 ISP Model/2024 ISP Green Energy Exports/Traces",
+                "description": "Moving solar traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "solar-traces.zip",
+                "description": "Removing solar archive",
+            },
+            # Download timeslice traces and move into nested model folder
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-timeslice-traces.zip",
+                "target": "timeslice-traces.zip",
+                "description": "Downloading timeslice traces",
+            },
+            {
+                "step": "extract",
+                "source": "timeslice-traces.zip",
+                "target": ".",
+                "description": "Extracting timeslice traces",
+            },
+            {
+                "step": "move",
+                "source": "timeslice",
+                "target": "2024 ISP Model/2024 ISP Green Energy Exports/Traces",
+                "description": "Moving timeslice traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "timeslice-traces.zip",
+                "description": "Removing timeslice archive",
+            },
+            # Download wind traces and move into nested model folder
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-wind-traces.zip",
+                "target": "wind-traces.zip",
+                "description": "Downloading wind traces",
+            },
+            {
+                "step": "extract",
+                "source": "wind-traces.zip",
+                "target": ".",
+                "description": "Extracting wind traces",
+            },
+            {
+                "step": "move",
+                "source": "wind",
+                "target": "2024 ISP Model/2024 ISP Green Energy Exports/Traces",
+                "description": "Moving wind traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "wind-traces.zip",
+                "description": "Removing wind archive",
+            },
+            # Move assembled model contents to root
+            {
+                "step": "delete",
+                "pattern": "aemo-models.zip",
+                "description": "Removing main model archive",
+            },
+            {
+                "step": "move",
+                "source": "2024 ISP Model/2024 ISP Green Energy Exports/*",
+                "target": ".",
+                "description": "Moving Green Energy Exports model contents to root",
+            },
+            {
+                "step": "delete",
+                "pattern": "2024 ISP Model",
+                "recursive": True,
+                "description": "Removing wrapper folder and other models",
+            },
+            # Validate installation
+            {
+                "step": "validate",
+                "checks": [
+                    "xml_exists",
+                    "required_dir:Traces/solar",
+                    "required_dir:Traces/timeslice",
+                    "required_dir:Traces/wind",
+                ],
+                "description": "Validating installation",
+            },
+        ],
     },
     "aemo-2024-isp-progressive-change": {
         "name": "AEMO 2024 ISP - Progressive Change",
@@ -47,6 +163,117 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            # Download and extract main model ZIP (contains all 3 models)
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip",
+                "target": "aemo-models.zip",
+                "description": "Downloading AEMO 2024 ISP models",
+            },
+            {
+                "step": "extract",
+                "source": "aemo-models.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-solar-traces.zip",
+                "target": "solar-traces.zip",
+                "description": "Downloading solar traces",
+            },
+            {
+                "step": "extract",
+                "source": "solar-traces.zip",
+                "target": ".",
+                "description": "Extracting solar traces",
+            },
+            {
+                "step": "move",
+                "source": "solar",
+                "target": "2024 ISP Model/2024 ISP Progressive Change/Traces",
+                "description": "Moving solar traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "solar-traces.zip",
+                "description": "Removing solar archive",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-timeslice-traces.zip",
+                "target": "timeslice-traces.zip",
+                "description": "Downloading timeslice traces",
+            },
+            {
+                "step": "extract",
+                "source": "timeslice-traces.zip",
+                "target": ".",
+                "description": "Extracting timeslice traces",
+            },
+            {
+                "step": "move",
+                "source": "timeslice",
+                "target": "2024 ISP Model/2024 ISP Progressive Change/Traces",
+                "description": "Moving timeslice traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "timeslice-traces.zip",
+                "description": "Removing timeslice archive",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-wind-traces.zip",
+                "target": "wind-traces.zip",
+                "description": "Downloading wind traces",
+            },
+            {
+                "step": "extract",
+                "source": "wind-traces.zip",
+                "target": ".",
+                "description": "Extracting wind traces",
+            },
+            {
+                "step": "move",
+                "source": "wind",
+                "target": "2024 ISP Model/2024 ISP Progressive Change/Traces",
+                "description": "Moving wind traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "wind-traces.zip",
+                "description": "Removing wind archive",
+            },
+            {
+                "step": "delete",
+                "pattern": "aemo-models.zip",
+                "description": "Removing main model archive",
+            },
+            {
+                "step": "move",
+                "source": "2024 ISP Model/2024 ISP Progressive Change/*",
+                "target": ".",
+                "description": "Moving Progressive Change model contents to root",
+            },
+            {
+                "step": "delete",
+                "pattern": "2024 ISP Model",
+                "recursive": True,
+                "description": "Removing wrapper folder and other models",
+            },
+            {
+                "step": "validate",
+                "checks": [
+                    "xml_exists",
+                    "required_dir:Traces/solar",
+                    "required_dir:Traces/timeslice",
+                    "required_dir:Traces/wind",
+                ],
+                "description": "Validating installation",
+            },
+        ],
     },
     "aemo-2024-isp-step-change": {
         "name": "AEMO 2024 ISP - Step Change",
@@ -56,6 +283,116 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-model.zip",
+                "target": "aemo-models.zip",
+                "description": "Downloading AEMO 2024 ISP models",
+            },
+            {
+                "step": "extract",
+                "source": "aemo-models.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-solar-traces.zip",
+                "target": "solar-traces.zip",
+                "description": "Downloading solar traces",
+            },
+            {
+                "step": "extract",
+                "source": "solar-traces.zip",
+                "target": ".",
+                "description": "Extracting solar traces",
+            },
+            {
+                "step": "move",
+                "source": "solar",
+                "target": "2024 ISP Model/2024 ISP Step Change/Traces",
+                "description": "Moving solar traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "solar-traces.zip",
+                "description": "Removing solar archive",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-timeslice-traces.zip",
+                "target": "timeslice-traces.zip",
+                "description": "Downloading timeslice traces",
+            },
+            {
+                "step": "extract",
+                "source": "timeslice-traces.zip",
+                "target": ".",
+                "description": "Extracting timeslice traces",
+            },
+            {
+                "step": "move",
+                "source": "timeslice",
+                "target": "2024 ISP Model/2024 ISP Step Change/Traces",
+                "description": "Moving timeslice traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "timeslice-traces.zip",
+                "description": "Removing timeslice archive",
+            },
+            {
+                "step": "download",
+                "url": "https://www.aemo.com.au/-/media/files/major-publications/isp/2024/supporting-materials/2024-isp-wind-traces.zip",
+                "target": "wind-traces.zip",
+                "description": "Downloading wind traces",
+            },
+            {
+                "step": "extract",
+                "source": "wind-traces.zip",
+                "target": ".",
+                "description": "Extracting wind traces",
+            },
+            {
+                "step": "move",
+                "source": "wind",
+                "target": "2024 ISP Model/2024 ISP Step Change/Traces",
+                "description": "Moving wind traces into model folder",
+            },
+            {
+                "step": "delete",
+                "pattern": "wind-traces.zip",
+                "description": "Removing wind archive",
+            },
+            {
+                "step": "delete",
+                "pattern": "aemo-models.zip",
+                "description": "Removing main model archive",
+            },
+            {
+                "step": "move",
+                "source": "2024 ISP Model/2024 ISP Step Change/*",
+                "target": ".",
+                "description": "Moving Step Change model contents to root",
+            },
+            {
+                "step": "delete",
+                "pattern": "2024 ISP Model",
+                "recursive": True,
+                "description": "Removing wrapper folder and other models",
+            },
+            {
+                "step": "validate",
+                "checks": [
+                    "xml_exists",
+                    "required_dir:Traces/solar",
+                    "required_dir:Traces/timeslice",
+                    "required_dir:Traces/wind",
+                ],
+                "description": "Validating installation",
+            },
+        ],
     },
     "caiso-irp23": {
         "name": "CAISO IRP 2023 Stochastic",
