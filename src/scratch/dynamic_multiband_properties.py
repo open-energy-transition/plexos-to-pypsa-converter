@@ -70,7 +70,7 @@ def extract_properties(xml_file):
 
 if __name__ == "__main__":
     # Find model data in src/examples/data/
-    model_id = "aemo-2024-isp-progressive"
+    model_id = "aemo-2024-isp-progressive-change"
     xml_path = find_model_xml(model_id)
 
     if xml_path is None:

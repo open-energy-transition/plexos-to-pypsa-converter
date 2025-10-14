@@ -30,7 +30,7 @@ Recipe Instruction Types:
 
 # Model metadata registry
 MODEL_REGISTRY = {
-    "aemo-2024-green": {
+    "aemo-2024-green-energy-exports": {
         "name": "AEMO 2024 ISP - Green Energy Exports",
         "source": "AEMO",
         "xml_filename": "2024 ISP Green Energy Exports Model.xml",
@@ -39,7 +39,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
     },
-    "aemo-2024-isp-progressive": {
+    "aemo-2024-isp-progressive-change": {
         "name": "AEMO 2024 ISP - Progressive Change",
         "source": "AEMO",
         "xml_filename": "2024 ISP Progressive Change Model.xml",
@@ -67,7 +67,7 @@ MODEL_REGISTRY = {
             "aggregate_node_name": "CAISO_Load_Aggregate",
             "model_name": "M01Y2024 PSP23_25MMT",
             "cross_model_dependencies": {
-                "vre_profiles_model_id": "aemo-2024-isp-progressive",
+                "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
             },
         },
         "recipe": [
@@ -124,7 +124,7 @@ MODEL_REGISTRY = {
             "model_name": "Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
             "demand_file": "CSV Files (1 of 2)/AI Demand_2023-2033_5base years.csv",
             "cross_model_dependencies": {
-                "vre_profiles_model_id": "aemo-2024-isp-progressive",
+                "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
             },
         },
         "recipe": [

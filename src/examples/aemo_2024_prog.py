@@ -5,7 +5,7 @@ import pandas as pd
 from network.conversion import create_model
 
 # Constants
-MODEL_ID = "aemo-2024-isp-progressive"
+MODEL_ID = "aemo-2024-isp-progressive-change"
 SNAPSHOTS_PER_YEAR = 50
 
 if __name__ == "__main__":

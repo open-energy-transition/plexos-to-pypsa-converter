@@ -16,9 +16,9 @@ from utils.recipe_executor import RecipeExecutor
 
 # Model ID to directory mapping - centralized for easier maintenance
 MODEL_DIRECTORIES: dict[str, str] = {
-    "aemo-2024-green": "aemo-2024-green",
-    "aemo-2024-isp-progressive": "aemo-2024-isp-progressive",
-    "aemo-2024-isp-step": "aemo-2024-isp-step",
+    "aemo-2024-green-energy-exports": "aemo-2024-green-energy-exports",
+    "aemo-2024-isp-progressive-change": "aemo-2024-isp-progressive-change",
+    "aemo-2024-isp-step-change": "aemo-2024-isp-step-change",
     "caiso-irp23": "caiso-irp23",
     "caiso-sa25": "caiso-sa25",
     "nrel-118": "nrel-118",
@@ -58,7 +58,7 @@ def find_model_xml(
     Parameters
     ----------
     model_id : str
-        Model identifier (e.g., 'aemo-2024-isp-progressive')
+        Model identifier (e.g., 'aemo-2024-isp-progressive-change')
     xml_filename : str, optional
         Specific XML filename to look for. If None, searches for any .xml file.
     auto_download : bool, default True
@@ -72,7 +72,7 @@ def find_model_xml(
 
     Examples
     --------
-    >>> xml_path = find_model_xml("aemo-2024-isp-progressive")
+    >>> xml_path = find_model_xml("aemo-2024-isp-progressive-change")
     >>> if xml_path:
     ...     print(f"Found at: {xml_path}")
     ... else:
@@ -226,7 +226,7 @@ def get_model_directory(model_id: str) -> Path | None:
 
     Examples
     --------
-    >>> model_dir = get_model_directory("aemo-2024-isp-progressive")
+    >>> model_dir = get_model_directory("aemo-2024-isp-progressive-change")
     >>> if model_dir:
     ...     demand_path = model_dir / "Traces" / "demand"
     """
@@ -284,7 +284,7 @@ def get_model_xml_path(model_id: str) -> Path | None:
 
     Examples
     --------
-    >>> xml_path = get_model_xml_path("aemo-2024-isp-progressive")
+    >>> xml_path = get_model_xml_path("aemo-2024-isp-progressive-change")
     >>> if xml_path:
     ...     print(f"Found at: {xml_path}")
     ... else:

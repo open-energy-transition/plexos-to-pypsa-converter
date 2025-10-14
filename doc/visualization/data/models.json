@@ -1,12 +1,12 @@
 {
   "models": [
     {
-      "id": "aemo-2024-green",
+      "id": "aemo-2024-green-energy-exports",
       "name": "AEMO 2024 ISP - Green Energy Exports",
       "conversion_pct": 0
     },
     {
-      "id": "aemo-2024-isp-progressive",
+      "id": "aemo-2024-isp-progressive-change",
       "name": "AEMO 2024 ISP - Progressive Change",
       "conversion_pct": 65
     },
