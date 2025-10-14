@@ -674,5 +674,41 @@ MODEL_REGISTRY = {
             "testing_mode": False,
             "use_csv_integration": True,
         },
+        "recipe": [
+            {
+                "step": "download",
+                "url": "https://github.com/DuncanDotPY/MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link/archive/refs/heads/main.zip",
+                "target": "plexos-message.zip",
+                "description": "Downloading MESSAGEix-GLOBIOM model from GitHub",
+            },
+            {
+                "step": "extract",
+                "source": "plexos-message.zip",
+                "target": ".",
+                "description": "Extracting model files",
+            },
+            {
+                "step": "move",
+                "source": "MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main/*",
+                "target": ".",
+                "description": "Moving model contents to root directory",
+            },
+            {
+                "step": "delete",
+                "pattern": "MESSAGEix-GLOBIOM-EN-NPi2020-500-Soft-Link-main",
+                "recursive": True,
+                "description": "Removing GitHub folder wrapper",
+            },
+            {
+                "step": "delete",
+                "pattern": "plexos-message.zip",
+                "description": "Removing archive",
+            },
+            {
+                "step": "validate",
+                "checks": ["xml_exists"],
+                "description": "Validating installation",
+            },
+        ],
     },
 }
