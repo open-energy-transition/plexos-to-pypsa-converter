@@ -48,7 +48,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
     },
-    "aemo-2024-isp-step": {
+    "aemo-2024-isp-step-change": {
         "name": "AEMO 2024 ISP - Step Change",
         "source": "AEMO",
         "xml_filename": "2024 ISP Step Change Model.xml",
