@@ -26,6 +26,33 @@ Recipe Instruction Types:
 - flatten: Flatten nested directory structure
 - validate: Validate model installation
 - manual: Display manual download instructions
+
+Example recipe:
+    [
+        {
+            "step": "download",
+            "url": "https://example.com/model.zip",
+            "target": "model.zip",
+            "description": "Downloading model files"
+        },
+        {
+            "step": "extract",
+            "source": "model.zip",
+            "target": ".",
+            "description": "Extracting archive"
+        },
+        {
+            "step": "delete",
+            "pattern": "model.zip",
+            "description": "Cleaning up"
+        },
+        {
+            "step": "validate",
+            "checks": ["xml_exists"],
+            "description": "Validating installation"
+        }
+    ]
+
 """
 
 # Model metadata registry

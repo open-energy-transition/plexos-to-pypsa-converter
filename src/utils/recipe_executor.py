@@ -1,35 +1,4 @@
-"""Recipe-based model download and organization system.
-
-This module implements a flexible instruction-based system for downloading,
-extracting, and organizing PLEXOS model files. Each model can define a "recipe"
-- a sequence of declarative instructions that are executed to set up the model.
-
-Example recipe:
-    [
-        {
-            "step": "download",
-            "url": "https://example.com/model.zip",
-            "target": "model.zip",
-            "description": "Downloading model files"
-        },
-        {
-            "step": "extract",
-            "source": "model.zip",
-            "target": ".",
-            "description": "Extracting archive"
-        },
-        {
-            "step": "delete",
-            "pattern": "model.zip",
-            "description": "Cleaning up"
-        },
-        {
-            "step": "validate",
-            "checks": ["xml_exists"],
-            "description": "Validating installation"
-        }
-    ]
-"""
+"""Execute recipe instructions to download and organize model files."""
 
 import platform
 import shutil
