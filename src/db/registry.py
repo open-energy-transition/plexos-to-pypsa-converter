@@ -705,6 +705,88 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            # Download main XML file (124 MB)
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/4214857",
+                "target": "PLEXOS-World 2015 Gold V1.1.xml",
+                "description": "Downloading main XML file",
+            },
+            # Download supporting data files
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985039",
+                "target": "All Demand UTC 2015.tab",
+                "description": "Downloading demand data",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3737270",
+                "target": "Hydro_Monthly_Profiles (15 year average).tab",
+                "description": "Downloading hydro profiles (15yr avg)",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985040",
+                "target": "Hydro_Monthly_Profiles (2015).tab",
+                "description": "Downloading hydro profiles (2015)",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/4300175",
+                "target": "renewables.ninja.Csp.output.full.adjusted.tab",
+                "description": "Downloading CSP profiles (adjusted)",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/4300174",
+                "target": "renewables.ninja.Csp.output.full.tab",
+                "description": "Downloading CSP profiles",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985046",
+                "target": "renewables.ninja.Solar.farms.output.full.adjusted.csv",
+                "description": "Downloading solar profiles (adjusted)",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985041",
+                "target": "renewables.ninja.Solar.farms.output.full.csv",
+                "description": "Downloading solar profiles",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985047",
+                "target": "Renewables.ninja.wind.output.Full.adjusted.csv",
+                "description": "Downloading wind profiles (adjusted)",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985042",
+                "target": "Renewables.ninja.wind.output.Full.csv",
+                "description": "Downloading wind profiles",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/4008393",
+                "target": "PLEXOS-World 2015 Gold V1.1.tab",
+                "description": "Downloading model metadata",
+            },
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/3985043",
+                "target": "Journal paper supplementary material for manuscript 'Building and Calibrating a Country-Level Detailed Global Electricity Model Based on Public Data'.docx",
+                "description": "Downloading documentation",
+            },
+            # Validate installation
+            {
+                "step": "validate",
+                "checks": ["xml_exists", "min_files:12"],
+                "description": "Validating installation",
+            },
+        ],
     },
     "plexos-world-spatial": {
         "name": "PLEXOS-World Spatial Resolution",
@@ -714,6 +796,64 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "recipe": [
+            # Download main XML file (234 MB)
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/7882637",
+                "target": "PLEXOS-World Spatial Resolution Case Study (Second Journal Submission version).xml",
+                "description": "Downloading main XML file",
+            },
+            # Download and extract input timeseries RAR (365 MB)
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/7882636",
+                "target": "Input timeseries.rar",
+                "description": "Downloading input timeseries",
+            },
+            {
+                "step": "extract",
+                "source": "Input timeseries.rar",
+                "target": ".",
+                "description": "Extracting input timeseries",
+            },
+            {
+                "step": "delete",
+                "pattern": "Input timeseries.rar",
+                "description": "Removing input timeseries archive",
+            },
+            # Download and extract solutions RAR (63 MB) - optional but included for completeness
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/7882635",
+                "target": "Solutions.rar",
+                "description": "Downloading solution files",
+            },
+            {
+                "step": "extract",
+                "source": "Solutions.rar",
+                "target": ".",
+                "description": "Extracting solution files",
+            },
+            {
+                "step": "delete",
+                "pattern": "Solutions.rar",
+                "description": "Removing solutions archive",
+            },
+            # Download documentation (28 MB)
+            {
+                "step": "download",
+                "url": "https://dataverse.harvard.edu/api/access/datafile/7882638",
+                "target": "PLEXOS-World Spatial Resolution Case Study (Second Journal Submission Version).xlsx",
+                "description": "Downloading documentation",
+            },
+            # Validate installation
+            {
+                "step": "validate",
+                "checks": ["xml_exists", "min_files:4"],
+                "description": "Validating installation",
+            },
+        ],
     },
     "plexos-message": {
         "name": "MESSAGEix-GLOBIOM",
