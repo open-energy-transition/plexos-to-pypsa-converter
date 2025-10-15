@@ -474,21 +474,68 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
         "recipe": [
+            # Download main XML file
             {
-                "step": "manual",
-                "instructions": "Download 'mti-118-mt-da-rt-reserves-all-generators.xml' from https://db.bettergrids.org/bettergrids/handle/1001/120 and place it in this folder.",
-                "description": "Manual download required for NREL 118 XML file.",
+                "step": "download",
+                "method": "post",
+                "url": "https://db.bettergrids.org/bettergrids/file-export",
+                "target": "mti-118-mt-da-rt-reserves-all-generators.xml",
+                "form_data": {
+                    "file_path": "/home/dspace/dspace/assetstore/64/19/59/64195974624583552615184398660987301346",
+                    "download_form": "original",
+                    "file_name": "mti-118-mt-da-rt-reserves-all-generators.xml",
+                },
+                "description": "Downloading main XML file",
+            },
+            # Download and extract input files
+            {
+                "step": "download",
+                "method": "post",
+                "url": "https://db.bettergrids.org/bettergrids/file-export",
+                "target": "input-files.zip",
+                "form_data": {
+                    "file_path": "/home/dspace/dspace/assetstore/12/42/12/124212665635606089509829983095761497931",
+                    "download_form": "original",
+                    "file_name": "input-files.zip",
+                },
+                "description": "Downloading input files (solar, wind, hydro, load data)",
             },
             {
-                "step": "manual",
-                "instructions": "Download 'Input-files.zip' from https://db.bettergrids.org/bettergrids/handle/1001/120, extract it, and place the resulting 'Input files' folder in this directory.",
-                "description": "Manual download and extraction required for NREL 118 input files.",
+                "step": "extract",
+                "source": "input-files.zip",
+                "target": ".",
+                "description": "Extracting input files",
             },
             {
-                "step": "manual",
-                "instructions": "Download 'additional-files-mti-118.zip' from https://db.bettergrids.org/bettergrids/handle/1001/120, extract it, and place the resulting 'Additional Files MTI 118' folder in this directory.",
-                "description": "Manual download and extraction required for NREL 118 additional files.",
+                "step": "delete",
+                "pattern": "input-files.zip",
+                "description": "Removing input files archive",
             },
+            # Download and extract additional files
+            {
+                "step": "download",
+                "method": "post",
+                "url": "https://db.bettergrids.org/bettergrids/file-export",
+                "target": "additional-files-mti-118.zip",
+                "form_data": {
+                    "file_path": "/home/dspace/dspace/assetstore/13/71/05/137105089482637900385896193465506147695",
+                    "download_form": "original",
+                    "file_name": "additional-files-mti-118.zip",
+                },
+                "description": "Downloading additional files (system CSV files and FAQ)",
+            },
+            {
+                "step": "extract",
+                "source": "additional-files-mti-118.zip",
+                "target": ".",
+                "description": "Extracting additional files",
+            },
+            {
+                "step": "delete",
+                "pattern": "additional-files-mti-118.zip",
+                "description": "Removing additional files archive",
+            },
+            # Validate installation
             {
                 "step": "validate",
                 "checks": [
