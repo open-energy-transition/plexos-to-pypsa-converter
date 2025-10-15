@@ -11,7 +11,7 @@ from network.core import setup_network
 from utils.model_paths import find_model_xml, get_model_directory
 
 # Find model data in src/examples/data/
-model_id = "aemo-2024-isp-progressive"
+model_id = "aemo-2024-isp-progressive-change"
 xml_path = find_model_xml(model_id)
 model_dir = get_model_directory(model_id)
 
@@ -33,7 +33,7 @@ def create_aemo_model():
     >>> network.optimize(solver_name="highs")
     """
     # Find model data in src/examples/data/
-    model_id = "aemo-2024-isp-progressive"
+    model_id = "aemo-2024-isp-progressive-change"
     xml_path = find_model_xml(model_id)
     model_dir = get_model_directory(model_id)
 

@@ -33,6 +33,9 @@ dependencies = [
     "deprecation",
     "validators",
     "plexosdb",
+    "rarfile>=4.0",
+    "requests>=2.31",
+    "tqdm>=4.66",
 ]
 
 [project.urls]

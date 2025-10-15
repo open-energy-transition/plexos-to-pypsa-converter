@@ -30,7 +30,7 @@ def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
     >>> network.optimize(solver_name="highs")
     """
     # Find model data in src/examples/data/
-    model_id = "aemo-2024-isp-progressive"
+    model_id = "aemo-2024-isp-progressive-change"
     file_xml = find_model_xml(model_id)
     main_dir = get_model_directory(model_id)
 
@@ -38,7 +38,7 @@ def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
         msg = (
             f"Model '{model_id}' not found in src/examples/data/. "
             f"Please download and extract the AEMO 2024 ISP model data to:\n"
-            f"  src/examples/data/aemo-2024-isp-progressive/"
+            f"  src/examples/data/aemo-2024-isp-progressive-change/"
         )
         raise FileNotFoundError(msg)
 

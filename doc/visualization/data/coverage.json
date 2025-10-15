@@ -11,112 +11,112 @@
   ],
   "coverage": [
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Generators",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Loads",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Storage",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Lines",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Buses",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Carriers",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-green",
+      "model_id": "aemo-2024-green-energy-exports",
       "feature": "Costs",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Generators",
       "status": "converted"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Loads",
       "status": "converted"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Storage",
       "status": "partial"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Lines",
       "status": "partial"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Buses",
       "status": "converted"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Carriers",
       "status": "converted"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Costs",
       "status": "not_yet_implemented"
     },
     {
-      "model_id": "aemo-2024-isp-progressive",
+      "model_id": "aemo-2024-isp-progressive-change",
       "feature": "Time-varying emission factors",
       "status": "feature_not_covered"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Generators",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Loads",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Storage",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Lines",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Buses",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Carriers",
       "status": "not_applicable"
     },
     {
-      "model_id": "aemo-2024-isp-step",
+      "model_id": "aemo-2024-isp-step-change",
       "feature": "Costs",
       "status": "not_applicable"
     },

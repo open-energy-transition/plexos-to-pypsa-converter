@@ -16,6 +16,17 @@ cd plexos-to-pypsa-converter
 pip install -e .
 ```
 
+### System Dependencies
+
+Some models use RAR archives and require the `unrar` or `unar` command-line tool to be installed:
+
+**macOS:**
+```bash
+brew install rar
+```
+
+**Note:** This is only required for models that use RAR archives (e.g., `plexos-world-spatial`). If you only work with ZIP-based models, this dependency is not needed.
+
 ## Converted Features
 
 The converter ports the following PLEXOS components to PyPSA:

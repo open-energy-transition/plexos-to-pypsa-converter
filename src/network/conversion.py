@@ -339,7 +339,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     Parameters
     ----------
     model_id : str
-        Model identifier from MODEL_REGISTRY (e.g., "aemo-2024-isp-progressive")
+        Model identifier from MODEL_REGISTRY (e.g., "aemo-2024-isp-progressive-change")
     **config_overrides
         Optional configuration overrides. Available options depend on model type:
 
@@ -402,7 +402,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     Examples
     --------
     Create AEMO model with defaults:
-    >>> network, summary = create_model("aemo-2024-isp-progressive")
+    >>> network, summary = create_model("aemo-2024-isp-progressive-change")
 
     Create CAISO model (uses default aggregate_node strategy):
     >>> network, summary = create_model("caiso-irp23")
@@ -540,7 +540,7 @@ def create_model_with_optimization(
     --------
     Create and optimize AEMO model with subset:
     >>> network, summary = create_model_with_optimization(
-    ...     "aemo-2024-isp-progressive",
+    ...     "aemo-2024-isp-progressive-change",
     ...     snapshots_per_year=50
     ... )
 

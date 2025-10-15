@@ -1,42 +1,13 @@
-"""Recipe-based model download and organization system.
+"""Execute recipe instructions to download and organize model files."""
 
-This module implements a flexible instruction-based system for downloading,
-extracting, and organizing PLEXOS model files. Each model can define a "recipe"
-- a sequence of declarative instructions that are executed to set up the model.
-
-Example recipe:
-    [
-        {
-            "step": "download",
-            "url": "https://example.com/model.zip",
-            "target": "model.zip",
-            "description": "Downloading model files"
-        },
-        {
-            "step": "extract",
-            "source": "model.zip",
-            "target": ".",
-            "description": "Extracting archive"
-        },
-        {
-            "step": "delete",
-            "pattern": "model.zip",
-            "description": "Cleaning up"
-        },
-        {
-            "step": "validate",
-            "checks": ["xml_exists"],
-            "description": "Validating installation"
-        }
-    ]
-"""
-
+import platform
 import shutil
 import tarfile
 import zipfile
 from pathlib import Path
 from typing import Any
 
+import rarfile
 import requests
 from tqdm import tqdm
 
@@ -53,28 +24,7 @@ class RecipeExecutionError(Exception):
 
 
 class RecipeExecutor:
-    """Executes recipe instructions to download and organize model files.
-
-    Parameters
-    ----------
-    model_id : str
-        Model identifier from MODEL_REGISTRY
-    model_dir : Path
-        Target directory for model files (e.g., src/examples/data/model-id/)
-    verbose : bool, default True
-        If True, print detailed progress information
-
-    Attributes
-    ----------
-    model_id : str
-        Model identifier
-    model_dir : Path
-        Target directory for model files
-    temp_dir : Path
-        Temporary directory for downloads and extraction
-    steps_completed : list
-        List of step indices that have been successfully completed
-    """
+    """Executes recipe instructions to download and organize model files."""
 
     def __init__(self, model_id: str, model_dir: Path, verbose: bool = True):
         self.model_id = model_id
@@ -82,8 +32,6 @@ class RecipeExecutor:
         self.temp_dir = self.model_dir / ".download_temp"
         self.verbose = verbose
         self.steps_completed: list[int] = []
-
-        # Step handler mapping for better performance and clarity
         self._step_handlers = {
             "download": self._step_download,
             "extract": self._step_extract,
@@ -98,31 +46,14 @@ class RecipeExecutor:
         }
 
     def execute_recipe(self, recipe: list[dict[str, Any]]) -> bool:
-        """Execute all steps in recipe.
-
-        Parameters
-        ----------
-        recipe : list of dict
-            List of instruction dictionaries
-
-        Returns
-        -------
-        bool
-            True if recipe executed successfully, False otherwise
-
-        Raises
-        ------
-        RecipeExecutionError
-            If a step fails during execution
-        """
+        """Execute all steps in recipe."""
         if not recipe:
             if self.verbose:
                 print("Empty recipe provided - nothing to execute")
             return True
 
-        i = 0  # Initialize for exception handling
+        i = 0
         try:
-            # Ensure directories exist
             self.model_dir.mkdir(parents=True, exist_ok=True)
             self.temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -130,7 +61,6 @@ class RecipeExecutor:
             if self.verbose:
                 self._print_header(total_steps)
 
-            # Execute each step
             for i, instruction in enumerate(recipe, 1):
                 step_type = instruction["step"]
                 description = instruction.get("description", f"Step {i}: {step_type}")
@@ -138,7 +68,6 @@ class RecipeExecutor:
                 if self.verbose:
                     print(f"[{i}/{total_steps}] {description}")
 
-                # Execute step
                 self._execute_step(instruction)
                 self.steps_completed.append(i)
 
@@ -149,9 +78,6 @@ class RecipeExecutor:
             if self.verbose:
                 self._print_error(i, len(recipe), e)
 
-            # Note: We don't rollback to allow inspection of partial state
-            # User can delete the model directory and try again
-
             msg = f"Recipe execution failed at step {i}/{len(recipe)}: {e}"
             raise RecipeExecutionError(msg) from e
 
@@ -159,7 +85,6 @@ class RecipeExecutor:
             return True
 
         finally:
-            # Always clean up temp directory
             self._cleanup_temp()
 
     def _print_header(self, total_steps: int) -> None:
@@ -184,21 +109,8 @@ class RecipeExecutor:
         print(f"{SEPARATOR_LINE}\n")
 
     def _execute_step(self, instruction: dict[str, Any]) -> None:
-        """Execute a single instruction.
-
-        Parameters
-        ----------
-        instruction : dict
-            Instruction dictionary with 'step' key and step-specific parameters
-
-        Raises
-        ------
-        ValueError
-            If step type is unknown
-        """
+        """Execute a single instruction."""
         step_type = instruction["step"]
-
-        # Use mapping for better performance
         handler = self._step_handlers.get(step_type)
 
         if handler is None:
@@ -208,22 +120,8 @@ class RecipeExecutor:
 
         handler(instruction)
 
-    # ==========================================================================
-    # Step Handlers
-    # ==========================================================================
-
     def _step_download(self, instruction: dict[str, Any]) -> None:
-        """Handle download step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - url: URL to download from
-            - target: Target filename (relative to model_dir)
-            Optional:
-            - method: Download method (default: 'direct')
-        """
+        """Handle download step."""
         url = instruction["url"]
         target_filename = instruction["target"]
         method = instruction.get("method", "direct")
@@ -232,22 +130,15 @@ class RecipeExecutor:
 
         if method == "direct":
             self._download_direct(url, target_path)
+        elif method == "post":
+            form_data = instruction.get("form_data", {})
+            self._download_post(url, target_path, form_data)
         else:
             msg = f"Unsupported download method: {method}"
             raise ValueError(msg)
 
     def _step_extract(self, instruction: dict[str, Any]) -> None:
-        """Handle extract step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - source: Path to archive file (relative to model_dir)
-            - target: Target directory for extraction (relative to model_dir)
-            Optional:
-            - format: Archive format (auto-detected if not specified)
-        """
+        """Handle extract step."""
         source = self.model_dir / instruction["source"]
         target = self.model_dir / instruction["target"]
         archive_format = instruction.get("format")
@@ -255,19 +146,9 @@ class RecipeExecutor:
         self._extract_archive(source, target, archive_format)
 
     def _step_move(self, instruction: dict[str, Any]) -> None:
-        """Handle move step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - source: Source path or glob pattern (relative to model_dir)
-            - target: Target path (relative to model_dir)
-        """
+        """Handle move step."""
         source_pattern = instruction["source"]
         target = self.model_dir / instruction["target"]
-
-        # Use Path.glob instead of glob.glob
         sources = list(self.model_dir.glob(source_pattern))
 
         if not sources:
@@ -275,28 +156,12 @@ class RecipeExecutor:
                 print(f"  Warning: No files matched pattern: {source_pattern}")
             return
 
-        # Ensure target directory exists
         target.mkdir(parents=True, exist_ok=True)
-
-        # Move each matched file/directory
         for source_path in sources:
-            if source_path.is_file():
-                shutil.move(str(source_path), str(target / source_path.name))
-            elif source_path.is_dir():
-                # Move directory contents
-                for item in source_path.iterdir():
-                    shutil.move(str(item), str(target / item.name))
+            shutil.move(str(source_path), str(target / source_path.name))
 
     def _step_copy(self, instruction: dict[str, Any]) -> None:
-        """Handle copy step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - source: Source path (relative to model_dir)
-            - target: Target path (relative to model_dir)
-        """
+        """Handle copy step."""
         source = self.model_dir / instruction["source"]
         target = self.model_dir / instruction["target"]
 
@@ -307,15 +172,7 @@ class RecipeExecutor:
             shutil.copytree(source, target, dirs_exist_ok=True)
 
     def _step_rename(self, instruction: dict[str, Any]) -> None:
-        """Handle rename step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - source: Source path (relative to model_dir)
-            - target: Target path (relative to model_dir)
-        """
+        """Handle rename step."""
         source = self.model_dir / instruction["source"]
         target = self.model_dir / instruction["target"]
 
@@ -323,24 +180,12 @@ class RecipeExecutor:
             source.rename(target)
 
     def _step_delete(self, instruction: dict[str, Any]) -> None:
-        """Handle delete step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - pattern: File/directory pattern to delete (relative to model_dir)
-            Optional:
-            - recursive: If True, delete directories recursively (default: False)
-        """
+        """Handle delete step."""
         pattern = instruction["pattern"]
         recursive = instruction.get("recursive", False)
-
-        # Use Path.glob instead of glob.glob
-        if recursive:
-            paths = list(self.model_dir.rglob(pattern))
-        else:
-            paths = list(self.model_dir.glob(pattern))
+        paths = list(
+            self.model_dir.rglob(pattern) if recursive else self.model_dir.glob(pattern)
+        )
 
         for path in paths:
             if path.is_file():
@@ -349,69 +194,33 @@ class RecipeExecutor:
                 shutil.rmtree(path)
 
     def _step_create_dir(self, instruction: dict[str, Any]) -> None:
-        """Handle create_dir step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - path: Directory path to create (relative to model_dir)
-            Optional:
-            - parents: If True, create parent directories (default: True)
-        """
+        """Handle create_dir step."""
         path = self.model_dir / instruction["path"]
-        parents = instruction.get("parents", True)
-
-        path.mkdir(parents=parents, exist_ok=True)
+        path.mkdir(parents=instruction.get("parents", True), exist_ok=True)
 
     def _step_flatten(self, instruction: dict[str, Any]) -> None:
-        """Handle flatten step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - source: Source directory to flatten (relative to model_dir)
-            Optional:
-            - levels: Number of directory levels to remove (default: 1)
-        """
+        """Handle flatten step."""
         source = self.model_dir / instruction["source"]
         levels = instruction.get("levels", 1)
 
-        # Move all contents up by specified number of levels
         for _ in range(levels):
             if not source.is_dir():
                 break
 
-            # Move all items from source to its parent
             for item in source.iterdir():
-                target = source.parent / item.name
-                shutil.move(str(item), str(target))
+                shutil.move(str(item), str(source.parent / item.name))
 
-            # Remove now-empty source directory
             if source.exists() and not list(source.iterdir()):
                 source.rmdir()
 
     def _step_validate(self, instruction: dict[str, Any]) -> None:
-        """Handle validate step.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - checks: List of validation checks to perform
-
-        Raises
-        ------
-        RecipeExecutionError
-            If validation fails
-        """
+        """Handle validate step."""
         checks = instruction["checks"]
         model_config = MODEL_REGISTRY[self.model_id]
 
         for check in checks:
             if check == "xml_exists":
-                xml_filename = model_config.get("xml_filename")  # type: ignore[attr-defined]
+                xml_filename = model_config.get("xml_filename")
                 if xml_filename:
                     xml_path = self.model_dir / xml_filename
                     if not xml_path.exists():
@@ -453,19 +262,7 @@ class RecipeExecutor:
             print("   Validation passed")
 
     def _step_manual(self, instruction: dict[str, Any]) -> None:
-        """Handle manual step - display instructions and wait for user.
-
-        Parameters
-        ----------
-        instruction : dict
-            Must contain:
-            - instructions: Text instructions for manual download
-
-        Raises
-        ------
-        RecipeExecutionError
-            If user cancels
-        """
+        """Handle manual step - display instructions and wait for user."""
         instructions_text = instruction["instructions"]
 
         print("\n" + "=" * 70)
@@ -482,27 +279,18 @@ class RecipeExecutor:
             msg = "Manual download cancelled by user"
             raise RecipeExecutionError(msg)
 
-    # ==========================================================================
-    # Helper Methods
-    # ==========================================================================
-
     def _download_direct(self, url: str, target: Path) -> None:
-        """Download file from direct HTTP/HTTPS URL with progress bar.
-
-        Parameters
-        ----------
-        url : str
-            URL to download from
-        target : Path
-            Target file path
-
-        Raises
-        ------
-        RecipeExecutionError
-            If download fails
-        """
+        """Download file from direct HTTP/HTTPS URL with progress bar."""
         try:
-            response = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Referer": "https://www.aemo.com.au/",
+            }
+            response = requests.get(
+                url, stream=True, timeout=REQUEST_TIMEOUT, headers=headers
+            )
             response.raise_for_status()
 
             total_size = int(response.headers.get("content-length", 0))
@@ -530,29 +318,55 @@ class RecipeExecutor:
             msg = f"Download failed from {url}: {e}"
             raise RecipeExecutionError(msg) from e
 
+    def _download_post(self, url: str, target: Path, form_data: dict[str, str]) -> None:
+        """Download file via POST request with form data."""
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            }
+
+            response = requests.post(
+                url,
+                data=form_data,
+                stream=True,
+                timeout=REQUEST_TIMEOUT,
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            total_size = int(response.headers.get("content-length", 0))
+
+            # Download with progress bar
+            with target.open("wb") as f:
+                if total_size > 0:
+                    with tqdm(
+                        total=total_size,
+                        unit="B",
+                        unit_scale=True,
+                        desc=f"  Downloading {target.name}",
+                    ) as pbar:
+                        for chunk in response.iter_content(
+                            chunk_size=DOWNLOAD_CHUNK_SIZE
+                        ):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header
+                    for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                        f.write(chunk)
+
+        except requests.RequestException as e:
+            msg = f"POST download failed from {url}: {e}"
+            raise RecipeExecutionError(msg) from e
+
     def _extract_archive(
         self, archive_path: Path, target_dir: Path, format: str | None = None
     ) -> None:
-        """Extract archive file to target directory.
-
-        Parameters
-        ----------
-        archive_path : Path
-            Path to archive file
-        target_dir : Path
-            Target directory for extraction
-        format : str, optional
-            Archive format ('zip', 'tar.gz', 'tar.bz2', etc.)
-            Auto-detected from filename if not specified
-
-        Raises
-        ------
-        RecipeExecutionError
-            If extraction fails or format is unsupported
-        """
+        """Extract archive file to target directory."""
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Auto-detect format from filename
         if format is None:
             format = self._detect_archive_format(archive_path)
 
@@ -561,11 +375,13 @@ class RecipeExecutor:
                 self._extract_zip(archive_path, target_dir)
             elif format in ("tar", "tar.gz", "tar.bz2"):
                 self._extract_tar(archive_path, target_dir, format)
+            elif format == "rar":
+                self._extract_rar(archive_path, target_dir)
             else:
                 msg = f"Unsupported archive format: {format}"
                 raise RecipeExecutionError(msg)
 
-        except (zipfile.BadZipFile, tarfile.TarError) as e:
+        except (zipfile.BadZipFile, tarfile.TarError, rarfile.Error) as e:
             msg = f"Failed to extract archive {archive_path}: {e}"
             raise RecipeExecutionError(msg) from e
 
@@ -579,17 +395,46 @@ class RecipeExecutor:
             return "tar.bz2"
         elif archive_path.suffix == ".tar":
             return "tar"
+        elif archive_path.suffix == ".rar":
+            return "rar"
         else:
             msg = f"Cannot auto-detect archive format for: {archive_path}"
             raise RecipeExecutionError(msg)
 
+    def _safe_extract_path(self, target_dir: Path, member_path: str) -> Path:
+        """Validate extraction path to prevent path traversal attacks."""
+        target_abs = target_dir.resolve()
+        member_abs = (target_abs / member_path).resolve()
+
+        try:
+            member_abs.relative_to(target_abs)
+        except ValueError as e:
+            msg = (
+                f"Archive member '{member_path}' would extract outside target "
+                f"directory (potential path traversal attack)"
+            )
+            raise RecipeExecutionError(msg) from e
+
+        return member_abs
+
     def _extract_zip(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract ZIP archive."""
+        """Extract ZIP archive safely, preventing path traversal."""
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            zip_ref.extractall(target_dir)  # noqa: S202
+            for member in zip_ref.namelist():
+                extract_path = self._safe_extract_path(target_dir, member)
+
+                if member.endswith("/"):
+                    extract_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    extract_path.parent.mkdir(parents=True, exist_ok=True)
+                    with (
+                        zip_ref.open(member) as source,
+                        extract_path.open("wb") as target,
+                    ):
+                        shutil.copyfileobj(source, target)
 
     def _extract_tar(self, archive_path: Path, target_dir: Path, format: str) -> None:
-        """Extract TAR archive."""
+        """Extract TAR archive safely, preventing path traversal."""
         mode_map = {
             "tar": "r",
             "tar.gz": "r:gz",
@@ -598,7 +443,59 @@ class RecipeExecutor:
         mode = mode_map[format]
 
         with tarfile.open(str(archive_path), mode) as tar_ref:  # type: ignore[call-overload]
-            tar_ref.extractall(target_dir)  # noqa: S202
+            for member in tar_ref.getmembers():
+                extract_path = self._safe_extract_path(target_dir, member.name)
+
+                if member.isdir():
+                    extract_path.mkdir(parents=True, exist_ok=True)
+                elif member.isfile():
+                    extract_path.parent.mkdir(parents=True, exist_ok=True)
+                    with tar_ref.extractfile(member) as source:
+                        if source:
+                            with extract_path.open("wb") as target:
+                                shutil.copyfileobj(source, target)
+
+    def _extract_rar(self, archive_path: Path, target_dir: Path) -> None:
+        """Extract RAR archive safely, preventing path traversal."""
+        tool_found = shutil.which("unrar") or shutil.which("unar")
+
+        if not tool_found:
+            os_name = platform.system()
+
+            install_instructions = {
+                "Darwin": "Install with Homebrew:\n  brew install unrar",
+                "Linux": "Install with package manager:\n  # Ubuntu/Debian:\n  sudo apt-get install unrar\n  # or use unar:\n  sudo apt-get install unar\n  \n  # Fedora/RHEL:\n  sudo yum install unrar",
+                "Windows": "Download UnRAR from:\n  https://www.rarlab.com/rar_add.htm\n  and add it to your PATH",
+            }
+
+            instructions = install_instructions.get(
+                os_name, "Install unrar or unar for your operating system"
+            )
+
+            msg = (
+                f"RAR extraction requires 'unrar' or 'unar' command-line tool.\n\n"
+                f"{instructions}\n\n"
+                f"After installation, retry the model download."
+            )
+            raise RecipeExecutionError(msg)
+
+        try:
+            with rarfile.RarFile(str(archive_path), "r") as rar_ref:
+                for member in rar_ref.infolist():
+                    extract_path = self._safe_extract_path(target_dir, member.filename)
+
+                    if member.isdir():
+                        extract_path.mkdir(parents=True, exist_ok=True)
+                    else:
+                        extract_path.parent.mkdir(parents=True, exist_ok=True)
+                        with (
+                            rar_ref.open(member.filename) as source,
+                            extract_path.open("wb") as target,
+                        ):
+                            shutil.copyfileobj(source, target)
+        except rarfile.Error as e:
+            msg = f"Failed to extract RAR archive: {e}"
+            raise RecipeExecutionError(msg) from e
 
     def _cleanup_temp(self) -> None:
         """Clean up temporary directory."""
