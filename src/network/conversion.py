@@ -15,6 +15,7 @@ from plexosdb import PlexosDB
 from db.registry import MODEL_REGISTRY
 from network.core import setup_network
 from network.core_csv import setup_network_csv
+from network.multi_sector_csv import setup_gas_electric_network_csv
 from network.multi_sector_db import (
     setup_enhanced_flow_network_with_csv,
     setup_flow_network_db,
@@ -257,6 +258,7 @@ def _create_gas_electric_model(
     model_dir: Path,
     config: dict,
     db: PlexosDB,
+    use_csv: bool = False,
 ) -> tuple[pypsa.Network, dict]:
     """Create multi-sector gas+electric PyPSA model.
 
@@ -280,32 +282,53 @@ def _create_gas_electric_model(
     """
     network = pypsa.Network()
 
-    use_csv = config.get("use_csv_integration", False)
-
     if use_csv:
         # Enhanced setup with CSV data integration
         csv_data_path = config.get("csv_data_path")
         if csv_data_path is None:
-            # Auto-determine CSV path
-            csv_dir = model_dir / "CSV Files"
-            if csv_dir.exists():
-                csv_data_path = str(csv_dir)
+            # Auto-determine CSV path - check csvs_from_xml first, then CSV Files
+            csv_dir_from_xml = model_dir / "csvs_from_xml"
+            csv_dir_legacy = model_dir / "CSV Files"
+
+            if csv_dir_from_xml.exists():
+                # Find the actual system subdirectory within csvs_from_xml
+                subdirs = [d for d in csv_dir_from_xml.iterdir() if d.is_dir()]
+                if subdirs:
+                    csv_data_path = str(
+                        subdirs[0]
+                    )  # Use the first (should be only) subdirectory
+                else:
+                    csv_data_path = str(csv_dir_from_xml)
+
+                # Use pure CSV approach when csvs_from_xml is available
+                print("Setting up gas+electric model from auto-generated CSVs...")
+                setup_summary = setup_gas_electric_network_csv(
+                    network=network,
+                    csv_path=csv_data_path,
+                )
+
+            elif csv_dir_legacy.exists():
+                csv_data_path = str(csv_dir_legacy)
+
+                # Use hybrid approach for legacy CSV Files
+                print("Setting up gas+electric model with CSV integration...")
+                setup_summary = setup_marei_csv_network(
+                    network=network,
+                    db=db,
+                    csv_data_path=csv_data_path,
+                    infrastructure_scenario=config.get(
+                        "infrastructure_scenario", "PCI"
+                    ),
+                    pricing_scheme=config.get("pricing_scheme", "Production"),
+                    generators_as_links=config.get("generators_as_links", False),
+                )
             else:
                 msg = (
-                    f"CSV Files directory not found in {model_dir}. "
-                    "Set use_csv_integration=False or provide csv_data_path."
+                    f"CSV directory not found in {model_dir}. "
+                    f"Looked for 'csvs_from_xml' and 'CSV Files'. "
+                    "Set use_csv=False or provide csv_data_path."
                 )
                 raise FileNotFoundError(msg)
-
-        print("Setting up gas+electric model with CSV integration...")
-        setup_summary = setup_marei_csv_network(
-            network=network,
-            db=db,
-            csv_data_path=csv_data_path,
-            infrastructure_scenario=config.get("infrastructure_scenario", "PCI"),
-            pricing_scheme=config.get("pricing_scheme", "Production"),
-            generators_as_links=config.get("generators_as_links", False),
-        )
     else:
         # Traditional database-only setup
         print("Setting up gas+electric model from database...")
@@ -327,6 +350,7 @@ def _create_flow_model(
     model_dir: Path,
     config: dict,
     db: PlexosDB,
+    use_csv: bool = False,
 ) -> tuple[pypsa.Network, dict]:
     """Create multi-sector flow PyPSA model (electricity + hydrogen + ammonia).
 
@@ -350,8 +374,6 @@ def _create_flow_model(
     """
     network = pypsa.Network()
 
-    use_csv = config.get("use_csv_integration", True)
-
     if use_csv:
         # Enhanced setup with CSV data integration
         inputs_folder = config.get("inputs_folder")
@@ -363,7 +385,7 @@ def _create_flow_model(
             else:
                 msg = (
                     f"Inputs folder not found at {inputs_path}. "
-                    "Set use_csv_integration=False or provide inputs_folder path."
+                    "Set use_csv=False or provide inputs_folder path."
                 )
                 raise FileNotFoundError(msg)
 
@@ -436,8 +458,8 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Use Line components instead of Links
 
         Gas+Electric models (MaREI-EU):
-        - use_csv_integration : bool
-            Enable CSV data integration (default from registry)
+        - use_csv : bool
+            Enable CSV data integration (default False)
         - csv_data_path : str
             Path to CSV Files directory
         - infrastructure_scenario : str
@@ -450,7 +472,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Process limited subsets for testing
 
         Flow models (PLEXOS-MESSAGE):
-        - use_csv_integration : bool
+        - use_csv : bool
             Enable CSV data integration (default from registry)
         - inputs_folder : str
             Path to Inputs folder with CSV data
@@ -485,7 +507,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
 
     Create MaREI model with CSV integration:
     >>> network, summary = create_model("marei-eu",
-    ...                                  use_csv_integration=True,
+    ...                                  use_csv=True,
     ...                                  infrastructure_scenario="High")
 
     Create PLEXOS-MESSAGE model in testing mode:
@@ -538,7 +560,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     use_csv = config.get("use_csv", False)
     csv_dir = None
 
-    if use_csv and model_type == "electricity":
+    if use_csv and model_type in ["electricity", "multi_sector_gas_electric"]:
         print(f"\nChecking for CSV exports in {model_dir}...")
 
         # Check if CSV export already exists
@@ -592,11 +614,11 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
         )
     elif model_type == "multi_sector_gas_electric":
         network, setup_summary = _create_gas_electric_model(
-            model_id, xml_file, model_dir, config, db
+            model_id, xml_file, model_dir, config, db, use_csv=use_csv
         )
     elif model_type == "multi_sector_flow":
         network, setup_summary = _create_flow_model(
-            model_id, xml_file, model_dir, config, db
+            model_id, xml_file, model_dir, config, db, use_csv=use_csv
         )
     else:
         msg = (

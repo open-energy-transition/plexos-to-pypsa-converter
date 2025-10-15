@@ -19,10 +19,10 @@ if __name__ == "__main__":
     # Configuration - can override defaults from MODEL_REGISTRY
     # Set generators_as_links=True to use Link representation for conventional generators
     # Set testing_mode=True for faster development, False for complete model
-    # Set use_csv_integration=True to enable MaREI CSV data integration
+    # Set use_csv=True to enable MaREI CSV data integration
     generators_as_links = True  # Enable generators-as-links functionality
     testing_mode = False  # Full model to investigate actual PLEXOS data
-    use_csv_integration = True  # Enable CSV integration for enhanced model
+    use_csv = True  # Enable CSV integration for enhanced model
     infrastructure_scenario = "PCI"  # Infrastructure scenario: 'PCI', 'High', 'Low'
     pricing_scheme = (
         "Production"  # Gas pricing: 'Production', 'Postage', 'Trickle', 'Uniform'
@@ -33,7 +33,7 @@ if __name__ == "__main__":
         MODEL_ID,
         generators_as_links=generators_as_links,
         testing_mode=testing_mode,
-        use_csv_integration=use_csv_integration,
+        use_csv=use_csv,
         infrastructure_scenario=infrastructure_scenario,
         pricing_scheme=pricing_scheme,
     )
@@ -47,10 +47,10 @@ if __name__ == "__main__":
     print(
         f"Generators represented as: {'Links' if generators_as_links else 'Generators'}"
     )
-    print(f"CSV integration: {'Enabled' if use_csv_integration else 'Disabled'}")
+    print(f"CSV integration: {'Enabled' if use_csv else 'Disabled'}")
 
     # CSV integration summary (if enabled)
-    if use_csv_integration and setup_summary.get("csv_data_loaded", False):
+    if use_csv and setup_summary.get("csv_data_loaded", False):
         csv_summary = setup_summary.get("csv_integration", {})
         print("\nCSV Data Integration:")
         print(
@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
     # Enhanced gas sector summary (with CSV integration)
     gas_summary = setup_summary["gas"]
-    if use_csv_integration:
+    if use_csv:
         print("\nGas Sector (Enhanced with CSV Integration):")
     else:
         print("\nGas Sector (Enhanced with PyPSA Patterns):")
@@ -93,7 +93,7 @@ if __name__ == "__main__":
         f"  Gas plants: {gas_summary.get('plants', 0)} (gas→electricity conversion Links)"
     )
     print(f"  Gas demand: {gas_summary['demand']} (Load components)")
-    if use_csv_integration:
+    if use_csv:
         print(
             f"  LNG terminals: {gas_summary.get('lng', 0)} (Store components from CSV)"
         )
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # Enhanced sector coupling summary
     coupling_summary = setup_summary["sector_coupling"]
     print("\nEnhanced Sector Coupling:")
-    if use_csv_integration:
+    if use_csv:
         # CSV integration mode
         print(
             f"  Gas-to-electric links: {coupling_summary.get('gas_to_elec_links', 0)} (CSV enhanced)"

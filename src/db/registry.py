@@ -734,7 +734,7 @@ MODEL_REGISTRY = {
         "xml_filename": "European Integrated Power & Gas Model.xml",
         "model_type": "multi_sector_gas_electric",
         "default_config": {
-            "use_csv_integration": False,
+            "use_csv": False,
             "infrastructure_scenario": "PCI",
             "pricing_scheme": "Production",
             "generators_as_links": False,
@@ -917,7 +917,7 @@ MODEL_REGISTRY = {
         "model_type": "multi_sector_flow",
         "default_config": {
             "testing_mode": False,
-            "use_csv_integration": True,
+            "use_csv": True,
         },
         "recipe": [
             {

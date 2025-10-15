@@ -10,13 +10,13 @@ MODEL_ID = "plexos-message"
 if __name__ == "__main__":
     # Configuration - can override defaults from MODEL_REGISTRY
     testing_mode = True  # Set to True for faster testing, False for complete model
-    use_csv_integration = True  # Enable CSV data integration with PyPSA best practices
+    use_csv = True  # Enable CSV data integration with PyPSA best practices
 
     # Create model using unified factory
     network, setup_summary = create_model(
         MODEL_ID,
         testing_mode=testing_mode,
-        use_csv_integration=use_csv_integration,
+        use_csv=use_csv,
     )
 
     # Print setup summary
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     print(f"Sectors: {', '.join(setup_summary['sectors'])}")
 
     # CSV integration summary (if enabled)
-    if use_csv_integration and setup_summary.get("csv_data_loaded", False):
+    if use_csv and setup_summary.get("csv_data_loaded", False):
         csv_summary = setup_summary.get("csv_integration", {})
         print("\nCSV Data Integration:")
         print(f"  Cost files loaded: {csv_summary.get('cost_files', 0)}")
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         print(f"\nH2 Pipeline Infrastructure: {setup_summary['h2_pipelines']} links")
 
     # Traditional summaries (if not using CSV integration)
-    if not use_csv_integration or not setup_summary.get("csv_data_loaded", False):
+    if not use_csv or not setup_summary.get("csv_data_loaded", False):
         # Paths
         if "paths" in setup_summary:
             paths_summary = setup_summary["paths"]

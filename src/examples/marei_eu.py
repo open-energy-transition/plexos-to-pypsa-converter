@@ -8,18 +8,18 @@ from network.conversion import create_model
 MODEL_ID = "marei-eu"
 SNAPSHOTS_PER_YEAR = 100
 
-network, setup_summary = create_model(MODEL_ID, use_csv=True)
+network, setup_summary = create_model("marei-eu", use_csv=True)
 
 if __name__ == "__main__":
     # Configuration - can override defaults from MODEL_REGISTRY
-    use_csv_integration = True
+    use_csv = True
     infrastructure_scenario = "PCI"
     pricing_scheme = "Production"
 
     # Create model using unified factory
     network, setup_summary = create_model(
         MODEL_ID,
-        use_csv_integration=use_csv_integration,
+        use_csv=use_csv,
         infrastructure_scenario=infrastructure_scenario,
         pricing_scheme=pricing_scheme,
     )
