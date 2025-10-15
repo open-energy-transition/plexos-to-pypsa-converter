@@ -822,35 +822,16 @@ MODEL_REGISTRY = {
                 "pattern": "Input timeseries.rar",
                 "description": "Removing input timeseries archive",
             },
-            # Download and extract solutions RAR (63 MB) - optional but included for completeness
-            {
-                "step": "download",
-                "url": "https://dataverse.harvard.edu/api/access/datafile/7882635",
-                "target": "Solutions.rar",
-                "description": "Downloading solution files",
-            },
-            {
-                "step": "extract",
-                "source": "Solutions.rar",
-                "target": ".",
-                "description": "Extracting solution files",
-            },
-            {
-                "step": "delete",
-                "pattern": "Solutions.rar",
-                "description": "Removing solutions archive",
-            },
-            # Download documentation (28 MB)
-            {
-                "step": "download",
-                "url": "https://dataverse.harvard.edu/api/access/datafile/7882638",
-                "target": "PLEXOS-World Spatial Resolution Case Study (Second Journal Submission Version).xlsx",
-                "description": "Downloading documentation",
-            },
             # Validate installation
             {
                 "step": "validate",
-                "checks": ["xml_exists", "min_files:4"],
+                "checks": [
+                    "xml_exists",
+                    "required_dir:Base Profiles",
+                    "required_dir:Bin Profiles",
+                    "required_dir:Forecasted Profiles",
+                    "required_dir:Load Files",
+                ],
                 "description": "Validating installation",
             },
         ],
