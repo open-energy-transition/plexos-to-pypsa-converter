@@ -225,6 +225,8 @@ class RecipeExecutor:
             - target: Target filename (relative to model_dir)
             Optional:
             - method: Download method (default: 'direct')
+              Options: 'direct' (GET), 'post' (POST with form data)
+            - form_data: Form data dict for POST requests (required if method='post')
         """
         url = instruction["url"]
         target_filename = instruction["target"]
@@ -234,6 +236,9 @@ class RecipeExecutor:
 
         if method == "direct":
             self._download_direct(url, target_path)
+        elif method == "post":
+            form_data = instruction.get("form_data", {})
+            self._download_post(url, target_path, form_data)
         else:
             msg = f"Unsupported download method: {method}"
             raise ValueError(msg)
@@ -535,6 +540,65 @@ class RecipeExecutor:
 
         except requests.RequestException as e:
             msg = f"Download failed from {url}: {e}"
+            raise RecipeExecutionError(msg) from e
+
+    def _download_post(self, url: str, target: Path, form_data: dict[str, str]) -> None:
+        """Download file via POST request with form data.
+
+        Parameters
+        ----------
+        url : str
+            URL to POST to
+        target : Path
+            Target file path
+        form_data : dict
+            Form data to include in POST request
+
+        Raises
+        ------
+        RecipeExecutionError
+            If download fails
+        """
+        try:
+            # Use browser-like headers
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            }
+
+            response = requests.post(
+                url,
+                data=form_data,
+                stream=True,
+                timeout=REQUEST_TIMEOUT,
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            total_size = int(response.headers.get("content-length", 0))
+
+            # Download with progress bar
+            with target.open("wb") as f:
+                if total_size > 0:
+                    with tqdm(
+                        total=total_size,
+                        unit="B",
+                        unit_scale=True,
+                        desc=f"  Downloading {target.name}",
+                    ) as pbar:
+                        for chunk in response.iter_content(
+                            chunk_size=DOWNLOAD_CHUNK_SIZE
+                        ):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+                else:
+                    # No content-length header
+                    for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                        f.write(chunk)
+
+        except requests.RequestException as e:
+            msg = f"POST download failed from {url}: {e}"
             raise RecipeExecutionError(msg) from e
 
     def _extract_archive(
