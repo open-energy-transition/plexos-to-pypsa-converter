@@ -383,7 +383,7 @@ class RecipeExecutor:
 
         for check in checks:
             if check == "xml_exists":
-                xml_filename = model_config.get("xml_filename")  # type: ignore[attr-defined]
+                xml_filename = model_config.get("xml_filename")
                 if xml_filename:
                     xml_path = self.model_dir / xml_filename
                     if not xml_path.exists():
