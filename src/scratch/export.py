@@ -5,7 +5,7 @@ from coad.export_plexos_model import get_all_objects, write_object_report
 
 from utils.model_paths import get_model_xml_path
 
-sel_model = "plexos-world-spatial"
+sel_model = "sem-2024-2032"
 file_xml = get_model_xml_path(sel_model)
 if file_xml is None:
     raise FileNotFoundError(
@@ -13,7 +13,7 @@ if file_xml is None:
         "Please download and extract the model data."
     )
 file_xml = str(file_xml)
-save_folder = "src/data/models/coad/" + sel_model
+save_folder = "src/examples/data/" + sel_model + "/coad_export"
 
 c = COAD(file_xml)
 

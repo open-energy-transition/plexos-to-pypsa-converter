@@ -1,5 +1,5 @@
-from plexosdb import PlexosDB  # type: ignore
-from plexosdb.enums import ClassEnum, CollectionEnum  # type: ignore
+from plexosdb import PlexosDB
+from plexosdb.enums import ClassEnum, CollectionEnum
 
 from db.read import (
     check_valid_properties,
@@ -11,7 +11,7 @@ from db.read import (
 )
 from utils.model_paths import get_model_xml_path
 
-file_xml = get_model_xml_path("plexos-message")
+file_xml = get_model_xml_path("sem-2024-2032")
 if file_xml is None:
     raise FileNotFoundError(
         "Model 'plexos-message' not found in src/examples/data/. "
@@ -28,6 +28,9 @@ mod_classes.sort()
 print("\nAvailable classes:")
 for cls in mod_classes:
     print(f"  - {cls}")
+
+
+list_and_print_objects(mod_db, ClassEnum.Node)
 
 list_and_print_objects(mod_db, ClassEnum.Constraint)
 list_and_print_objects(mod_db, ClassEnum.Facility)

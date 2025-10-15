@@ -8,6 +8,8 @@ from network.conversion import create_model
 MODEL_ID = "marei-eu"
 SNAPSHOTS_PER_YEAR = 100
 
+network, setup_summary = create_model(MODEL_ID, use_csv=True)
+
 if __name__ == "__main__":
     # Configuration - can override defaults from MODEL_REGISTRY
     use_csv_integration = True
