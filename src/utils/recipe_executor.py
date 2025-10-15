@@ -31,12 +31,15 @@ Example recipe:
     ]
 """
 
+import platform
 import shutil
+import shutil as sh
 import tarfile
 import zipfile
 from pathlib import Path
 from typing import Any
 
+import rarfile
 import requests
 from tqdm import tqdm
 
@@ -566,11 +569,13 @@ class RecipeExecutor:
                 self._extract_zip(archive_path, target_dir)
             elif format in ("tar", "tar.gz", "tar.bz2"):
                 self._extract_tar(archive_path, target_dir, format)
+            elif format == "rar":
+                self._extract_rar(archive_path, target_dir)
             else:
                 msg = f"Unsupported archive format: {format}"
                 raise RecipeExecutionError(msg)
 
-        except (zipfile.BadZipFile, tarfile.TarError) as e:
+        except (zipfile.BadZipFile, tarfile.TarError, rarfile.Error) as e:
             msg = f"Failed to extract archive {archive_path}: {e}"
             raise RecipeExecutionError(msg) from e
 
@@ -584,6 +589,8 @@ class RecipeExecutor:
             return "tar.bz2"
         elif archive_path.suffix == ".tar":
             return "tar"
+        elif archive_path.suffix == ".rar":
+            return "rar"
         else:
             msg = f"Cannot auto-detect archive format for: {archive_path}"
             raise RecipeExecutionError(msg)
@@ -591,7 +598,7 @@ class RecipeExecutor:
     def _extract_zip(self, archive_path: Path, target_dir: Path) -> None:
         """Extract ZIP archive."""
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            zip_ref.extractall(target_dir)  # noqa: S202
+            zip_ref.extractall(target_dir, filter="data")
 
     def _extract_tar(self, archive_path: Path, target_dir: Path, format: str) -> None:
         """Extract TAR archive."""
@@ -603,7 +610,46 @@ class RecipeExecutor:
         mode = mode_map[format]
 
         with tarfile.open(str(archive_path), mode) as tar_ref:  # type: ignore[call-overload]
-            tar_ref.extractall(target_dir)  # noqa: S202
+            tar_ref.extractall(target_dir, filter="data")
+
+    def _extract_rar(self, archive_path: Path, target_dir: Path) -> None:
+        """Extract RAR archive.
+
+        Raises
+        ------
+        RecipeExecutionError
+            If unrar/unar tool is not installed on the system
+        """
+        tool_found = sh.which("unrar") or sh.which("unar")
+
+        if not tool_found:
+            # Provide OS-specific installation instructions
+            os_name = platform.system()
+
+            install_instructions = {
+                "Darwin": "Install with Homebrew:\n  brew install unrar",
+                "Linux": "Install with package manager:\n  # Ubuntu/Debian:\n  sudo apt-get install unrar\n  # or use unar:\n  sudo apt-get install unar\n  \n  # Fedora/RHEL:\n  sudo yum install unrar",
+                "Windows": "Download UnRAR from:\n  https://www.rarlab.com/rar_add.htm\n  and add it to your PATH",
+            }
+
+            instructions = install_instructions.get(
+                os_name, "Install unrar or unar for your operating system"
+            )
+
+            msg = (
+                f"RAR extraction requires 'unrar' or 'unar' command-line tool.\n\n"
+                f"{instructions}\n\n"
+                f"After installation, retry the model download."
+            )
+            raise RecipeExecutionError(msg)
+
+        # Extract the RAR archive
+        try:
+            with rarfile.RarFile(str(archive_path), "r") as rar_ref:
+                rar_ref.extractall(target_dir, filter="data")
+        except rarfile.Error as e:
+            msg = f"Failed to extract RAR archive: {e}"
+            raise RecipeExecutionError(msg) from e
 
     def _cleanup_temp(self) -> None:
         """Clean up temporary directory."""
