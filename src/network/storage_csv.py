@@ -433,10 +433,12 @@ def port_standalone_storage_csv(
         if bus is None:
             # Try finding bus via generators
             generator_df = load_static_properties(csv_dir, "Generator")
-            bus, primary_generator = find_bus_for_storage_via_generators_csv(
-                storage_name, storage_df, generator_df
+            result = find_bus_for_storage_via_generators_csv(
+                storage_df, generator_df, storage_name
             )
-            connection_method = "via_generator"
+            if result:
+                bus, primary_generator = result
+                connection_method = "via_generator"
 
         if bus is None:
             logger.warning(f"No connected bus found for storage {storage_name}")
@@ -570,16 +572,20 @@ def port_pumped_hydro_pair_csv(
         if bus is None:
             # Try via generators
             generator_df = load_static_properties(csv_dir, "Generator")
-            bus, primary_generator = find_bus_for_storage_via_generators_csv(
-                head_name, storage_df, generator_df
+            result = find_bus_for_storage_via_generators_csv(
+                storage_df, generator_df, head_name
             )
-            connection_method = "via_generator"
+            if result:
+                bus, primary_generator = result
+                connection_method = "via_generator"
 
             if bus is None:
-                bus, primary_generator = find_bus_for_storage_via_generators_csv(
-                    tail_name, storage_df, generator_df
+                result = find_bus_for_storage_via_generators_csv(
+                    storage_df, generator_df, tail_name
                 )
-                connection_method = "via_generator"
+                if result:
+                    bus, primary_generator = result
+                    connection_method = "via_generator"
 
         if bus is None:
             logger.warning(
@@ -728,10 +734,12 @@ def port_batteries_csv(
             if bus is None:
                 # Try via generators
                 generator_df = load_static_properties(csv_dir, "Generator")
-                bus, primary_generator = find_bus_for_storage_via_generators_csv(
-                    battery_name, battery_df, generator_df
+                result = find_bus_for_storage_via_generators_csv(
+                    battery_df, generator_df, battery_name
                 )
-                connection_method = "via_generator"
+                if result:
+                    bus, primary_generator = result
+                    connection_method = "via_generator"
 
             if bus is None:
                 logger.warning(f"No connected bus found for battery {battery_name}")
@@ -739,16 +747,20 @@ def port_batteries_csv(
                 continue
 
             # Extract Max Power (required)
-            max_power = get_property_value(battery_name, "Max Power")
+            max_power = get_property_value(battery_name, "Max Power.Variable")
             if max_power is None or max_power <= 0:
-                logger.warning(f"No valid 'Max Power' for battery {battery_name}")
+                logger.warning(
+                    f"No valid 'Max Power.Variable' for battery {battery_name}"
+                )
                 skipped_batteries.append(f"{battery_name} (no Max Power)")
                 continue
 
-            # Extract volume properties
-            max_volume = get_property_value(
-                battery_name, "Max Volume"
-            ) or get_property_value(battery_name, "Max SoC")
+            # Extract volume properties - try Capacity.Variable first, then fallback options
+            max_volume = (
+                get_property_value(battery_name, "Capacity.Variable")
+                or get_property_value(battery_name, "Max Volume")
+                or get_property_value(battery_name, "Max SoC")
+            )
             initial_volume = get_property_value(
                 battery_name, "Initial Volume"
             ) or get_property_value(battery_name, "Initial SoC", 0.0)
@@ -784,6 +796,9 @@ def port_batteries_csv(
             if lifetime is None:
                 lifetime = get_property_value(battery_name, "Economic Life")
 
+            # Extract max charge power (optional)
+            max_charge_power = get_property_value(battery_name, "Max Load.Variable")
+
             # Create storage unit entry
             storage_unit_data = {
                 "bus": bus,
@@ -798,6 +813,9 @@ def port_batteries_csv(
 
             if lifetime is not None:
                 storage_unit_data["lifetime"] = lifetime
+
+            if max_charge_power is not None and max_charge_power > 0:
+                storage_unit_data["p_nom_max_charge"] = max_charge_power
 
             # Add to network
             network.add("StorageUnit", battery_name, **storage_unit_data)
