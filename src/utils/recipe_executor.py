@@ -33,7 +33,6 @@ Example recipe:
 
 import platform
 import shutil
-import shutil as sh
 import tarfile
 import zipfile
 from pathlib import Path
@@ -595,13 +594,66 @@ class RecipeExecutor:
             msg = f"Cannot auto-detect archive format for: {archive_path}"
             raise RecipeExecutionError(msg)
 
+    def _safe_extract_path(self, target_dir: Path, member_path: str) -> Path:
+        """Validate extraction path to prevent path traversal attacks.
+
+        Parameters
+        ----------
+        target_dir : Path
+            Target directory for extraction
+        member_path : str
+            Path of member to extract
+
+        Returns
+        -------
+        Path
+            Validated absolute path for extraction
+
+        Raises
+        ------
+        RecipeExecutionError
+            If member path would extract outside target directory
+        """
+        # Resolve target directory to absolute path
+        target_abs = target_dir.resolve()
+
+        # Construct member path and resolve it
+        member_abs = (target_abs / member_path).resolve()
+
+        # Ensure member path is within target directory
+        try:
+            member_abs.relative_to(target_abs)
+        except ValueError as e:
+            msg = (
+                f"Archive member '{member_path}' would extract outside target "
+                f"directory (potential path traversal attack)"
+            )
+            raise RecipeExecutionError(msg) from e
+
+        return member_abs
+
     def _extract_zip(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract ZIP archive."""
+        """Extract ZIP archive safely, preventing path traversal."""
         with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            zip_ref.extractall(target_dir, filter="data")
+            for member in zip_ref.namelist():
+                # Validate extraction path
+                extract_path = self._safe_extract_path(target_dir, member)
+
+                # Extract member
+                if member.endswith("/"):
+                    # Directory
+                    extract_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    # File - ensure parent directory exists
+                    extract_path.parent.mkdir(parents=True, exist_ok=True)
+                    with (
+                        zip_ref.open(member) as source,
+                        extract_path.open("wb") as target,
+                    ):
+                        shutil.copyfileobj(source, target)
 
     def _extract_tar(self, archive_path: Path, target_dir: Path, format: str) -> None:
-        """Extract TAR archive."""
+        """Extract TAR archive safely, preventing path traversal."""
         mode_map = {
             "tar": "r",
             "tar.gz": "r:gz",
@@ -610,17 +662,32 @@ class RecipeExecutor:
         mode = mode_map[format]
 
         with tarfile.open(str(archive_path), mode) as tar_ref:  # type: ignore[call-overload]
-            tar_ref.extractall(target_dir, filter="data")
+            for member in tar_ref.getmembers():
+                # Validate extraction path
+                extract_path = self._safe_extract_path(target_dir, member.name)
+
+                # Extract member
+                if member.isdir():
+                    # Directory
+                    extract_path.mkdir(parents=True, exist_ok=True)
+                elif member.isfile():
+                    # File
+                    extract_path.parent.mkdir(parents=True, exist_ok=True)
+                    with tar_ref.extractfile(member) as source:
+                        if source:
+                            with extract_path.open("wb") as target:
+                                shutil.copyfileobj(source, target)
+                # Note: Ignoring symlinks and other special files for security
 
     def _extract_rar(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract RAR archive.
+        """Extract RAR archive safely, preventing path traversal.
 
         Raises
         ------
         RecipeExecutionError
             If unrar/unar tool is not installed on the system
         """
-        tool_found = sh.which("unrar") or sh.which("unar")
+        tool_found = shutil.which("unrar") or shutil.which("unar")
 
         if not tool_found:
             # Provide OS-specific installation instructions
@@ -646,7 +713,22 @@ class RecipeExecutor:
         # Extract the RAR archive
         try:
             with rarfile.RarFile(str(archive_path), "r") as rar_ref:
-                rar_ref.extractall(target_dir, filter="data")
+                for member in rar_ref.infolist():
+                    # Validate extraction path
+                    extract_path = self._safe_extract_path(target_dir, member.filename)
+
+                    # Extract member
+                    if member.isdir():
+                        # Directory
+                        extract_path.mkdir(parents=True, exist_ok=True)
+                    else:
+                        # File
+                        extract_path.parent.mkdir(parents=True, exist_ok=True)
+                        with (
+                            rar_ref.open(member.filename) as source,
+                            extract_path.open("wb") as target,
+                        ):
+                            shutil.copyfileobj(source, target)
         except rarfile.Error as e:
             msg = f"Failed to extract RAR archive: {e}"
             raise RecipeExecutionError(msg) from e
