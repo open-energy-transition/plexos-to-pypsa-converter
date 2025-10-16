@@ -4,6 +4,8 @@ import pandas as pd
 from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 
+from db.timeslice_parser import load_and_parse_timeslice_patterns
+
 
 def find_bus_for_object(
     db: PlexosDB, object_name: str, object_class: ClassEnum
@@ -189,23 +191,61 @@ def find_fuel_for_generator(db: PlexosDB, generator_name: str) -> str | None:
 
 
 def read_timeslice_activity(
-    timeslice_csv: str, snapshots: pd.DatetimeIndex | Any
+    timeslice_csv: str,
+    snapshots: pd.DatetimeIndex | Any,
+    trading_periods_per_day: int = 24,
 ) -> pd.DataFrame:
     """Read a timeslice CSV and return a parsed DataFrame.
 
-    Assumes the CSV has columns: DATETIME, NAME, TIMESLICE (where TIMESLICE is -1 for active, 0 for inactive).
-    Ensures that if the last setting before the first snapshot is present, it is carried over to the first snapshot.
+    Supports two formats:
+    1. Activity timeseries (AEMO format): DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
+    2. Pattern definitions (SEM/CAISO format): object, category, Include(text) with patterns
 
     Parameters
     ----------
         timeslice_csv: Path to the timeslice CSV file
         snapshots: pd.DatetimeIndex of model snapshots
+        trading_periods_per_day: Number of trading periods per day (for P symbol in patterns)
 
     Returns
     -------
         pd.DataFrame with index=snapshots, columns=timeslice names, values=True/False for activity
+
+    Notes
+    -----
+    The function automatically detects the format based on column names:
+    - If DATETIME/NAME/TIMESLICE columns exist → activity timeseries format
+    - If object/Include(text) columns exist → pattern definition format
     """
     df = pd.read_csv(timeslice_csv)
+
+    # Detect format based on columns
+    columns_lower = [col.lower() for col in df.columns]
+
+    # Format 1: Activity timeseries (DATETIME, NAME, TIMESLICE)
+    if (
+        "datetime" in columns_lower
+        and "name" in columns_lower
+        and "timeslice" in columns_lower
+    ):
+        return _read_timeslice_activity_timeseries(df, snapshots)
+
+    # Format 2: Pattern definitions (object, Include(text))
+    elif "object" in df.columns and any("include" in col.lower() for col in df.columns):
+        return _read_timeslice_activity_patterns(df, snapshots, trading_periods_per_day)
+
+    else:
+        msg = f"Unknown timeslice CSV format. Columns: {df.columns.tolist()}"
+        raise ValueError(msg)
+
+
+def _read_timeslice_activity_timeseries(
+    df: pd.DataFrame, snapshots: pd.DatetimeIndex
+) -> pd.DataFrame:
+    """Parse timeslice activity timeseries format (AEMO-style).
+
+    Format: DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
+    """
     df["DATETIME"] = pd.to_datetime(df["DATETIME"], dayfirst=True)
     timeslice_names = df["NAME"].unique()
     activity = pd.DataFrame(False, index=snapshots, columns=timeslice_names)
@@ -225,6 +265,18 @@ def read_timeslice_activity(
                 activity.loc[mask, ts_name] = True
             elif row["TIMESLICE"] == 0:  # Inactive
                 activity.loc[mask, ts_name] = False
+
+    return activity
+
+
+def _read_timeslice_activity_patterns(
+    df: pd.DataFrame, snapshots: pd.DatetimeIndex, trading_periods_per_day: int = 24
+) -> pd.DataFrame:
+    """Parse timeslice pattern definitions (SEM/CAISO-style).
+
+    Format: object, category, Include(text) with PLEXOS pattern strings
+    """
+    activity = load_and_parse_timeslice_patterns(df, snapshots, trading_periods_per_day)
 
     return activity
 
