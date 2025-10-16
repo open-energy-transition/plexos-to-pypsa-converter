@@ -11,7 +11,7 @@ from db.csv_readers import load_static_properties
 from network.carriers_csv import parse_fuel_prices_csv
 from network.core import add_loads_flexible, add_snapshots
 from network.generators_csv import port_generators_csv
-from network.links_csv import port_transmission_csv
+from network.links_csv import port_links_csv
 from network.storage_csv import add_storage_csv
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,7 @@ def setup_network_csv(
     target_node: str | None = None,
     aggregate_node_name: str | None = None,
     demand_assignment_strategy: str = "per_node",
+    demand_target_node: str | None = None,
     transmission_as_lines: bool = False,
     load_scenario: str | None = None,
 ) -> dict:
@@ -136,11 +137,15 @@ def setup_network_csv(
     inflow_path : str, optional
         Path to hydro inflow data
     target_node : str, optional
-        Target node for demand aggregation (target_node strategy)
+        Target node for generator reassignment (target_node strategy)
     aggregate_node_name : str, optional
         Aggregate node name (aggregate_node strategy)
     demand_assignment_strategy : str, default "per_node"
-        Strategy for demand assignment: "per_node", "target_node", or "aggregate_node"
+        Strategy for generator/component assignment: "per_node", "target_node", or "aggregate_node"
+    demand_target_node : str, optional
+        Specific node to assign ALL demand to, regardless of demand_assignment_strategy.
+        This allows keeping generators on their original nodes (per_node) while
+        consolidating all demand to one node. Example: "SEM"
     transmission_as_lines : bool, default False
         Use Line components instead of Links for transmission
     load_scenario : str, optional
@@ -179,15 +184,25 @@ def setup_network_csv(
         logger.info("Adding demand from database...")
         # Use add_loads_flexible which handles different demand formats
         if demand_source:
+            # Determine which node to assign demand to
+            # Priority: demand_target_node > strategy-based target_node/aggregate_node_name
+            demand_node = None
+            demand_aggregate = None
+
+            if demand_target_node:
+                # Explicit demand target node - overrides strategy
+                demand_node = demand_target_node
+                logger.info(f"  Assigning all demand to node: {demand_target_node}")
+            elif demand_assignment_strategy == "target_node":
+                demand_node = target_node
+            elif demand_assignment_strategy == "aggregate_node":
+                demand_aggregate = aggregate_node_name
+
             add_loads_flexible(
                 network=network,
                 demand_source=demand_source,
-                target_node=target_node
-                if demand_assignment_strategy == "target_node"
-                else None,
-                aggregate_node_name=aggregate_node_name
-                if demand_assignment_strategy == "aggregate_node"
-                else None,
+                target_node=demand_node,
+                aggregate_node_name=demand_aggregate,
                 load_scenario=load_scenario,
             )
     else:
@@ -214,14 +229,18 @@ def setup_network_csv(
         timeslice_csv=timeslice_csv,
     )
 
-    # 6. Add transmission (Lines or Links)
-    logger.info("Adding transmission from CSV...")
-    port_transmission_csv(
+    # 6. Add transmission links
+    logger.info("Adding transmission links from CSV...")
+    if transmission_as_lines:
+        logger.warning(
+            "transmission_as_lines=True not yet supported in CSV mode. "
+            "Using Links instead."
+        )
+    port_links_csv(
         network=network,
         csv_dir=csv_dir,
         timeslice_csv=timeslice_csv,
         target_node=target_node,
-        transmission_as_lines=transmission_as_lines,
     )
 
     # 7. Set fuel prices
@@ -259,16 +278,10 @@ def setup_network_csv(
         "carriers": num_carriers,
         "generators": len(network.generators),
         "storage": len(network.storage_units),
+        "links": len(network.links),
         "snapshots": len(network.snapshots),
         "demand_strategy": demand_assignment_strategy,
-        "transmission_as_lines": transmission_as_lines,
     }
-
-    # Add transmission counts based on component type
-    if transmission_as_lines:
-        summary["lines"] = len(network.lines)
-    else:
-        summary["links"] = len(network.links)
 
     if target_node:
         summary["target_node"] = target_node
@@ -280,10 +293,7 @@ def setup_network_csv(
     logger.info(f"  Carriers: {num_carriers}")
     logger.info(f"  Generators: {len(network.generators)}")
     logger.info(f"  Storage units: {len(network.storage_units)}")
-    if transmission_as_lines:
-        logger.info(f"  Lines: {len(network.lines)}")
-    else:
-        logger.info(f"  Links: {len(network.links)}")
+    logger.info(f"  Links: {len(network.links)}")
     logger.info(f"  Snapshots: {len(network.snapshots)}")
 
     return summary

@@ -952,6 +952,7 @@ def port_core_network(
     aggregate_node_name=None,
     model_name=None,
     load_scenario=None,
+    demand_target_node=None,
 ):
     """Comprehensive function to set up the core PyPSA network infrastructure.
 
@@ -1057,12 +1058,16 @@ def port_core_network(
 
     # Step 4: Add loads with flexible parsing
     print("4. Adding loads...")
+    # Determine demand target: demand_target_node takes precedence
+    effective_target = demand_target_node if demand_target_node else target_node
+    effective_aggregate = None if demand_target_node else aggregate_node_name
+
     load_summary = add_loads_flexible(
         network,
         demand_source,
         demand_bus_mapping,
-        target_node,
-        aggregate_node_name,
+        effective_target,
+        effective_aggregate,
         load_scenario,
     )
 
@@ -1678,6 +1683,7 @@ def setup_network(
     inflow_path=None,
     transmission_as_lines=False,
     load_scenario=None,
+    demand_target_node=None,
 ):
     """Unified network setup function that automatically detects the appropriate mode.
 
@@ -1720,6 +1726,10 @@ def setup_network(
     load_scenario : str, optional
         For demand data with multiple scenarios (iterations), specify which scenario
         to use. If None, defaults to first scenario. Example: "iteration_1"
+    demand_target_node : str, optional
+        Specific node to assign ALL demand to, regardless of setup mode.
+        This allows keeping generators on their original nodes while
+        consolidating all demand to one node. Takes precedence over target_node.
 
     Returns
     -------
@@ -1804,6 +1814,7 @@ def setup_network(
         aggregate_node_name=aggregate_node_name,
         model_name=model_name,
         load_scenario=load_scenario,
+        demand_target_node=demand_target_node,
     )
 
     # Step 2: Add storage (batteries, hydro, pumped hydro)

@@ -161,6 +161,7 @@ def _create_electricity_model(
             demand_assignment_strategy=config.get(
                 "demand_assignment_strategy", "per_node"
             ),
+            demand_target_node=config.get("demand_target_node"),
             transmission_as_lines=config.get("transmission_as_lines", False),
             load_scenario=config.get("load_scenario"),
         )
@@ -245,6 +246,10 @@ def _create_electricity_model(
         setup_args["target_node"] = config.get("target_node")
     elif strategy == "aggregate_node":
         setup_args["aggregate_node_name"] = config.get("aggregate_node_name")
+
+    # Add demand-specific target node (independent of strategy)
+    if "demand_target_node" in config:
+        setup_args["demand_target_node"] = config.get("demand_target_node")
 
     # Add load scenario parameter
     setup_args["load_scenario"] = config.get("load_scenario")
