@@ -820,8 +820,9 @@ def set_marginal_costs_csv(
     fuel_prices = parse_fuel_prices_csv(csv_dir, network, timeslice_csv)
 
     if fuel_prices.empty:
-        logger.warning("No fuel prices found. Cannot set marginal costs.")
-        return
+        logger.warning(
+            "No fuel prices found. Cannot set marginal costs for thermal generators."
+        )
 
     generator_df = load_static_properties(csv_dir, "Generator")
     snapshots = network.snapshots
@@ -829,6 +830,18 @@ def set_marginal_costs_csv(
     skipped_generators = []
 
     for gen in network.generators.index:
+        # Get VO&M Charge first (applies to all generator types)
+        vo_m_charge_value = get_property_from_static_csv(
+            generator_df, gen, "VO&M Charge"
+        )
+
+        if vo_m_charge_value is None:
+            vo_m_charge = 0.0
+        else:
+            vo_m_charge = parse_numeric_value(vo_m_charge_value, use_first=True)
+            if vo_m_charge is None:
+                vo_m_charge = 0.0
+
         # Find the generator's carrier/fuel
         carrier = None
         if "carrier" in network.generators.columns and pd.notna(
@@ -838,15 +851,31 @@ def set_marginal_costs_csv(
         else:
             carrier = find_fuel_for_generator_csv(generator_df, gen)
 
-        if carrier is None or carrier not in fuel_prices.columns:
-            skipped_generators.append(gen)
+        # Check if this is a fuel-burning generator
+        has_fuel = (
+            carrier is not None
+            and not fuel_prices.empty
+            and carrier in fuel_prices.columns
+        )
+
+        if not has_fuel:
+            # Non-fuel generators (hydro, wind, solar, storage, etc.)
+            # Marginal cost is just VO&M charge (typically 0)
+            marginal_cost_ts = pd.Series(vo_m_charge, index=snapshots)
+            marginal_costs_dict[gen] = marginal_cost_ts
+            logger.debug(f"Generator {gen}: no fuel, marginal_cost={vo_m_charge}")
             continue
 
-        # Get fuel price time series
+        # Fuel-burning generator - need heat rate and fuel price
         fuel_price_ts = fuel_prices[carrier]
 
-        if fuel_price_ts.isna().all() or (fuel_price_ts == 0).all():
-            skipped_generators.append(gen)
+        if fuel_price_ts.isna().all():
+            # Fuel exists but no prices - use VO&M only
+            marginal_cost_ts = pd.Series(vo_m_charge, index=snapshots)
+            marginal_costs_dict[gen] = marginal_cost_ts
+            logger.debug(
+                f"Generator {gen}: fuel {carrier} has no prices, using VO&M only"
+            )
             continue
 
         # Get Heat Rate Inc values
@@ -877,32 +906,20 @@ def set_marginal_costs_csv(
         if heat_rate_inc_values:
             heat_rate_inc = sum(heat_rate_inc_values) / len(heat_rate_inc_values)
         else:
-            logger.warning(f"No Heat Rate Inc found for generator {gen}")
-            skipped_generators.append(gen)
-            continue
-
-        # Get VO&M Charge
-        vo_m_charge = get_property_from_static_csv(generator_df, gen, "VO&M Charge")
-
-        if vo_m_charge is None:
-            logger.warning(f"No VO&M Charge found for generator {gen}")
-            skipped_generators.append(gen)
-            continue
-
-        vo_m_charge = parse_numeric_value(vo_m_charge, use_first=True)
-        if vo_m_charge is None:
+            # Has fuel but no heat rate - unusual, but default to VO&M only
             logger.warning(
-                f"Invalid VO&M Charge value for generator {gen}: {vo_m_charge}"
+                f"Generator {gen} has fuel {carrier} but no Heat Rate Inc, using VO&M only"
             )
-            skipped_generators.append(gen)
+            marginal_cost_ts = pd.Series(vo_m_charge, index=snapshots)
+            marginal_costs_dict[gen] = marginal_cost_ts
             continue
 
-        # Calculate marginal cost time series
+        # Calculate marginal cost time series: (fuel_price * heat_rate) + VO&M
         marginal_cost_ts = (fuel_price_ts * heat_rate_inc) + vo_m_charge
         marginal_costs_dict[gen] = marginal_cost_ts
 
         logger.debug(
-            f"Generator {gen}: heat_rate_inc={heat_rate_inc}, vo_m_charge={vo_m_charge}"
+            f"Generator {gen}: heat_rate_inc={heat_rate_inc}, vo_m_charge={vo_m_charge}, carrier={carrier}"
         )
 
     # Create DataFrame from marginal costs dictionary
