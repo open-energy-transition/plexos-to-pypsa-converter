@@ -376,6 +376,9 @@ def find_fuel_for_generator_csv(
 ) -> str | None:
     """Find the associated fuel for a given generator using static CSV data.
 
+    Handles multi-fuel generators by removing duplicates and using the first fuel.
+    When multiple unique fuels exist, uses the primary (first) fuel and logs a message.
+
     This replaces db.parse.find_fuel_for_generator() with CSV-based lookup.
 
     Parameters
@@ -388,7 +391,7 @@ def find_fuel_for_generator_csv(
     Returns
     -------
     str | None
-        The name of the associated Fuel, or None if not found.
+        The name of the associated Fuel (primary fuel if multiple), or None if not found.
 
     Examples
     --------
@@ -396,6 +399,10 @@ def find_fuel_for_generator_csv(
     >>> fuel = find_fuel_for_generator_csv(generators, "AA1")
     >>> print(fuel)
     None  # Hydro generators may not have fuel
+
+    >>> fuel = find_fuel_for_generator_csv(generators, "MP1")
+    >>> print(fuel)
+    'ROI Coal'  # First fuel from ['ROI Coal', 'ROI Coal', 'ROI Oil']
     """
     if generator_name not in static_df.index:
         print(f"Warning: Generator '{generator_name}' not found in static properties")
@@ -410,6 +417,34 @@ def find_fuel_for_generator_csv(
     # Handle empty/NaN values
     if pd.isna(fuel_value) or fuel_value == "":
         return None
+
+    # Handle multi-fuel lists: "['ROI Gas', 'ROI Gas']" or "['ROI Coal', 'ROI Oil']"
+    if isinstance(fuel_value, str) and fuel_value.startswith("["):
+        try:
+            fuel_list = ast.literal_eval(fuel_value)
+            if isinstance(fuel_list, list) and len(fuel_list) > 0:
+                # Remove duplicates while preserving order
+                unique_fuels = []
+                for fuel in fuel_list:
+                    if fuel not in unique_fuels:
+                        unique_fuels.append(fuel)
+
+                # If only one unique fuel remains, use it
+                if len(unique_fuels) == 1:
+                    return str(unique_fuels[0])
+
+                # If multiple unique fuels, use first and log
+                if len(unique_fuels) > 1:
+                    primary_fuel = str(unique_fuels[0])
+                    logger.info(
+                        f"Generator '{generator_name}' has multiple fuels {unique_fuels}. "
+                        f"Using primary fuel: '{primary_fuel}'"
+                    )
+                    return primary_fuel
+        except (ValueError, SyntaxError) as e:
+            logger.warning(
+                f"Failed to parse Fuel list for generator '{generator_name}': {e}"
+            )
 
     return str(fuel_value)
 
