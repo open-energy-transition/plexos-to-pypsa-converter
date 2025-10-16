@@ -100,6 +100,7 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
       - Single "Node" column with format "['bus1', 'bus2']" (most models)
       - Separate "Node From" and "Node To" columns (NREL format)
     - Adds links with basic properties (bus0, bus1, ramp limits)
+    - Sets carrier="AC" for all transmission links and ensures AC carrier exists
     - Does NOT set p_nom, p_min_pu, p_max_pu (use set_link_flows_csv for that)
     - Multi-value properties use MIN strategy for ramp limits (most conservative)
     """
@@ -111,6 +112,11 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
         return
 
     logger.info(f"Adding {len(line_df)} transmission links from CSV...")
+
+    # Ensure AC carrier exists for transmission links
+    if "AC" not in network.carriers.index:
+        network.add("Carrier", "AC")
+        logger.debug("Added AC carrier for transmission links")
 
     added_count = 0
     skipped_lines = []
@@ -138,6 +144,7 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
             link_data = {
                 "bus0": bus0,
                 "bus1": bus1,
+                "carrier": "AC",  # Transmission lines are AC carrier
             }
 
             # Add ramp limits if they exist and are positive
