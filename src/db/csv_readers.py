@@ -1136,3 +1136,49 @@ def _parse_bands_in_columns(df: pd.DataFrame) -> pd.DataFrame:
     result = df[["datetime"] + band_cols].copy()
     result.set_index("datetime", inplace=True)
     return result
+
+
+def load_timeslice_definitions(csv_dir: str | Path) -> pd.DataFrame:
+    """Load timeslice definitions from Timeslice.csv with pattern strings.
+
+    This loads the Timeslice.csv file that contains pattern definitions
+    (e.g., "M6-9,H16-22" for summer peak hours). These patterns can then
+    be parsed using the timeslice_parser module.
+
+    Parameters
+    ----------
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns: object, category, Include, Include(text)
+        Returns empty DataFrame if file doesn't exist.
+
+    Examples
+    --------
+    >>> timeslice_defs = load_timeslice_definitions(csv_dir)
+    >>> timeslice_defs.loc[timeslice_defs["object"] == "SUMMER PEAK", "Include(text)"]
+    'M4-9,H8-19'
+
+    Notes
+    -----
+    This is different from the timeslice activity CSV (DATETIME,NAME,TIMESLICE format)
+    used by AEMO models. This function loads the pattern definition CSV used by
+    SEM, CAISO, and other models.
+    """
+    csv_path = Path(csv_dir) / "Timeslice.csv"
+
+    if not csv_path.exists():
+        logger.info(f"Timeslice.csv not found at {csv_path}")
+        return pd.DataFrame(columns=["object", "category", "Include", "Include(text)"])
+
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:
+        logger.exception(f"Error loading {csv_path}")
+        return pd.DataFrame(columns=["object", "category", "Include", "Include(text)"])
+    else:
+        logger.info(f"Loaded {len(df)} timeslice definitions from {csv_path.name}")
+        return df
