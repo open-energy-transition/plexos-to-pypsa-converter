@@ -66,24 +66,30 @@ def ensure_datetime(value: Any) -> pd.Timestamp | None:
         return None
 
 
-def parse_numeric_value(value: Any, use_first: bool = True) -> float | None:
+def parse_numeric_value(
+    value: Any, use_first: bool = True, strategy: str = "first"
+) -> float | None:
     """Parse a numeric value that might be a string representation of a list.
 
     When COAD exports PLEXOS data to CSV, properties with multiple values
-    (e.g., multiple generator units) are stored as string representations of lists.
-    This function handles various formats:
-    - Direct numeric values: 55.197
-    - String numbers: "55.197"
-    - String representations of lists: "['55.197', '62.606']"
+    (e.g., multiple generator units, multiple operating conditions) are stored as
+    string representations of lists. This function handles various formats and
+    provides multiple strategies for aggregating multi-value properties.
 
     Parameters
     ----------
     value : Any
         Value to parse (could be number, string, or string representation of list)
     use_first : bool, default True
+        DEPRECATED: Use strategy parameter instead.
         If value is a list, whether to use first element (True) or sum all (False).
-        - Use True for properties that represent a characteristic (e.g., efficiency)
-        - Use False for properties that represent a total (e.g., total capacity)
+    strategy : str, default "first"
+        Strategy for handling multi-value properties:
+        - "first": Use first value (default, backward compatible)
+        - "min": Use minimum value (conservative for max limits)
+        - "max": Use maximum value (conservative for min limits)
+        - "sum": Sum all values (for additive properties like capacity)
+        - "average": Average all values (for representative physical parameters)
 
     Returns
     -------
@@ -96,13 +102,17 @@ def parse_numeric_value(value: Any, use_first: bool = True) -> float | None:
     >>> parse_numeric_value("55.197")
     55.197
 
-    Parse a list string, taking first value:
-    >>> parse_numeric_value("['55.197', '62.606']")
-    55.197
-
-    Parse a list string, summing all values:
-    >>> parse_numeric_value("['55.197', '62.606']", use_first=False)
-    117.803
+    Parse a list string with different strategies:
+    >>> parse_numeric_value("['100', '150', '200']", strategy="first")
+    100.0
+    >>> parse_numeric_value("['100', '150', '200']", strategy="min")
+    100.0
+    >>> parse_numeric_value("['100', '150', '200']", strategy="max")
+    200.0
+    >>> parse_numeric_value("['100', '150', '200']", strategy="sum")
+    450.0
+    >>> parse_numeric_value("['100', '150', '200']", strategy="average")
+    150.0
 
     Handle already-parsed numeric values:
     >>> parse_numeric_value(55.197)
@@ -134,10 +144,35 @@ def parse_numeric_value(value: Any, use_first: bool = True) -> float | None:
             if isinstance(parsed, list) and len(parsed) > 0:
                 # Convert all elements to float
                 float_values = [float(x) for x in parsed]
-                if use_first:
-                    return float_values[0]
+
+                # Apply strategy (use_first param takes precedence for backward compatibility)
+                if not use_first and strategy == "first":
+                    strategy = "sum"
+
+                if strategy == "first":
+                    result = float_values[0]
+                elif strategy == "min":
+                    result = min(float_values)
+                elif strategy == "max":
+                    result = max(float_values)
+                elif strategy == "sum":
+                    result = sum(float_values)
+                elif strategy == "average":
+                    result = sum(float_values) / len(float_values)
                 else:
-                    return sum(float_values)
+                    logger.warning(
+                        f"Unknown strategy '{strategy}', using 'first'. "
+                        f"Valid strategies: first, min, max, sum, average"
+                    )
+                    result = float_values[0]
+
+                # Log when multi-value property is encountered
+                if len(float_values) > 1:
+                    logger.debug(
+                        f"Multi-value property {float_values} resolved to {result} using strategy '{strategy}'"
+                    )
+
+                return result
         except (ValueError, SyntaxError, TypeError):
             pass
 
@@ -527,6 +562,63 @@ def get_property_from_static_csv(
         return default
 
     return value
+
+
+def get_numeric_property_from_static_csv(
+    static_df: pd.DataFrame,
+    object_name: str,
+    property_name: str,
+    default: float | None = None,
+    strategy: str = "first",
+) -> float | None:
+    """Get a numeric property value with multi-value handling strategy.
+
+    This is a convenience function that combines get_property_from_static_csv()
+    with parse_numeric_value() to handle numeric properties that may have
+    multiple values in the CSV.
+
+    Parameters
+    ----------
+    static_df : pd.DataFrame
+        DataFrame from load_static_properties()
+    object_name : str
+        Name of the object
+    property_name : str
+        Name of the property to retrieve
+    default : float | None, optional
+        Default value to return if property not found or cannot be parsed
+    strategy : str, default "first"
+        Strategy for handling multi-value properties:
+        - "first": Use first value (default)
+        - "min": Use minimum value (conservative for max limits)
+        - "max": Use maximum value (conservative for min limits)
+        - "sum": Sum all values (for additive properties)
+        - "average": Average all values (for physical parameters)
+
+    Returns
+    -------
+    float | None
+        Parsed numeric value, or default if not found/cannot be parsed
+
+    Examples
+    --------
+    >>> lines = load_static_properties(csv_dir, "Line")
+    >>> # Single value
+    >>> max_flow = get_numeric_property_from_static_csv(lines, "line001", "Max Flow")
+    >>> # Multi-value with strategy
+    >>> max_flow = get_numeric_property_from_static_csv(
+    ...     lines, "line001", "Max Flow", strategy="min"
+    ... )
+    """
+    raw_value = get_property_from_static_csv(
+        static_df, object_name, property_name, default=None
+    )
+
+    if raw_value is None:
+        return default
+
+    parsed = parse_numeric_value(raw_value, strategy=strategy)
+    return parsed if parsed is not None else default
 
 
 def list_objects_by_class_csv(static_df: pd.DataFrame) -> list[str]:

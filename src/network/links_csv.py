@@ -2,6 +2,18 @@
 
 This module provides CSV-based alternatives to the PlexosDB-based functions in links.py.
 These functions read from COAD CSV exports instead of querying the SQLite database.
+
+Multi-Value Property Handling
+------------------------------
+PLEXOS CSV exports may contain properties with multiple values (e.g., "['100', '150', '200']").
+This module applies appropriate aggregation strategies based on power system constraints:
+
+- **Max Flow / Max Rating**: Uses MIN strategy (most restrictive/conservative capacity)
+- **Min Flow / Min Rating**: Uses MAX strategy (most restrictive constraint)
+- **Max Ramp Up/Down**: Uses MIN strategy (slowest/most conservative ramp rate)
+- **Reactance / Resistance**: Uses FIRST strategy (physical parameters)
+
+See `parse_numeric_value()` in db.csv_readers for available strategies.
 """
 
 import ast
@@ -14,6 +26,7 @@ import pypsa
 from db.csv_readers import (
     ensure_datetime,
     get_dataid_timeslice_map_csv,
+    get_numeric_property_from_static_csv,
     get_property_from_static_csv,
     load_static_properties,
     load_time_varying_properties,
@@ -88,6 +101,7 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
       - Separate "Node From" and "Node To" columns (NREL format)
     - Adds links with basic properties (bus0, bus1, ramp limits)
     - Does NOT set p_nom, p_min_pu, p_max_pu (use set_link_flows_csv for that)
+    - Multi-value properties use MIN strategy for ramp limits (most conservative)
     """
     csv_dir = Path(csv_dir)
     line_df = load_static_properties(csv_dir, "Line")
@@ -112,11 +126,12 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
                 continue
 
             # Get ramp limits if available
-            max_ramp_up = get_property_from_static_csv(
-                line_df, line_name, "Max Ramp Up"
+            # Use "min" strategy for ramp limits - most conservative/restrictive (slowest ramp)
+            max_ramp_up = get_numeric_property_from_static_csv(
+                line_df, line_name, "Max Ramp Up", strategy="min"
             )
-            max_ramp_down = get_property_from_static_csv(
-                line_df, line_name, "Max Ramp Down"
+            max_ramp_down = get_numeric_property_from_static_csv(
+                line_df, line_name, "Max Ramp Down", strategy="min"
             )
 
             # Add link to network
@@ -126,10 +141,10 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
             }
 
             # Add ramp limits if they exist and are positive
-            if max_ramp_up and float(max_ramp_up) > 0:
-                link_data["ramp_limit_up"] = float(max_ramp_up)
-            if max_ramp_down and float(max_ramp_down) > 0:
-                link_data["ramp_limit_down"] = float(max_ramp_down)
+            if max_ramp_up and max_ramp_up > 0:
+                link_data["ramp_limit_up"] = max_ramp_up
+            if max_ramp_down and max_ramp_down > 0:
+                link_data["ramp_limit_down"] = max_ramp_down
 
             network.add("Link", line_name, **link_data)
             added_count += 1
@@ -167,6 +182,7 @@ def add_lines_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
     - Adds Line components with electrical properties (bus0, bus1, x, r)
     - Does NOT set s_nom, s_min_pu, s_max_pu (use set_line_flows_csv for that)
     - If Reactance is not available, warns and skips the line
+    - Multi-value properties use FIRST strategy for electrical parameters
     """
     csv_dir = Path(csv_dir)
     line_df = load_static_properties(csv_dir, "Line")
@@ -191,11 +207,12 @@ def add_lines_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
                 continue
 
             # Get electrical parameters (required for PyPSA Line)
-            reactance = get_property_from_static_csv(
-                line_df, line_name, "Reactance (p.u.)"
+            # Use "first" strategy for physical parameters (or could use "average")
+            reactance = get_numeric_property_from_static_csv(
+                line_df, line_name, "Reactance (p.u.)", strategy="first"
             )
-            resistance = get_property_from_static_csv(
-                line_df, line_name, "Resistance (p.u.)"
+            resistance = get_numeric_property_from_static_csv(
+                line_df, line_name, "Resistance (p.u.)", strategy="first"
             )
 
             if not reactance:
@@ -210,12 +227,14 @@ def add_lines_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
             line_data = {
                 "bus0": bus0,
                 "bus1": bus1,
-                "x": float(reactance),  # Reactance in p.u.
+                "x": reactance,  # Reactance in p.u. (already parsed as float)
             }
 
             # Add resistance if available
             if resistance:
-                line_data["r"] = float(resistance)  # Resistance in p.u.
+                line_data["r"] = (
+                    resistance  # Resistance in p.u. (already parsed as float)
+                )
             else:
                 line_data["r"] = 0.0  # Default to zero resistance if not provided
 
@@ -258,6 +277,7 @@ def parse_lines_flow_csv(
     - Uses time-varying properties CSV if available
     - Prefers Rating over Flow properties
     - Applies date/timeslice logic same as generators
+    - Multi-value properties: MIN for max limits, MAX for min limits (conservative)
     """
     csv_dir = Path(csv_dir)
     snapshots = network.snapshots
@@ -382,25 +402,28 @@ def _build_static_line_flows(
 
     for line in lines:
         # Try to get static flow/rating values
-        max_flow = get_property_from_static_csv(line_df, line, "Max Flow")
-        max_rating = get_property_from_static_csv(line_df, line, "Max Rating")
-        min_flow = get_property_from_static_csv(line_df, line, "Min Flow")
-        min_rating = get_property_from_static_csv(line_df, line, "Min Rating")
+        # Use "min" strategy for max limits (conservative - most restrictive capacity)
+        # Use "max" strategy for min limits (conservative - most restrictive constraint)
+        max_flow = get_numeric_property_from_static_csv(
+            line_df, line, "Max Flow", strategy="min"
+        )
+        max_rating = get_numeric_property_from_static_csv(
+            line_df, line, "Max Rating", strategy="min"
+        )
+        min_flow = get_numeric_property_from_static_csv(
+            line_df, line, "Min Flow", strategy="max"
+        )
+        min_rating = get_numeric_property_from_static_csv(
+            line_df, line, "Min Rating", strategy="max"
+        )
 
         # Prefer rating over flow
         max_val = max_rating if max_rating is not None else max_flow
         min_val = min_rating if min_rating is not None else min_flow
 
-        # Convert to float with defaults
-        try:
-            max_val = float(max_val) if max_val is not None else 1000.0
-        except (ValueError, TypeError):
-            max_val = 1000.0
-
-        try:
-            min_val = float(min_val) if min_val is not None else 0.0
-        except (ValueError, TypeError):
-            min_val = 0.0
+        # Apply defaults if still None
+        max_val = max_val if max_val is not None else 1000.0
+        min_val = min_val if min_val is not None else 0.0
 
         min_flow_series[line] = pd.Series(min_val, index=snapshots, dtype=float)
         max_flow_series[line] = pd.Series(max_val, index=snapshots, dtype=float)
