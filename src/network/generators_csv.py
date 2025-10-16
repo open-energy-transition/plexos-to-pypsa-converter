@@ -6,6 +6,8 @@ These functions read from COAD CSV exports instead of querying the SQLite databa
 
 import ast
 import logging
+import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +24,7 @@ from db.csv_readers import (
     load_static_properties,
     load_time_varying_properties,
     parse_numeric_value,
+    read_plexos_input_csv,
 )
 from db.parse import get_property_active_mask, read_timeslice_activity
 from network.carriers_csv import parse_fuel_prices_csv
@@ -774,6 +777,608 @@ def set_vre_profiles_csv(network: Network, csv_dir: str | Path, vre_profiles_pat
         )
         network.generators_t.p_max_pu.loc[:, dispatch_df.columns] = dispatch_df
         network.generators_t.p_min_pu.loc[:, dispatch_df.columns] = dispatch_df
+
+
+# =============================================================================
+# Generic Profile Loading Functions (Data File.csv Auto-Discovery)
+# =============================================================================
+
+
+def _discover_datafile_mappings(csv_dir: str | Path) -> dict[str, str]:
+    """Build mapping from Data File objects to CSV filenames.
+
+    Parses Data File.csv to extract the relationship between data file object names
+    and their corresponding CSV file paths.
+
+    Parameters
+    ----------
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (must include Data File.csv)
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of {datafile_object_name: csv_filename}
+        Example: {"StochasticWindNI": "NI Wind_5base years - 2018-2033.csv"}
+
+    Examples
+    --------
+    >>> mappings = _discover_datafile_mappings("csvs_from_xml/SEM Forecast model")
+    >>> mappings["StochasticWindNI"]
+    'NI Wind_5base years - 2018-2033.csv'
+    """
+    data_file_path = Path(csv_dir) / "Data File.csv"
+
+    if not data_file_path.exists():
+        logger.warning(f"Data File.csv not found at {data_file_path}")
+        return {}
+
+    try:
+        data_file_df = pd.read_csv(data_file_path)
+    except Exception:
+        logger.exception("Failed to read Data File.csv")
+        return {}
+
+    profile_mapping = {}
+
+    for _, row in data_file_df.iterrows():
+        obj_name = row.get("object")
+        filename_text = row.get("Filename(text)")
+
+        if obj_name and filename_text and pd.notna(filename_text):
+            # Extract just the filename from path like "CSV Files\NI Wind_5base years - 2018-2033.csv"
+            # Handle both Windows backslash and Unix forward slash
+            if "\\" in str(filename_text):
+                filename = str(filename_text).split("\\")[-1]
+            elif "/" in str(filename_text):
+                filename = str(filename_text).split("/")[-1]
+            else:
+                filename = str(filename_text)
+
+            profile_mapping[obj_name] = filename
+
+    logger.info(f"Discovered {len(profile_mapping)} data file mappings")
+    return profile_mapping
+
+
+def _find_generators_with_datafile(
+    generator_df: pd.DataFrame, property_name: str
+) -> dict[str, str]:
+    """Find generators that reference Data Files for a given property.
+
+    Searches Generator.csv for the "{property_name}.Data File" column to identify
+    which generators have external data files associated with specific properties.
+
+    Parameters
+    ----------
+    generator_df : pd.DataFrame
+        DataFrame from load_static_properties(csv_dir, "Generator")
+    property_name : str
+        PLEXOS property name (e.g., "Rating", "Fixed Load", "Max Capacity")
+
+    Returns
+    -------
+    dict[str, str]
+        Mapping of {generator_name: datafile_object_name} for generators with data files
+        Example: {"Wind NI -- All": "StochasticWindNI"}
+
+    Examples
+    --------
+    >>> gen_df = load_static_properties("csvs_from_xml/SEM Forecast model", "Generator")
+    >>> refs = _find_generators_with_datafile(gen_df, "Rating")
+    >>> refs.get("Wind NI -- All")
+    'StochasticWindNI'
+    """
+    datafile_column = f"{property_name}.Data File"
+
+    if datafile_column not in generator_df.columns:
+        logger.warning(
+            f"Column '{datafile_column}' not found in Generator.csv. "
+            f"No generators have {property_name} data files."
+        )
+        return {}
+
+    gen_to_datafile = {}
+
+    for gen_name in generator_df.index:
+        datafile_ref = generator_df.at[gen_name, datafile_column]
+
+        if pd.notna(datafile_ref) and datafile_ref != "":
+            gen_to_datafile[gen_name] = str(datafile_ref)
+
+    logger.info(
+        f"Found {len(gen_to_datafile)} generators with '{property_name}.Data File' references"
+    )
+    return gen_to_datafile
+
+
+def load_data_file_profiles_csv(
+    network: Network,
+    csv_dir: str | Path,
+    profiles_path: str | Path,
+    property_name: str,
+    target_property: str,
+    target_type: str = "generators_t",
+    apply_mode: str = "replace",
+    scenario: str | int = "1",
+    generator_filter: Callable | None = None,
+    carrier_mapping: dict[str, str] | None = None,
+    value_scaling: float = 1.0,
+    manual_mappings: dict[str, str] | None = None,
+) -> dict:
+    """Load time series profiles from Data File.csv mappings and apply to network.
+
+    This is a fully generic function that auto-discovers generator→profile linkages
+    from PLEXOS Data File.csv metadata and applies loaded data to PyPSA network properties
+    with configurable mapping options.
+
+    The function performs auto-discovery in three steps:
+    1. Parse Data File.csv to map data file objects → CSV filenames
+    2. Parse Generator.csv to find generators with "{property_name}.Data File" references
+    3. Load and apply profile data to specified PyPSA properties
+
+    If auto-discovery fails (e.g., CSV export lacks "{property_name}.Data File" column),
+    manual_mappings can be provided as a fallback.
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (must contain Data File.csv and Generator.csv)
+    profiles_path : str | Path
+        Base directory containing profile CSV files referenced in Data File.csv
+    property_name : str
+        PLEXOS property name to look for (e.g., "Rating", "Fixed Load", "Max Capacity").
+        Function searches for "{property_name}.Data File" column in Generator.csv.
+    target_property : str
+        PyPSA property to set (e.g., "p_max_pu", "p_set", "p_nom")
+    target_type : str, default "generators_t"
+        Where to apply data:
+        - "generators_t": Time-varying properties (network.generators_t[target_property])
+        - "generators": Static properties (network.generators[target_property])
+    apply_mode : str, default "replace"
+        How to apply loaded data:
+        - "replace": Overwrite existing values
+        - "multiply": Multiply by existing values (for capacity factors on top of ratings)
+        - "set_both_min_max": Set both p_max_pu and p_min_pu (for must-run profiles)
+        - "add": Add to existing values
+        - "mask": Multiply as availability mask (0-1 values)
+    scenario : str | int, default "1"
+        Which stochastic scenario to use if data has multiple scenarios
+    generator_filter : callable, optional
+        Function taking generator name and returning True to process, False to skip.
+        Example: lambda gen: "Wind" in gen or "Solar" in gen
+    carrier_mapping : dict, optional
+        Mapping to set generator carriers based on keywords in generator or file names.
+        Example: {"Wind": "Wind", "Solar": "Solar"}
+        Keys are matched case-insensitively against generator names and data file names.
+    value_scaling : float, default 1.0
+        Scaling factor for values (e.g., 0.01 to convert percentage to fraction)
+    manual_mappings : dict[str, str], optional
+        Manual fallback mappings when auto-discovery fails. Maps generator names to
+        data file object names. Used when CSV export lacks "{property_name}.Data File" column.
+        Example: {"Wind NI -- All": "StochasticWindNI", "Wind ROI": "StochasticWindROI"}
+
+    Returns
+    -------
+    dict
+        Summary: {
+            "processed_generators": int,
+            "skipped_generators": list[str],
+            "failed_generators": list[str],
+            "applied_to": str (target_type.target_property),
+            "mode": str (apply_mode)
+        }
+
+    Examples
+    --------
+    Load VRE capacity factor profiles (SEM model with manual mappings fallback):
+    >>> sem_vre_mappings = {
+    ...     "Wind NI -- All": "StochasticWindNI",
+    ...     "Wind ROI": "StochasticWindROI",
+    ...     "Wind Offshore": "StochasticWindOffshore",
+    ...     "Wind Offshore -- Arklow Phase 1": "StochasticWindROI",
+    ...     "Solar NI -- All": "StochasticSolarNI",
+    ...     "Solar ROI": "StochasticSolarROI",
+    ... }
+    >>> load_data_file_profiles_csv(
+    ...     network=network,
+    ...     csv_dir="csvs_from_xml/SEM Forecast model",
+    ...     profiles_path="CSV Files",
+    ...     property_name="Rating",
+    ...     target_property="p_max_pu",
+    ...     target_type="generators_t",
+    ...     apply_mode="multiply",
+    ...     scenario="1",
+    ...     generator_filter=lambda gen: "Wind" in gen or "Solar" in gen,
+    ...     carrier_mapping={"Wind": "Wind", "Solar": "Solar"},
+    ...     value_scaling=0.01,  # Convert percentage to fraction
+    ...     manual_mappings=sem_vre_mappings,  # Fallback for incomplete CSV export
+    ... )
+
+    Load hydro dispatch schedule (CAISO model):
+    >>> load_data_file_profiles_csv(
+    ...     network=network,
+    ...     csv_dir="csvs_from_xml/WECC",
+    ...     profiles_path="FixedDispatch",
+    ...     property_name="Fixed Load",
+    ...     target_property="p_set",
+    ...     target_type="generators_t",
+    ...     apply_mode="replace",
+    ... )
+
+    Load generator outage/availability:
+    >>> load_data_file_profiles_csv(
+    ...     network=network,
+    ...     csv_dir="csvs_from_xml/WECC",
+    ...     profiles_path="Units Out",
+    ...     property_name="Rating",
+    ...     target_property="p_max_pu",
+    ...     apply_mode="mask",  # Availability factor 0-1
+    ... )
+    """
+    csv_dir = Path(csv_dir)
+    profiles_path = Path(profiles_path)
+
+    # Step 1: Discover data file mappings
+    datafile_to_csv = _discover_datafile_mappings(csv_dir)
+
+    if not datafile_to_csv:
+        logger.warning("No data file mappings found. Cannot load profiles.")
+        return {
+            "processed_generators": 0,
+            "skipped_generators": [],
+            "failed_generators": [],
+            "applied_to": f"{target_type}.{target_property}",
+            "mode": apply_mode,
+        }
+
+    # Step 2: Find generators with data file references
+    generator_df = load_static_properties(csv_dir, "Generator")
+
+    if generator_df.empty:
+        logger.warning("No Generator.csv found. Cannot load profiles.")
+        return {
+            "processed_generators": 0,
+            "skipped_generators": [],
+            "failed_generators": [],
+            "applied_to": f"{target_type}.{target_property}",
+            "mode": apply_mode,
+        }
+
+    gen_to_datafile = _find_generators_with_datafile(generator_df, property_name)
+
+    if not gen_to_datafile:
+        # Try manual mappings as fallback
+        if manual_mappings:
+            logger.info(
+                f"Auto-discovery found no generators with '{property_name}.Data File' references. "
+                f"Using manual_mappings fallback with {len(manual_mappings)} mappings."
+            )
+            gen_to_datafile = manual_mappings
+        else:
+            logger.warning(
+                f"No generators found with '{property_name}.Data File' references, "
+                f"and no manual_mappings provided."
+            )
+            return {
+                "processed_generators": 0,
+                "skipped_generators": [],
+                "failed_generators": [],
+                "applied_to": f"{target_type}.{target_property}",
+                "mode": apply_mode,
+            }
+
+    # Step 3: Load and apply profiles
+    profile_dict = {}
+    skipped_generators = []
+    failed_generators = []
+
+    for gen_name, datafile_obj in gen_to_datafile.items():
+        # Apply filter if provided
+        if generator_filter and not generator_filter(gen_name):
+            skipped_generators.append(gen_name)
+            continue
+
+        # Check if generator exists in network
+        if gen_name not in network.generators.index:
+            logger.debug(f"Generator {gen_name} not in network, skipping")
+            skipped_generators.append(gen_name)
+            continue
+
+        # Look up CSV filename
+        # Try exact match first, then try without "Data File." prefix if present
+        csv_filename = None
+        if datafile_obj in datafile_to_csv:
+            csv_filename = datafile_to_csv[datafile_obj]
+        elif datafile_obj.startswith("Data File."):
+            # Strip "Data File." prefix and try again
+            stripped_name = datafile_obj.replace("Data File.", "", 1)
+            if stripped_name in datafile_to_csv:
+                csv_filename = datafile_to_csv[stripped_name]
+
+        if csv_filename is None:
+            logger.warning(
+                f"No CSV file mapping for data file '{datafile_obj}' (gen: {gen_name})"
+            )
+            skipped_generators.append(gen_name)
+            continue
+        csv_path = profiles_path / csv_filename
+
+        if not csv_path.exists():
+            logger.warning(
+                f"Profile CSV not found: {csv_path} (gen: {gen_name}, datafile: {datafile_obj})"
+            )
+            failed_generators.append(gen_name)
+            continue
+
+        # Set carrier if mapping provided
+        if carrier_mapping:
+            for keyword, carrier in carrier_mapping.items():
+                if (
+                    keyword.lower() in gen_name.lower()
+                    or keyword.lower() in csv_filename.lower()
+                ):
+                    network.generators.at[gen_name, "carrier"] = carrier
+                    break
+
+        # Load profile using existing reader
+        try:
+            profile_df = read_plexos_input_csv(csv_path, scenario=scenario)
+
+            # Extract values (handle both single column and multi-column formats)
+            if "value" in profile_df.columns:
+                profile_series = profile_df["value"]
+            else:
+                # Use first column
+                profile_series = profile_df.iloc[:, 0]
+
+            # Apply scaling
+            if value_scaling != 1.0:
+                profile_series = profile_series * value_scaling
+
+            # Store for later application
+            profile_dict[gen_name] = profile_series
+
+            logger.info(
+                f"Loaded profile for {gen_name} from {csv_filename} (scenario {scenario})"
+            )
+
+        except Exception:
+            logger.exception(f"Failed to load profile for {gen_name}")
+            failed_generators.append(gen_name)
+            traceback.print_exc()
+
+    # Step 4: Apply profiles to network based on target_type and apply_mode
+    if not profile_dict:
+        logger.warning("No profiles were successfully loaded")
+        return {
+            "processed_generators": 0,
+            "skipped_generators": skipped_generators,
+            "failed_generators": failed_generators,
+            "applied_to": f"{target_type}.{target_property}",
+            "mode": apply_mode,
+        }
+
+    if target_type == "generators_t":
+        # Time-varying property
+        snapshots = network.snapshots
+
+        # Initialize DataFrame if needed
+        if not hasattr(network.generators_t, target_property):
+            network.generators_t[target_property] = pd.DataFrame(
+                index=snapshots, columns=network.generators.index, dtype=float
+            )
+
+        # Apply profiles based on mode
+        for gen_name, profile_series in profile_dict.items():
+            # Align to network snapshots
+            aligned_profile = profile_series.reindex(snapshots).fillna(0)
+
+            if apply_mode == "replace":
+                network.generators_t[target_property][gen_name] = aligned_profile
+
+            elif apply_mode == "multiply":
+                # Multiply by existing values
+                existing = network.generators_t[target_property][gen_name]
+                network.generators_t[target_property][gen_name] = (
+                    existing * aligned_profile
+                )
+
+            elif apply_mode == "set_both_min_max":
+                # Set both p_max_pu and p_min_pu (for must-run profiles)
+                network.generators_t.p_max_pu[gen_name] = aligned_profile
+                network.generators_t.p_min_pu[gen_name] = aligned_profile
+
+            elif apply_mode == "add":
+                existing = network.generators_t[target_property][gen_name]
+                network.generators_t[target_property][gen_name] = (
+                    existing + aligned_profile
+                )
+
+            elif apply_mode == "mask":
+                # Multiply as availability mask (0-1 values)
+                existing = network.generators_t[target_property][gen_name]
+                network.generators_t[target_property][gen_name] = (
+                    existing * aligned_profile
+                )
+
+            else:
+                logger.error(f"Unknown apply_mode: {apply_mode}")
+                msg = "apply_mode must be one of: replace, multiply, set_both_min_max, add, mask"
+                raise ValueError(msg)
+
+    elif target_type == "generators":
+        # Static property - use mean or first value
+        for gen_name, profile_series in profile_dict.items():
+            # For static properties, use the mean of the time series
+            static_value = profile_series.mean()
+
+            if apply_mode == "replace":
+                network.generators.at[gen_name, target_property] = static_value
+            elif apply_mode == "multiply":
+                existing = network.generators.at[gen_name, target_property]
+                network.generators.at[gen_name, target_property] = (
+                    existing * static_value
+                )
+            elif apply_mode == "add":
+                existing = network.generators.at[gen_name, target_property]
+                network.generators.at[gen_name, target_property] = (
+                    existing + static_value
+                )
+            else:
+                logger.warning(
+                    f"apply_mode '{apply_mode}' not fully supported for static properties, using 'replace'"
+                )
+                network.generators.at[gen_name, target_property] = static_value
+
+    else:
+        msg = "target_type must be 'generators_t' or 'generators'"
+        raise ValueError(msg)
+
+    processed_count = len(profile_dict)
+    logger.info(
+        f"Successfully applied {processed_count} profiles to {target_type}.{target_property} (mode: {apply_mode})"
+    )
+
+    return {
+        "processed_generators": processed_count,
+        "skipped_generators": skipped_generators,
+        "failed_generators": failed_generators,
+        "applied_to": f"{target_type}.{target_property}",
+        "mode": apply_mode,
+    }
+
+
+# =============================================================================
+# Convenience Wrapper Functions
+# =============================================================================
+
+
+def load_vre_profiles_csv(
+    network: Network,
+    csv_dir: str | Path,
+    profiles_path: str | Path,
+    scenario: str | int = "1",
+    value_scaling: float = 0.01,
+    set_min_pu: bool = True,
+) -> dict:
+    """Load VRE capacity factor profiles using Data File.csv mappings.
+
+    Convenience wrapper around load_data_file_profiles_csv() for loading VRE
+    (wind/solar) capacity factor profiles. Automatically filters to Wind/Solar
+    generators and applies profiles as multiplicative capacity factors.
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (must contain Data File.csv and Generator.csv)
+    profiles_path : str | Path
+        Base directory containing VRE profile CSV files
+    scenario : str | int, default "1"
+        Which stochastic scenario to use if data has multiple scenarios
+    value_scaling : float, default 0.01
+        Scaling factor for profile values (default 0.01 converts percentage to fraction)
+    set_min_pu : bool, default True
+        Also set p_min_pu to match p_max_pu (makes VRE must-run at capacity factor)
+
+    Returns
+    -------
+    dict
+        Summary with processed/skipped/failed generator counts
+
+    Examples
+    --------
+    >>> load_vre_profiles_csv(
+    ...     network=network,
+    ...     csv_dir="csvs_from_xml/SEM Forecast model",
+    ...     profiles_path="CSV Files",
+    ...     scenario="1",
+    ... )
+    """
+    summary = load_data_file_profiles_csv(
+        network=network,
+        csv_dir=csv_dir,
+        profiles_path=profiles_path,
+        property_name="Rating",
+        target_property="p_max_pu",
+        target_type="generators_t",
+        apply_mode="multiply",
+        scenario=scenario,
+        generator_filter=lambda gen: "Wind" in gen or "Solar" in gen,
+        carrier_mapping={"Wind": "Wind", "Solar": "Solar"},
+        value_scaling=value_scaling,
+    )
+
+    # Also set p_min_pu for VRE generators if requested
+    if set_min_pu and summary["processed_generators"] > 0:
+        for gen in network.generators.index:
+            if (
+                "Wind" in gen or "Solar" in gen
+            ) and gen in network.generators_t.p_max_pu.columns:
+                network.generators_t.p_min_pu[gen] = network.generators_t.p_max_pu[gen]
+
+    return summary
+
+
+def load_hydro_dispatch_csv(
+    network: Network,
+    csv_dir: str | Path,
+    profiles_path: str | Path,
+    scenario: str | int = "1",
+    generator_filter: Callable | None = None,
+) -> dict:
+    """Load hydro fixed dispatch schedules using Data File.csv mappings.
+
+    Convenience wrapper around load_data_file_profiles_csv() for loading hydro
+    generator dispatch schedules (Fixed Load property). Sets p_set time series
+    for hydro generators with fixed dispatch profiles.
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (must contain Data File.csv and Generator.csv)
+    profiles_path : str | Path
+        Base directory containing fixed dispatch CSV files
+    scenario : str | int, default "1"
+        Which scenario to use if data has multiple scenarios
+    generator_filter : callable, optional
+        Function taking generator name and returning True to process, False to skip.
+        Default None processes all generators with "Fixed Load.Data File" references.
+        Example: lambda gen: "Hydro" in gen
+
+    Returns
+    -------
+    dict
+        Summary with processed/skipped/failed generator counts
+
+    Examples
+    --------
+    >>> load_hydro_dispatch_csv(
+    ...     network=network,
+    ...     csv_dir="csvs_from_xml/WECC",
+    ...     profiles_path="FixedDispatch",
+    ...     generator_filter=lambda gen: "Hydro" in gen,
+    ... )
+    """
+    return load_data_file_profiles_csv(
+        network=network,
+        csv_dir=csv_dir,
+        profiles_path=profiles_path,
+        property_name="Fixed Load",
+        target_property="p_set",
+        target_type="generators_t",
+        apply_mode="replace",
+        scenario=scenario,
+        generator_filter=generator_filter,
+        carrier_mapping={"Hydro": "Hydro", "Water": "Hydro"},
+        value_scaling=1.0,
+    )
 
 
 def set_capital_costs_csv(network: Network, csv_dir: str | Path):
