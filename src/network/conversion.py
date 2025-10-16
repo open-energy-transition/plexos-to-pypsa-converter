@@ -162,6 +162,7 @@ def _create_electricity_model(
                 "demand_assignment_strategy", "per_node"
             ),
             transmission_as_lines=config.get("transmission_as_lines", False),
+            load_scenario=config.get("load_scenario"),
         )
 
         return network, setup_summary
@@ -244,6 +245,9 @@ def _create_electricity_model(
         setup_args["target_node"] = config.get("target_node")
     elif strategy == "aggregate_node":
         setup_args["aggregate_node_name"] = config.get("aggregate_node_name")
+
+    # Add load scenario parameter
+    setup_args["load_scenario"] = config.get("load_scenario")
 
     # Set up network
     print(f"Setting up {strategy} electricity model...")
@@ -456,6 +460,10 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Path to timeslice CSV file
         - transmission_as_lines : bool
             Use Line components instead of Links
+        - load_scenario : str, optional
+            For demand data with multiple scenarios (iterations), specify which
+            scenario to use. If None, defaults to first scenario.
+            Example: "iteration_1" to select first scenario explicitly
 
         Gas+Electric models (MaREI-EU):
         - use_csv : bool

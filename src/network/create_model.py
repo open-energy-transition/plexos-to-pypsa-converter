@@ -94,9 +94,9 @@ def create_aemo_model(use_data_driven: bool = False) -> pypsa.Network:
         print(
             f"  Iterations processed: {setup_summary.get('iterations_processed', 'N/A')}"
         )
-        print(f"  Loads created: {setup_summary['loads_added']}")
+        print(f"  Loads created: {len(n.loads)}")
     else:  # zone format
-        print(f"  Loads mapped to buses: {setup_summary['loads_added']}")
+        print(f"  Loads mapped to buses: {len(n.loads)}")
         if setup_summary.get("loads_skipped", 0) > 0:
             print(
                 f"  Loads skipped (no matching bus): {setup_summary['loads_skipped']}"

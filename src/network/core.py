@@ -884,6 +884,7 @@ def add_loads_flexible(
     bus_mapping=None,
     target_node=None,
     aggregate_node_name=None,
+    load_scenario=None,
 ):
     """Flexible function to add loads to the PyPSA network from various demand data formats.
 
@@ -901,6 +902,9 @@ def add_loads_flexible(
     aggregate_node_name : str, optional
         If specified, creates a new node with this name and assigns all demand to it.
         Example: "Load_Aggregate" to create an aggregate load node.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Examples
     --------
@@ -927,13 +931,15 @@ def add_loads_flexible(
     # Handle different demand assignment modes
     if target_node is not None:
         # Mode 1: Assign all demand to a specific existing node
-        return _add_loads_to_target_node(network, demand_df, target_node)
+        return _add_loads_to_target_node(network, demand_df, target_node, load_scenario)
     elif aggregate_node_name is not None:
         # Mode 2: Create new aggregate node and assign all demand to it
-        return _add_loads_to_aggregate_node(network, demand_df, aggregate_node_name)
+        return _add_loads_to_aggregate_node(
+            network, demand_df, aggregate_node_name, load_scenario
+        )
     else:
         # Mode 3: Default per-node assignment
-        return _add_loads_per_node(network, demand_df)
+        return _add_loads_per_node(network, demand_df, load_scenario)
 
 
 def port_core_network(
@@ -945,6 +951,7 @@ def port_core_network(
     target_node=None,
     aggregate_node_name=None,
     model_name=None,
+    load_scenario=None,
 ):
     """Comprehensive function to set up the core PyPSA network infrastructure.
 
@@ -975,6 +982,9 @@ def port_core_network(
     model_name : str, optional
         Name of the specific model to use when multiple models exist in the XML file.
         If None and multiple models exist, an error will be raised.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Returns
     -------
@@ -1048,7 +1058,12 @@ def port_core_network(
     # Step 4: Add loads with flexible parsing
     print("4. Adding loads...")
     load_summary = add_loads_flexible(
-        network, demand_source, demand_bus_mapping, target_node, aggregate_node_name
+        network,
+        demand_source,
+        demand_bus_mapping,
+        target_node,
+        aggregate_node_name,
+        load_scenario,
     )
 
     print(
@@ -1204,10 +1219,58 @@ def get_demand_format_info(source_path):
     return info
 
 
-def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
+def _normalize_scenario_name(user_input: str, available_columns: list) -> str | None:
+    """Normalize user scenario input to match actual DataFrame column names.
+
+    Accepts either "1" or "iteration_1" and returns the actual column name.
+    Returns None if scenario not found.
+
+    Parameters
+    ----------
+    user_input : str
+        User-provided scenario name (e.g., "1" or "iteration_1")
+    available_columns : list
+        List of available column names in the DataFrame
+
+    Returns
+    -------
+    str or None
+        Normalized column name if found, None otherwise
+
+    Examples
+    --------
+    >>> cols = ["iteration_1", "iteration_2", "iteration_3"]
+    >>> _normalize_scenario_name("1", cols)
+    'iteration_1'
+    >>> _normalize_scenario_name("iteration_2", cols)
+    'iteration_2'
+    """
+    # If exact match, return as-is
+    if user_input in available_columns:
+        return user_input
+
+    # Try adding "iteration_" prefix
+    prefixed = f"iteration_{user_input}"
+    if prefixed in available_columns:
+        return prefixed
+
+    # Try removing "iteration_" prefix (in case user typed it but columns don't have it)
+    if user_input.startswith("iteration_"):
+        unprefixed = user_input.replace("iteration_", "", 1)
+        if unprefixed in available_columns:
+            return unprefixed
+
+    # Not found
+    return None
+
+
+def _add_loads_per_node(
+    network: Network, demand_df: pd.DataFrame, load_scenario: str | None = None
+):
     """Assign loads to individual nodes based on matching (default mode).
 
-    For iteration-based formats, creates multiple loads per node (Load1_{Node}, Load2_{Node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
+    For iteration-based formats without scenario selection (legacy), creates multiple loads per node
     For zone-based formats, creates one load per zone (Load_{Zone})
 
     Parameters
@@ -1216,13 +1279,14 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
         The PyPSA network object.
     demand_df : DataFrame
         DataFrame with demand time series for each load zone/iteration.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
     dict
         Summary information about the load assignment.
     """
-    loads_added = 0
     loads_skipped = 0
 
     # Check if this is an iteration-based format
@@ -1245,24 +1309,42 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
         else:
             # Use the first available bus
             target_node = available_buses[0]
-            print(f"  - Assigning iterations to node: {target_node}")
+            print(f"  - Assigning scenario to node: {target_node}")
 
-        # Create one load for each iteration
-        for col in demand_df.columns:
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-                load_name = f"Load{iteration_num}_{target_node}"
+        # Count iteration columns
+        iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
 
-                network.add("Load", name=load_name, bus=target_node)
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
+            )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-                # Add the load time series (align with network snapshots)
-                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-                network.loads_t.p_set.loc[:, load_name] = load_series
+        # Create single load with selected scenario
+        load_name = f"Load_{target_node}"
+        network.add("Load", name=load_name, bus=target_node)
 
-                loads_added += 1
-                print(
-                    f"  - Added load time series for {load_name} (bus: {target_node})"
-                )
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
 
     else:
         print("Processing zone-based format")
@@ -1301,10 +1383,11 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
             load_series = demand_df[load_zone].reindex(network.snapshots).fillna(0)
             network.loads_t.p_set.loc[:, load_name] = load_series
 
-            loads_added += 1
             print(f"  - Added load time series for {load_name} (bus: {bus_name})")
 
-    print(f"Successfully added {loads_added} loads, skipped {loads_skipped} load zones")
+    print(
+        f"Successfully added {len(network.loads)} loads, skipped {loads_skipped} load zones"
+    )
 
     # Report any network buses without loads (only for zone-based format)
     if not is_iteration_format:
@@ -1324,22 +1407,33 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
     else:
         buses_without_loads = []
 
-    return {
-        "mode": "per_node",
-        "loads_added": loads_added,
-        "loads_skipped": loads_skipped,
-        "buses_without_loads": len(buses_without_loads),
-        "format_type": "iteration" if is_iteration_format else "zone",
-        "target_node": target_node if is_iteration_format else None,
-    }
+    if is_iteration_format:
+        return {
+            "mode": "per_node",
+            "format_type": "iteration",
+            "target_node": target_node,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
+        }
+    else:
+        return {
+            "mode": "per_node",
+            "loads_skipped": loads_skipped,
+            "buses_without_loads": len(buses_without_loads),
+            "format_type": "zone",
+        }
 
 
 def _add_loads_to_target_node(
-    network: Network, demand_df: pd.DataFrame, target_node: str
+    network: Network,
+    demand_df: pd.DataFrame,
+    target_node: str,
+    load_scenario: str | None = None,
 ):
     """Assign all demand to a specific existing node.
 
-    For iteration-based formats, creates multiple loads (Load1_{target_node}, Load2_{target_node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
     For zone-based formats, creates a single aggregated load
 
     Parameters
@@ -1350,6 +1444,8 @@ def _add_loads_to_target_node(
         DataFrame with demand time series for each load zone/iteration.
     target_node : str
         Name of the existing node to assign all demand to.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
@@ -1366,8 +1462,6 @@ def _add_loads_to_target_node(
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
 
-    loads_added = 0
-
     if is_iteration_format:
         # Count actual iteration columns (handle both prefixed and non-prefixed)
         iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
@@ -1375,52 +1469,48 @@ def _add_loads_to_target_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Prepare batch data for efficient DataFrame assignment
-        load_time_series_data = {}
-        load_names = []
-
-        # Create one load for each iteration and prepare time series data
-        for col in iteration_cols:
-            # Extract iteration number from column name (handle prefixed names)
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-            else:
-                # Handle prefixed columns like "filename_iteration_1"
-                iteration_num = col.split("iteration_")[1]
-
-            load_name = f"Load{iteration_num}_{target_node}"
-            load_names.append(load_name)
-
-            network.add("Load", name=load_name, bus=target_node)
-
-            # Prepare the load time series (align with network snapshots)
-            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            load_time_series_data[load_name] = load_series
-
-            loads_added += 1
-            print(f"  - Added load {load_name} to bus {target_node}")
-
-        # Batch assign all load time series to avoid DataFrame fragmentation
-        if load_time_series_data:
-            load_time_series_df = pd.DataFrame(load_time_series_data)
-            # Use pd.concat to efficiently add all columns at once
-            network.loads_t.p_set = pd.concat(
-                [network.loads_t.p_set, load_time_series_df], axis=1
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
             )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-        # Calculate total demand for reporting
-        total_demand = demand_df[iteration_cols].sum(axis=1)
-        peak_demand = total_demand.max()
+        # Create single load with selected scenario
+        load_name = f"Load_{target_node}"
+        network.add("Load", name=load_name, bus=target_node)
 
-        print(f"  - Total iterations: {actual_iterations}")
-        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        peak_demand = load_series.max()
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
+        print(f"  - Peak demand: {peak_demand:.2f} MW")
 
         return {
             "mode": "target_node",
             "format_type": "iteration",
             "target_node": target_node,
-            "loads_added": loads_added,
-            "iterations_processed": actual_iterations,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
             "peak_demand": peak_demand,
         }
 
@@ -1438,7 +1528,6 @@ def _add_loads_to_target_node(
         load_series = total_demand.reindex(network.snapshots).fillna(0)
         network.loads_t.p_set.loc[:, load_name] = load_series
 
-        loads_added = 1
         print(f"  - Added aggregated load {load_name} to bus {target_node}")
         print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
         print(f"  - Peak demand: {total_demand.max():.2f} MW")
@@ -1454,11 +1543,14 @@ def _add_loads_to_target_node(
 
 
 def _add_loads_to_aggregate_node(
-    network: Network, demand_df: pd.DataFrame, aggregate_node_name: str
+    network: Network,
+    demand_df: pd.DataFrame,
+    aggregate_node_name: str,
+    load_scenario: str | None = None,
 ):
     """Create a new aggregate node and assign all demand to it.
 
-    For iteration-based formats, creates multiple loads (Load1_{aggregate_node}, Load2_{aggregate_node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
     For zone-based formats, creates a single aggregated load
 
     Parameters
@@ -1469,6 +1561,8 @@ def _add_loads_to_aggregate_node(
         DataFrame with demand time series for each load zone/iteration.
     aggregate_node_name : str
         Name for the new aggregate node.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
@@ -1490,8 +1584,6 @@ def _add_loads_to_aggregate_node(
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
 
-    loads_added = 0
-
     if is_iteration_format:
         # Count actual iteration columns (handle both prefixed and non-prefixed)
         iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
@@ -1499,52 +1591,48 @@ def _add_loads_to_aggregate_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Prepare batch data for efficient DataFrame assignment
-        load_time_series_data = {}
-        load_names = []
-
-        # Create one load for each iteration and prepare time series data
-        for col in iteration_cols:
-            # Extract iteration number from column name (handle prefixed names)
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-            else:
-                # Handle prefixed columns like "filename_iteration_1"
-                iteration_num = col.split("iteration_")[1]
-
-            load_name = f"Load{iteration_num}_{aggregate_node_name}"
-            load_names.append(load_name)
-
-            network.add("Load", name=load_name, bus=aggregate_node_name)
-
-            # Prepare the load time series (align with network snapshots)
-            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            load_time_series_data[load_name] = load_series
-
-            loads_added += 1
-            print(f"  - Added load {load_name} to bus {aggregate_node_name}")
-
-        # Batch assign all load time series to avoid DataFrame fragmentation
-        if load_time_series_data:
-            load_time_series_df = pd.DataFrame(load_time_series_data)
-            # Use pd.concat to efficiently add all columns at once
-            network.loads_t.p_set = pd.concat(
-                [network.loads_t.p_set, load_time_series_df], axis=1
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
             )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-        # Calculate total demand for reporting
-        total_demand = demand_df[iteration_cols].sum(axis=1)
-        peak_demand = total_demand.max()
+        # Create single load with selected scenario
+        load_name = f"Load_{aggregate_node_name}"
+        network.add("Load", name=load_name, bus=aggregate_node_name)
 
-        print(f"  - Total iterations: {actual_iterations}")
-        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        peak_demand = load_series.max()
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
+        print(f"  - Peak demand: {peak_demand:.2f} MW")
 
         return {
             "mode": "aggregate_node",
             "format_type": "iteration",
             "aggregate_node": aggregate_node_name,
-            "loads_added": loads_added,
-            "iterations_processed": actual_iterations,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
             "peak_demand": peak_demand,
         }
 
@@ -1562,7 +1650,6 @@ def _add_loads_to_aggregate_node(
         load_series = total_demand.reindex(network.snapshots).fillna(0)
         network.loads_t.p_set.loc[:, load_name] = load_series
 
-        loads_added = 1
         print(f"  - Added aggregated load {load_name} to bus {aggregate_node_name}")
         print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
         print(f"  - Peak demand: {total_demand.max():.2f} MW")
@@ -1590,6 +1677,7 @@ def setup_network(
     model_name=None,
     inflow_path=None,
     transmission_as_lines=False,
+    load_scenario=None,
 ):
     """Unified network setup function that automatically detects the appropriate mode.
 
@@ -1629,6 +1717,9 @@ def setup_network(
     transmission_as_lines : bool, optional
         If True, convert PLEXOS Line objects to PyPSA Lines with electrical impedance.
         If False (default), use existing Links behavior for backward compatibility.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Returns
     -------
@@ -1712,6 +1803,7 @@ def setup_network(
         target_node=target_node,
         aggregate_node_name=aggregate_node_name,
         model_name=model_name,
+        load_scenario=load_scenario,
     )
 
     # Step 2: Add storage (batteries, hydro, pumped hydro)

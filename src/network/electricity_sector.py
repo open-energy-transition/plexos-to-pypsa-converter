@@ -139,7 +139,7 @@ def create_model_from_xml(
             f"  Iterations processed: {setup_summary.get('iterations_processed', 'N/A')}"
         )
 
-    print(f"  Loads created: {setup_summary.get('loads_added', 0)}")
+    print(f"  Loads created: {len(network.loads)}")
     if setup_summary.get("loads_skipped", 0) > 0:
         print(f"  Loads skipped: {setup_summary['loads_skipped']}")
 

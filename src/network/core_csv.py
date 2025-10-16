@@ -109,6 +109,7 @@ def setup_network_csv(
     aggregate_node_name: str | None = None,
     demand_assignment_strategy: str = "per_node",
     transmission_as_lines: bool = False,
+    load_scenario: str | None = None,
 ) -> dict:
     """Set up PyPSA network from CSV exports.
 
@@ -142,6 +143,9 @@ def setup_network_csv(
         Strategy for demand assignment: "per_node", "target_node", or "aggregate_node"
     transmission_as_lines : bool, default False
         Use Line components instead of Links for transmission
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Returns
     -------
@@ -184,6 +188,7 @@ def setup_network_csv(
                 aggregate_node_name=aggregate_node_name
                 if demand_assignment_strategy == "aggregate_node"
                 else None,
+                load_scenario=load_scenario,
             )
     else:
         logger.warning(
