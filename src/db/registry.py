@@ -580,8 +580,7 @@ MODEL_REGISTRY = {
         "xml_filename": "PUBLIC Validation 2024-2032 Model 2025-03-14.xml",
         "model_type": "electricity",
         "default_config": {
-            "demand_assignment_strategy": "target_node",
-            "target_node": "SEM",
+            "demand_assignment_strategy": "per_node",
             "model_name": "Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
             "demand_file": "CSV Files (1 of 2)/AI Demand_2023-2033_5base years.csv",
             "cross_model_dependencies": {
