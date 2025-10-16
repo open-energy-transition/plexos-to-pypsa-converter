@@ -11,7 +11,7 @@ from db.csv_readers import load_static_properties
 from network.carriers_csv import parse_fuel_prices_csv
 from network.core import add_loads_flexible, add_snapshots
 from network.generators_csv import port_generators_csv
-from network.links_csv import port_links_csv
+from network.links_csv import port_transmission_csv
 from network.storage_csv import add_storage_csv
 
 logger = logging.getLogger(__name__)
@@ -214,18 +214,14 @@ def setup_network_csv(
         timeslice_csv=timeslice_csv,
     )
 
-    # 6. Add transmission links
-    logger.info("Adding transmission links from CSV...")
-    if transmission_as_lines:
-        logger.warning(
-            "transmission_as_lines=True not yet supported in CSV mode. "
-            "Using Links instead."
-        )
-    port_links_csv(
+    # 6. Add transmission (Lines or Links)
+    logger.info("Adding transmission from CSV...")
+    port_transmission_csv(
         network=network,
         csv_dir=csv_dir,
         timeslice_csv=timeslice_csv,
         target_node=target_node,
+        transmission_as_lines=transmission_as_lines,
     )
 
     # 7. Set fuel prices
@@ -263,10 +259,16 @@ def setup_network_csv(
         "carriers": num_carriers,
         "generators": len(network.generators),
         "storage": len(network.storage_units),
-        "links": len(network.links),
         "snapshots": len(network.snapshots),
         "demand_strategy": demand_assignment_strategy,
+        "transmission_as_lines": transmission_as_lines,
     }
+
+    # Add transmission counts based on component type
+    if transmission_as_lines:
+        summary["lines"] = len(network.lines)
+    else:
+        summary["links"] = len(network.links)
 
     if target_node:
         summary["target_node"] = target_node
@@ -278,7 +280,10 @@ def setup_network_csv(
     logger.info(f"  Carriers: {num_carriers}")
     logger.info(f"  Generators: {len(network.generators)}")
     logger.info(f"  Storage units: {len(network.storage_units)}")
-    logger.info(f"  Links: {len(network.links)}")
+    if transmission_as_lines:
+        logger.info(f"  Lines: {len(network.lines)}")
+    else:
+        logger.info(f"  Links: {len(network.links)}")
     logger.info(f"  Snapshots: {len(network.snapshots)}")
 
     return summary

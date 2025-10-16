@@ -4,6 +4,7 @@ This module provides CSV-based alternatives to the PlexosDB-based functions in l
 These functions read from COAD CSV exports instead of querying the SQLite database.
 """
 
+import ast
 import logging
 from pathlib import Path
 
@@ -22,6 +23,52 @@ from db.parse import get_property_active_mask, read_timeslice_activity
 logger = logging.getLogger(__name__)
 
 
+def _parse_node_buses(
+    line_df: pd.DataFrame, line_name: str
+) -> tuple[str | None, str | None]:
+    """Parse bus0 and bus1 from Line.csv Node column or separate columns.
+
+    Handles two formats:
+    1. Single "Node" column with string format: "['bus1', 'bus2']"
+    2. Separate "Node From" and "Node To" columns (NREL format)
+
+    Parameters
+    ----------
+    line_df : pd.DataFrame
+        DataFrame containing line properties
+    line_name : str
+        Name of the line to parse nodes for
+
+    Returns
+    -------
+    tuple[str | None, str | None]
+        (bus0, bus1) or (None, None) if parsing fails
+    """
+    # Try separate columns first (NREL format)
+    node_from = get_property_from_static_csv(line_df, line_name, "Node From")
+    node_to = get_property_from_static_csv(line_df, line_name, "Node To")
+
+    if node_from and node_to:
+        return str(node_from), str(node_to)
+
+    # Try single "Node" column (most common format)
+    node_value = get_property_from_static_csv(line_df, line_name, "Node")
+
+    if not node_value:
+        return None, None
+
+    # Parse string representation of list: "['bus1', 'bus2']"
+    try:
+        if isinstance(node_value, str):
+            nodes = ast.literal_eval(node_value)
+            if isinstance(nodes, list) and len(nodes) == 2:
+                return str(nodes[0]), str(nodes[1])
+    except (ValueError, SyntaxError) as e:
+        logger.warning(f"Failed to parse Node column for {line_name}: {e}")
+
+    return None, None
+
+
 def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
     """Add transmission links to PyPSA network from COAD CSV exports.
 
@@ -36,7 +83,9 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
 
     Notes
     -----
-    - Expects Line.csv with "Node From" and "Node To" columns
+    - Expects Line.csv with either:
+      - Single "Node" column with format "['bus1', 'bus2']" (most models)
+      - Separate "Node From" and "Node To" columns (NREL format)
     - Adds links with basic properties (bus0, bus1, ramp limits)
     - Does NOT set p_nom, p_min_pu, p_max_pu (use set_link_flows_csv for that)
     """
@@ -54,14 +103,11 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
 
     for line_name in line_df.index:
         try:
-            # Get Node From and Node To
-            node_from = get_property_from_static_csv(line_df, line_name, "Node From")
-            node_to = get_property_from_static_csv(line_df, line_name, "Node To")
+            # Parse buses from Node column or Node From/To columns
+            bus0, bus1 = _parse_node_buses(line_df, line_name)
 
-            if not node_from or not node_to:
-                logger.warning(
-                    f"Line {line_name} missing Node From or Node To, skipping"
-                )
+            if not bus0 or not bus1:
+                logger.warning(f"Line {line_name} missing bus connections, skipping")
                 skipped_lines.append(line_name)
                 continue
 
@@ -75,8 +121,8 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
 
             # Add link to network
             link_data = {
-                "bus0": str(node_from),
-                "bus1": str(node_to),
+                "bus0": bus0,
+                "bus1": bus1,
             }
 
             # Add ramp limits if they exist and are positive
@@ -88,13 +134,103 @@ def add_links_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
             network.add("Link", line_name, **link_data)
             added_count += 1
 
-            logger.debug(f"Added link {line_name} from {node_from} to {node_to}")
+            logger.debug(f"Added link {line_name} from {bus0} to {bus1}")
 
         except Exception as e:
             logger.warning(f"Error adding link {line_name}: {e}")
             skipped_lines.append(line_name)
 
     logger.info(f"Added {added_count} links to network")
+    if skipped_lines:
+        logger.warning(f"Skipped {len(skipped_lines)} lines: {skipped_lines[:10]}")
+
+
+def add_lines_csv(network: pypsa.Network, csv_dir: str | Path) -> None:
+    """Add transmission lines (AC/DC) to PyPSA network from COAD CSV exports.
+
+    This function creates PyPSA Line components instead of Link components.
+    Use this when electrical network parameters (resistance, reactance) are available.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network to add lines to
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+
+    Notes
+    -----
+    - Expects Line.csv with either:
+      - Single "Node" column with format "['bus1', 'bus2']" (most models)
+      - Separate "Node From" and "Node To" columns (NREL format)
+    - Requires electrical parameters: "Reactance (p.u.)" and optionally "Resistance (p.u.)"
+    - Adds Line components with electrical properties (bus0, bus1, x, r)
+    - Does NOT set s_nom, s_min_pu, s_max_pu (use set_line_flows_csv for that)
+    - If Reactance is not available, warns and skips the line
+    """
+    csv_dir = Path(csv_dir)
+    line_df = load_static_properties(csv_dir, "Line")
+
+    if line_df.empty:
+        logger.info("No Line.csv found or no lines in CSV")
+        return
+
+    logger.info(f"Adding {len(line_df)} transmission lines from CSV...")
+
+    added_count = 0
+    skipped_lines = []
+
+    for line_name in line_df.index:
+        try:
+            # Parse buses from Node column or Node From/To columns
+            bus0, bus1 = _parse_node_buses(line_df, line_name)
+
+            if not bus0 or not bus1:
+                logger.warning(f"Line {line_name} missing bus connections, skipping")
+                skipped_lines.append(line_name)
+                continue
+
+            # Get electrical parameters (required for PyPSA Line)
+            reactance = get_property_from_static_csv(
+                line_df, line_name, "Reactance (p.u.)"
+            )
+            resistance = get_property_from_static_csv(
+                line_df, line_name, "Resistance (p.u.)"
+            )
+
+            if not reactance:
+                logger.warning(
+                    f"Line {line_name} missing Reactance parameter, skipping. "
+                    "Use transmission_as_lines=False for models without electrical data."
+                )
+                skipped_lines.append(line_name)
+                continue
+
+            # Build line data
+            line_data = {
+                "bus0": bus0,
+                "bus1": bus1,
+                "x": float(reactance),  # Reactance in p.u.
+            }
+
+            # Add resistance if available
+            if resistance:
+                line_data["r"] = float(resistance)  # Resistance in p.u.
+            else:
+                line_data["r"] = 0.0  # Default to zero resistance if not provided
+
+            network.add("Line", line_name, **line_data)
+            added_count += 1
+
+            logger.debug(
+                f"Added line {line_name} from {bus0} to {bus1} (x={line_data['x']:.4f}, r={line_data['r']:.4f})"
+            )
+
+        except Exception as e:
+            logger.warning(f"Error adding line {line_name}: {e}")
+            skipped_lines.append(line_name)
+
+    logger.info(f"Added {added_count} lines to network")
     if skipped_lines:
         logger.warning(f"Skipped {len(skipped_lines)} lines: {skipped_lines[:10]}")
 
@@ -383,6 +519,172 @@ def set_link_flows_csv(
     logger.info(f"Set flow limits for {len(network.links)} links")
 
 
+def set_line_flows_csv(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    timeslice_csv: str | None = None,
+) -> None:
+    """Set flow limits (s_nom, s_min_pu, s_max_pu) for PyPSA Lines from CSV.
+
+    This is similar to set_link_flows_csv but works with Line components.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network containing lines
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    timeslice_csv : str, optional
+        Path to timeslice activity CSV file
+
+    Notes
+    -----
+    - Sets s_nom from fallback values (first available max flow/rating)
+    - Sets s_min_pu and s_max_pu time series normalized by s_nom
+    - For Lines, s_nom represents nominal apparent power (MVA)
+    """
+    csv_dir = Path(csv_dir)
+
+    logger.info("Setting line flow limits from CSV...")
+
+    # Parse flows using the same logic but for network.lines
+    snapshots = network.snapshots
+    lines = network.lines.index
+
+    # Load timeslice activity if provided
+    timeslice_activity = None
+    if timeslice_csv is not None:
+        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshots)
+
+    # Load static line properties
+    line_df = load_static_properties(csv_dir, "Line")
+
+    # Load time-varying properties
+    time_varying = load_time_varying_properties(csv_dir)
+
+    if time_varying.empty:
+        logger.info("No time-varying properties CSV, using static flow limits")
+        min_flow_df, max_flow_df, fallback_val_dict = _build_static_line_flows(
+            line_df, lines, snapshots
+        )
+    else:
+        # Filter to Line class and flow/rating properties
+        line_time_varying = time_varying[
+            (time_varying["class"] == "Line")
+            & (
+                time_varying["property"].isin(
+                    ["Min Flow", "Max Flow", "Min Rating", "Max Rating"]
+                )
+            )
+        ].copy()
+
+        # Build data_id to timeslice mapping
+        dataid_to_timeslice = {}
+        if timeslice_csv is not None:
+            dataid_to_timeslice = get_dataid_timeslice_map_csv(line_time_varying)
+
+        # Build flow time series for each line
+        min_flow_series = {}
+        max_flow_series = {}
+        fallback_val_dict = {}
+
+        for line in lines:
+            # Get properties for this line
+            line_props = line_time_varying[line_time_varying["object"] == line].copy()
+
+            # Build property entries
+            property_entries = []
+            for _, p in line_props.iterrows():
+                entry = {
+                    "property": p["property"],
+                    "value": float(p["value"]),
+                    "from": ensure_datetime(p["date_from"]),
+                    "to": ensure_datetime(p["date_to"]),
+                    "data_id": int(p["data_id"]) if pd.notnull(p["data_id"]) else None,
+                }
+                property_entries.append(entry)
+
+            if not property_entries:
+                # No time-varying properties, try static
+                min_flow_series[line] = pd.Series(0.0, index=snapshots, dtype=float)
+                max_flow_series[line] = pd.Series(1000.0, index=snapshots, dtype=float)
+                fallback_val_dict[line] = 1000.0
+                continue
+
+            prop_df_entries = pd.DataFrame(property_entries)
+
+            # Build time series for each property
+            min_flow_ts = _build_flow_ts(
+                prop_df_entries,
+                "Min Flow",
+                snapshots,
+                timeslice_activity,
+                dataid_to_timeslice,
+            )
+            min_rating_ts = _build_flow_ts(
+                prop_df_entries,
+                "Min Rating",
+                snapshots,
+                timeslice_activity,
+                dataid_to_timeslice,
+            )
+            max_flow_ts = _build_flow_ts(
+                prop_df_entries,
+                "Max Flow",
+                snapshots,
+                timeslice_activity,
+                dataid_to_timeslice,
+            )
+            max_rating_ts = _build_flow_ts(
+                prop_df_entries,
+                "Max Rating",
+                snapshots,
+                timeslice_activity,
+                dataid_to_timeslice,
+            )
+
+            # Prefer rating over flow
+            min_final = min_rating_ts.combine_first(min_flow_ts)
+            max_final = max_rating_ts.combine_first(max_flow_ts)
+
+            # Get fallback value (first available max flow/rating)
+            max_fallback = (
+                max_final.dropna().iloc[0] if not max_final.dropna().empty else None
+            )
+
+            min_flow_series[line] = min_final
+            max_flow_series[line] = max_final
+            fallback_val_dict[line] = max_fallback
+
+        min_flow_df = pd.DataFrame(min_flow_series, index=snapshots)
+        max_flow_df = pd.DataFrame(max_flow_series, index=snapshots)
+
+    # Set s_nom from fallback values
+    for line in network.lines.index:
+        fallback_val = fallback_val_dict.get(line)
+        if fallback_val is not None:
+            network.lines.loc[line, "s_nom"] = fallback_val
+            logger.debug(f"Set s_nom for line {line} to {fallback_val:.1f}")
+        else:
+            logger.warning(
+                f"Line {line} has no fallback value for s_nom, cannot set flow limits"
+            )
+
+    # Calculate s_min_pu and s_max_pu (normalized by s_nom)
+    s_min_pu = min_flow_df.divide(network.lines["s_nom"], axis=1)
+    s_max_pu = max_flow_df.divide(network.lines["s_nom"], axis=1)
+
+    # Replace inf/-inf with safe defaults
+    s_min_pu = s_min_pu.replace([float("inf"), float("-inf")], 0).fillna(0)
+    s_max_pu = s_max_pu.replace([float("inf"), float("-inf")], 1).fillna(1)
+
+    # Assign to network
+    network.lines_t.s_min_pu = s_min_pu
+    network.lines_t.s_max_pu = s_max_pu
+
+    logger.info(f"Set flow limits for {len(network.lines)} lines")
+
+
 def reassign_links_to_node(network: pypsa.Network, target_node: str) -> dict:
     """Reassign all links to connect a specific node.
 
@@ -497,3 +799,84 @@ def port_links_csv(
 
     logger.info(f"Link porting complete! Added {len(network.links)} links.")
     return None
+
+
+def port_transmission_csv(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    timeslice_csv: str | None = None,
+    target_node: str | None = None,
+    transmission_as_lines: bool = False,
+) -> dict | None:
+    """Comprehensive function to add transmission (Lines or Links) from CSV.
+
+    This function routes to either Lines or Links based on the transmission_as_lines parameter.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        The PyPSA network to add transmission to
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    timeslice_csv : str, optional
+        Path to timeslice activity CSV file
+    target_node : str, optional
+        If specified and using Links, all links will be reassigned to this node
+    transmission_as_lines : bool, default False
+        If True, adds PyPSA Line components (requires electrical parameters: reactance, resistance)
+        If False, adds PyPSA Link components (only requires flow limits)
+
+    Returns
+    -------
+    dict or None
+        If target_node is specified (Links mode only), returns reassignment summary
+
+    Notes
+    -----
+    - **Use Links (transmission_as_lines=False)** when:
+      - Model has operational/economic parameters (Max Flow, costs) but no electrical data
+      - Most PLEXOS models fall into this category (SEM, CAISO, MaREI, etc.)
+    - **Use Lines (transmission_as_lines=True)** when:
+      - Model has electrical network parameters (Reactance, Resistance)
+      - Example: NREL 118-bus model with impedance data
+    - Lines are added with electrical properties (x, r)
+    - Links are added as generic flow components with ramp limits
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> csv_dir = "models/sem-2024/SEM Forecast model/"
+    >>> port_transmission_csv(network, csv_dir)  # Uses Links (default)
+
+    >>> # For electrical model with reactance/resistance data
+    >>> port_transmission_csv(network, csv_dir, transmission_as_lines=True)
+
+    >>> # With node reassignment (Links mode only)
+    >>> port_transmission_csv(network, csv_dir, target_node="Load_Aggregate")
+    """
+    if transmission_as_lines:
+        logger.info("Using PyPSA Lines for transmission (electrical network model)...")
+
+        # Step 1: Add lines
+        logger.info("1. Adding lines from CSV...")
+        add_lines_csv(network, csv_dir)
+
+        # Step 2: Set line flow limits
+        logger.info("2. Setting line flow limits...")
+        set_line_flows_csv(network, csv_dir, timeslice_csv=timeslice_csv)
+
+        # Note: target_node reassignment only makes sense for Links
+        if target_node:
+            logger.warning(
+                f"target_node='{target_node}' specified but transmission_as_lines=True. "
+                "Node reassignment is not applicable to PyPSA Line components."
+            )
+
+        logger.info(f"Transmission porting complete! Added {len(network.lines)} lines.")
+        return None
+
+    else:
+        logger.info(
+            "Using PyPSA Links for transmission (operational/economic model)..."
+        )
+        return port_links_csv(network, csv_dir, timeslice_csv, target_node)
