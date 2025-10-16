@@ -805,3 +805,334 @@ def get_emission_rates_csv(
                     continue
 
     return emission_props
+
+
+def read_plexos_input_csv(
+    file_path: str | Path,
+    object_name: str | None = None,
+    scenario: str | int | None = None,
+    resolution: str = "hourly",
+) -> pd.DataFrame:
+    """Read and parse PLEXOS input CSV files in various formats.
+
+    This is a generalized function that handles all PLEXOS input CSV formats:
+    - Periods in Columns (most common): Year/Month/Day/Period + value columns
+    - Bands in Columns: Datetime + band columns
+    - Names in Columns: Datetime/Pattern + object name columns
+    - Stochastic scenarios: Multiple scenario columns (1, 2, 3, 4, 5)
+
+    PLEXOS Input CSV Format Support:
+    1. Periods in Columns:
+       - Columns: Year, Month, Day, Period (hour), then value columns
+       - OR: Columns: Datetime, then period/hour columns (1, 2, 3, ..., 24/48)
+       - Supports up and down scaling
+       - Supports name column for identifying object
+       - Does not support band column
+       - Does not support datetime date format (uses Year/Month/Day/Period)
+
+    2. Bands in Columns:
+       - Columns: Datetime, then band columns
+       - Does not support up and down scaling
+       - Supports name column
+       - Supports pattern or period column
+       - Supports datetime date format
+
+    3. Names in Columns:
+       - Columns: Datetime/Pattern/Period, then object name columns
+       - Does not support up and down scaling
+       - Supports pattern or period column
+       - Supports datetime date format
+       - PLEXOS looks for object name in column headers
+
+    Date Format Options:
+    - Year/Month/Day/Period: Most common, Period=1 means hour 1 (00:00-01:00)
+    - Datetime: ISO format datetime string
+    - Timeslice/Pattern: Named time periods
+
+    Parameters
+    ----------
+    file_path : str | Path
+        Path to the PLEXOS input CSV file
+    object_name : str, optional
+        Name of specific object to extract (for Names in Columns format).
+        If None, returns all columns.
+    scenario : str | int, optional
+        Scenario number to extract (for stochastic models with multiple scenarios).
+        Common values: "1", "2", "3", "4", "5" or 1, 2, 3, 4, 5.
+        If None, uses first scenario or averages all scenarios.
+    resolution : str, default "hourly"
+        Time resolution: "hourly" (60min), "half_hourly" (30min), "5min", etc.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with datetime index and value column(s).
+        - If object_name specified: single column with that object's data
+        - If multiple objects: multiple columns, one per object
+        - If stochastic scenarios: columns for each scenario or selected scenario
+
+    Examples
+    --------
+    Read SEM wind profile (Periods in Columns, stochastic):
+    >>> df = read_plexos_input_csv(
+    ...     "ROI Wind_5base years - 2018-2033.csv",
+    ...     scenario="1"
+    ... )
+
+    Read AEMO demand (Names in Columns):
+    >>> df = read_plexos_input_csv(
+    ...     "demand.csv",
+    ...     object_name="NSW1"
+    ... )
+
+    Read VRE profile (Periods in Columns):
+    >>> df = read_plexos_input_csv(
+    ...     "Gen_Solar.csv"
+    ... )
+
+    Notes
+    -----
+    - Automatically detects format based on column names
+    - Handles various date formats (Year/Month/Day/Period, Datetime, etc.)
+    - Supports hourly (24 periods) and half-hourly (48 periods) resolutions
+    - For stochastic models, can select specific scenario or average all
+    - Returns data indexed by datetime for easy PyPSA integration
+    """
+    df = pd.read_csv(file_path)
+
+    # Detect format and parse accordingly
+    format_type = _detect_plexos_csv_format(df)
+
+    if format_type == "periods_in_columns_ymd":
+        return _parse_periods_in_columns_ymd(df, scenario)
+    elif format_type == "periods_in_columns_datetime":
+        return _parse_periods_in_columns_datetime(df, object_name, scenario)
+    elif format_type == "names_in_columns":
+        return _parse_names_in_columns(df, object_name, scenario)
+    elif format_type == "bands_in_columns":
+        return _parse_bands_in_columns(df)
+    else:
+        msg = f"Could not detect PLEXOS CSV format for file: {file_path}"
+        raise ValueError(msg)
+
+
+def _detect_plexos_csv_format(df: pd.DataFrame) -> str:
+    """Detect which PLEXOS input CSV format is being used.
+
+    Returns
+    -------
+    str
+        One of: "periods_in_columns_ymd", "periods_in_columns_datetime",
+        "names_in_columns", "bands_in_columns"
+    """
+    columns_lower = [col.lower() for col in df.columns]
+
+    # Check for Year/Month/Day/Period format (SEM-style)
+    if all(col in columns_lower for col in ["year", "month", "day", "period"]):
+        return "periods_in_columns_ymd"
+
+    # Check for Datetime + numeric period columns (AEMO-style VRE profiles)
+    if "datetime" in columns_lower:
+        # Check if we have numeric columns (1, 2, 3, ..., 24 or 48)
+        numeric_cols = [col for col in df.columns if str(col).strip().isdigit()]
+        if len(numeric_cols) in [24, 48]:
+            return "periods_in_columns_datetime"
+
+        # Check if we have object name columns (Names in Columns format)
+        non_date_cols = [
+            col
+            for col in df.columns
+            if col.lower() not in ["datetime", "date", "timeslice", "pattern"]
+        ]
+        if len(non_date_cols) > 0:
+            return "names_in_columns"
+
+    # Check for Pattern/Timeslice + object columns
+    if any(col in columns_lower for col in ["pattern", "timeslice"]):
+        return "names_in_columns"
+
+    # Check for band columns
+    if any("band" in col.lower() for col in df.columns):
+        return "bands_in_columns"
+
+    # Default to names in columns if we have datetime-like first column
+    return "names_in_columns"
+
+
+def _parse_periods_in_columns_ymd(
+    df: pd.DataFrame, scenario: str | int | None = None
+) -> pd.DataFrame:
+    """Parse Periods in Columns format with Year/Month/Day/Period.
+
+    Used by SEM and other models with stochastic scenarios.
+    """
+    # Create datetime from Year, Month, Day, Period
+    df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]]) + pd.to_timedelta(
+        (df["Period"] - 1), unit="h"
+    )
+
+    # Find value columns (numeric columns that aren't date components)
+    value_cols = [
+        col
+        for col in df.columns
+        if col not in ["Year", "Month", "Day", "Period", "datetime"]
+        and str(col).replace(".", "").isdigit()
+    ]
+
+    if not value_cols:
+        msg = "No value columns found in Periods in Columns format"
+        raise ValueError(msg)
+
+    # If scenario specified, select that column
+    if scenario is not None:
+        scenario_col = str(scenario)
+        if scenario_col in value_cols:
+            result = df[["datetime", scenario_col]].copy()
+            result.columns = ["datetime", "value"]
+        else:
+            msg = f"Scenario '{scenario}' not found. Available: {value_cols}"
+            raise ValueError(msg)
+    else:
+        # Return all scenarios
+        result = df[["datetime"] + value_cols].copy()
+
+    result.set_index("datetime", inplace=True)
+    return result
+
+
+def _parse_periods_in_columns_datetime(
+    df: pd.DataFrame, object_name: str | None = None, scenario: str | int | None = None
+) -> pd.DataFrame:
+    """Parse Periods in Columns format with Datetime + hour columns.
+
+    Used by AEMO and other models with hourly/half-hourly resolution.
+    """
+    df["datetime"] = pd.to_datetime(
+        df["datetime" if "datetime" in df.columns else "Datetime"]
+    )
+
+    # Find numeric period columns (1, 2, 3, ..., 24/48)
+    numeric_cols = sorted(
+        [col for col in df.columns if str(col).strip().isdigit()], key=lambda x: int(x)
+    )
+
+    if not numeric_cols:
+        msg = "No numeric period columns found"
+        raise ValueError(msg)
+
+    # Determine resolution (hourly = 24 columns, half-hourly = 48 columns)
+    if len(numeric_cols) == 24:
+        resolution_minutes = 60
+    elif len(numeric_cols) == 48:
+        resolution_minutes = 30
+    else:
+        resolution_minutes = 60  # Default to hourly
+
+    # Melt the dataframe to long format
+    df_long = df.melt(
+        id_vars=["datetime"],
+        value_vars=numeric_cols,
+        var_name="period",
+        value_name="value",
+    )
+
+    # Convert period to timedelta
+    df_long["period"] = pd.to_timedelta(
+        (df_long["period"].astype(int) - 1) * resolution_minutes, unit="m"
+    )
+
+    # Create full datetime
+    df_long["datetime"] = df_long["datetime"].dt.floor("D") + df_long["period"]
+    df_long.drop(columns=["period"], inplace=True)
+
+    df_long.set_index("datetime", inplace=True)
+    return df_long
+
+
+def _parse_names_in_columns(
+    df: pd.DataFrame, object_name: str | None = None, scenario: str | int | None = None
+) -> pd.DataFrame:
+    """Parse Names in Columns format.
+
+    Object names are column headers, rows are time periods.
+    """
+    # Find datetime column
+    datetime_col = None
+    for col in ["datetime", "Datetime", "Date", "DATE"]:
+        if col in df.columns:
+            datetime_col = col
+            break
+
+    if datetime_col is None:
+        # Try Pattern or Timeslice column
+        for col in ["Pattern", "pattern", "Timeslice", "timeslice"]:
+            if col in df.columns:
+                # For now, skip pattern-based parsing (would need timeslice mapping)
+                msg = "Pattern/Timeslice-based CSV parsing not yet implemented. Please use datetime-based CSVs."
+                raise NotImplementedError(msg)
+
+        msg = "Could not find datetime column in Names in Columns format"
+        raise ValueError(msg)
+
+    df["datetime"] = pd.to_datetime(df[datetime_col])
+
+    # Get object columns (everything except datetime-related columns)
+    meta_cols = [
+        datetime_col,
+        "datetime",
+        "Pattern",
+        "pattern",
+        "Timeslice",
+        "timeslice",
+        "Iteration",
+        "iteration",
+    ]
+    object_cols = [col for col in df.columns if col not in meta_cols]
+
+    if not object_cols:
+        msg = "No object columns found in Names in Columns format"
+        raise ValueError(msg)
+
+    # If object_name specified, select that column
+    if object_name is not None:
+        if object_name not in object_cols:
+            msg = f"Object '{object_name}' not found. Available: {object_cols}"
+            raise ValueError(msg)
+        result = df[["datetime", object_name]].copy()
+        result.columns = ["datetime", "value"]
+    else:
+        # Return all object columns
+        result = df[["datetime"] + object_cols].copy()
+
+    result.set_index("datetime", inplace=True)
+    return result
+
+
+def _parse_bands_in_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Parse Bands in Columns format.
+
+    Each column represents a different band (e.g., different cost tranches).
+    """
+    # Find datetime column
+    datetime_col = None
+    for col in ["datetime", "Datetime", "Date", "DATE"]:
+        if col in df.columns:
+            datetime_col = col
+            break
+
+    if datetime_col is None:
+        msg = "Could not find datetime column in Bands in Columns format"
+        raise ValueError(msg)
+
+    df["datetime"] = pd.to_datetime(df[datetime_col])
+
+    # Get band columns (columns with 'band' in name or numeric columns)
+    band_cols = [col for col in df.columns if col not in {datetime_col, "datetime"}]
+
+    if not band_cols:
+        msg = "No band columns found in Bands in Columns format"
+        raise ValueError(msg)
+
+    result = df[["datetime"] + band_cols].copy()
+    result.set_index("datetime", inplace=True)
+    return result
