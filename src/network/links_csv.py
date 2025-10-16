@@ -74,10 +74,21 @@ def _parse_node_buses(
     try:
         if isinstance(node_value, str):
             nodes = ast.literal_eval(node_value)
-            if isinstance(nodes, list) and len(nodes) == 2:
-                return str(nodes[0]), str(nodes[1])
+            if isinstance(nodes, list):
+                if len(nodes) == 2:
+                    return str(nodes[0]), str(nodes[1])
+                else:
+                    logger.warning(
+                        f"Line {line_name} Node column has {len(nodes)} nodes instead of 2: {nodes}"
+                    )
+            else:
+                logger.warning(
+                    f"Line {line_name} Node column parsed but not a list: {type(nodes)} = {nodes}"
+                )
     except (ValueError, SyntaxError) as e:
-        logger.warning(f"Failed to parse Node column for {line_name}: {e}")
+        logger.warning(
+            f"Failed to parse Node column for {line_name}: '{node_value}' - Error: {e}"
+        )
 
     return None, None
 
