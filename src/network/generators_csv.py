@@ -912,13 +912,12 @@ def load_data_file_profiles_csv(
     from PLEXOS Data File.csv metadata and applies loaded data to PyPSA network properties
     with configurable mapping options.
 
-    The function performs auto-discovery in three steps:
+    The function performs these steps:
     1. Parse Data File.csv to map data file objects → CSV filenames
     2. Parse Generator.csv to find generators with "{property_name}.Data File" references
-    3. Load and apply profile data to specified PyPSA properties
-
-    If auto-discovery fails (e.g., CSV export lacks "{property_name}.Data File" column),
-    manual_mappings can be provided as a fallback.
+       (or use manual_mappings as fallback if auto-discovery fails)
+    3. Create missing carriers if carrier_mapping is provided
+    4. Load and apply profile data to specified PyPSA properties
 
     Parameters
     ----------
@@ -953,6 +952,7 @@ def load_data_file_profiles_csv(
         Mapping to set generator carriers based on keywords in generator or file names.
         Example: {"Wind": "Wind", "Solar": "Solar"}
         Keys are matched case-insensitively against generator names and data file names.
+        If carriers don't exist in network, they will be automatically created.
     value_scaling : float, default 1.0
         Scaling factor for values (e.g., 0.01 to convert percentage to fraction)
     manual_mappings : dict[str, str], optional
@@ -1070,7 +1070,18 @@ def load_data_file_profiles_csv(
                 "mode": apply_mode,
             }
 
-    # Step 3: Load and apply profiles
+    # Step 3: Ensure carriers exist in network (if carrier_mapping provided)
+    if carrier_mapping:
+        # Collect all carriers that will be used
+        carriers_to_create = set(carrier_mapping.values())
+
+        # Create missing carriers
+        for carrier in carriers_to_create:
+            if carrier not in network.carriers.index:
+                network.add("Carrier", carrier)
+                logger.info(f"Created carrier: {carrier}")
+
+    # Step 4: Load and apply profiles
     profile_dict = {}
     skipped_generators = []
     failed_generators = []
