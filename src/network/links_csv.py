@@ -507,6 +507,7 @@ def set_link_flows_csv(
     network: pypsa.Network,
     csv_dir: str | Path,
     timeslice_csv: str | None = None,
+    bidirectional_links: bool = True,
 ) -> None:
     """Set flow limits (p_nom, p_min_pu, p_max_pu) for links from CSV.
 
@@ -520,11 +521,16 @@ def set_link_flows_csv(
         Directory containing COAD CSV exports
     timeslice_csv : str, optional
         Path to timeslice activity CSV file
+    bidirectional_links : bool, default True
+        If True, links with missing or zero min flows will be set to allow
+        bidirectional flow (p_min_pu = -1, enabling imports/exports).
+        If False, min flows of zero/NaN will remain unidirectional (p_min_pu = 0).
 
     Notes
     -----
     - Sets p_nom from fallback values (first available max flow/rating)
     - Sets p_min_pu and p_max_pu time series normalized by p_nom
+    - Bidirectional flow allows links to flow in reverse (from bus1 to bus0)
     """
     csv_dir = Path(csv_dir)
 
@@ -550,7 +556,15 @@ def set_link_flows_csv(
     p_max_pu = max_flow_df.divide(network.links["p_nom"], axis=1)
 
     # Replace inf/-inf with safe defaults
-    p_min_pu = p_min_pu.replace([float("inf"), float("-inf")], 0).fillna(0)
+    # p_min_pu behavior depends on bidirectional_links flag:
+    # - If True: treat missing/zero as -1 to enable bidirectional flow (imports/exports)
+    # - If False: treat missing/zero as 0 to keep unidirectional flow (exports only)
+    if bidirectional_links:
+        p_min_pu = p_min_pu.replace([float("inf"), float("-inf")], -1).fillna(-1)
+        p_min_pu[p_min_pu == 0] = -1.0  # Convert zero min flow to bidirectional
+    else:
+        p_min_pu = p_min_pu.replace([float("inf"), float("-inf")], 0).fillna(0)
+
     p_max_pu = p_max_pu.replace([float("inf"), float("-inf")], 1).fillna(1)
 
     # Assign to network
@@ -786,6 +800,7 @@ def port_links_csv(
     csv_dir: str | Path,
     timeslice_csv: str | None = None,
     target_node: str | None = None,
+    bidirectional_links: bool = True,
 ) -> dict | None:
     """Comprehensive function to add links and set all properties from CSV.
 
@@ -806,6 +821,10 @@ def port_links_csv(
         Path to timeslice activity CSV file
     target_node : str, optional
         If specified, all links will be reassigned to this node
+    bidirectional_links : bool, default True
+        If True, links with missing or zero min flows will be set to allow
+        bidirectional flow (p_min_pu = -1, enabling imports/exports).
+        If False, min flows of zero/NaN will remain unidirectional (p_min_pu = 0).
 
     Returns
     -------
@@ -829,7 +848,12 @@ def port_links_csv(
 
     # Step 2: Set link flow limits
     logger.info("2. Setting link flow limits...")
-    set_link_flows_csv(network, csv_dir, timeslice_csv=timeslice_csv)
+    set_link_flows_csv(
+        network,
+        csv_dir,
+        timeslice_csv=timeslice_csv,
+        bidirectional_links=bidirectional_links,
+    )
 
     # Step 3: Reassign links to target node if specified
     if target_node:

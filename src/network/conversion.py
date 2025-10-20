@@ -163,6 +163,7 @@ def _create_electricity_model(
             ),
             demand_target_node=config.get("demand_target_node"),
             transmission_as_lines=config.get("transmission_as_lines", False),
+            bidirectional_links=config.get("bidirectional_links", True),
             load_scenario=config.get("load_scenario"),
         )
 

@@ -110,6 +110,7 @@ def setup_network_csv(
     demand_assignment_strategy: str = "per_node",
     demand_target_node: str | None = None,
     transmission_as_lines: bool = False,
+    bidirectional_links: bool = True,
     load_scenario: str | None = None,
 ) -> dict:
     """Set up PyPSA network from CSV exports.
@@ -148,6 +149,10 @@ def setup_network_csv(
         consolidating all demand to one node. Example: "SEM"
     transmission_as_lines : bool, default False
         Use Line components instead of Links for transmission
+    bidirectional_links : bool, default True
+        If True, Links with zero/NaN min flows will be set to allow bidirectional
+        flow (p_min_pu = -1). If False, min flows of zero/NaN will be treated
+        as unidirectional (p_min_pu = 0).
     load_scenario : str, optional
         For demand data with multiple scenarios (iterations), specify which scenario
         to use. If None, defaults to first scenario. Example: "iteration_1"
@@ -241,6 +246,7 @@ def setup_network_csv(
         csv_dir=csv_dir,
         timeslice_csv=timeslice_csv,
         target_node=target_node,
+        bidirectional_links=bidirectional_links,
     )
 
     # 7. Set fuel prices
