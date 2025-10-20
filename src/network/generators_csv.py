@@ -529,6 +529,34 @@ def _build_generator_p_min_pu_timeseries_csv(
         min_stable_factor_ts = build_ts("Min Stable Factor", prop_df_entries)
         min_pump_load_ts = build_ts("Min Pump Load", prop_df_entries)
 
+        # If no time-varying data, try static CSV as fallback
+        if min_stable_level_ts.isnull().all():
+            static_min_level = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Level"
+            )
+            if static_min_level is not None:
+                parsed_val = parse_numeric_value(static_min_level, use_first=True)
+                if parsed_val is not None:
+                    min_stable_level_ts = pd.Series(parsed_val, index=snapshots)
+
+        if min_stable_factor_ts.isnull().all():
+            static_min_factor = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Factor"
+            )
+            if static_min_factor is not None:
+                parsed_val = parse_numeric_value(static_min_factor, use_first=True)
+                if parsed_val is not None:
+                    min_stable_factor_ts = pd.Series(parsed_val, index=snapshots)
+
+        if min_pump_load_ts.isnull().all():
+            static_pump_load = get_property_from_static_csv(
+                generator_df, gen, "Min Pump Load"
+            )
+            if static_pump_load is not None:
+                parsed_val = parse_numeric_value(static_pump_load, use_first=True)
+                if parsed_val is not None:
+                    min_pump_load_ts = pd.Series(parsed_val, index=snapshots)
+
         # Get p_nom for scaling Min Stable Level and Min Pump Load
         p_nom = None
         if gen in network.generators.index and "p_nom" in network.generators.columns:
