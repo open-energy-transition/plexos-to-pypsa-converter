@@ -13,8 +13,9 @@ This module provides:
 - Parsing explicit outages from PLEXOS properties
 - Simplified Monte Carlo and maintenance scheduling
 - Expected value fallback (deterministic derating)
+- Generalized application of outage schedules to PyPSA networks
 
-All outages are represented as time series modifications to p_max_pu.
+All outages are represented as time series modifications to p_max_pu and p_min_pu.
 """
 
 import logging
@@ -181,6 +182,101 @@ def build_outage_schedule(
         )
 
     return schedule
+
+
+def apply_outage_schedule(
+    network: Network,
+    outage_schedule: pd.DataFrame,
+    apply_to_p_max: bool = True,
+    apply_to_p_min: bool = True,
+) -> dict:
+    """Apply outage schedule to network generators.
+
+    This function applies outage schedules to PyPSA networks by:
+    1. Scaling p_max_pu by the outage schedule (reduces available capacity)
+    2. Scaling p_min_pu by the outage schedule (maintains constraint consistency)
+    3. Preventing p_min_pu > p_max_pu violations
+
+    Note: This assumes time series p_min_pu has already been properly initialized
+    from PLEXOS database properties (Min Stable Level, Min Stable Factor, etc.)
+    during network setup via set_min_stable_levels() in port_generators().
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators
+    outage_schedule : pd.DataFrame
+        Outage schedule from build_outage_schedule() with index=snapshots,
+        columns=generator names, values=capacity factors (0-1)
+    apply_to_p_max : bool, default True
+        Apply schedule to p_max_pu (multiply existing values by schedule)
+    apply_to_p_min : bool, default True
+        Apply schedule to p_min_pu (multiply existing values by schedule)
+        Maintains operational flexibility while scaling constraints
+
+    Returns
+    -------
+    dict
+        Summary: {
+            "affected_generators": int,
+            "applied_to_p_max": int,
+            "applied_to_p_min": int,
+        }
+
+    Examples
+    --------
+    >>> # Standard usage - handles everything automatically
+    >>> events = parse_explicit_outages_from_properties(csv_dir, network)
+    >>> schedule = build_outage_schedule(events, network.snapshots)
+    >>> summary = apply_outage_schedule(network, schedule)
+    >>> print(f"Applied outages to {summary['affected_generators']} generators")
+    Applied outages to 42 generators
+
+    >>> # Custom: only apply to p_max_pu (allow free curtailment)
+    >>> summary = apply_outage_schedule(network, schedule, apply_to_p_min=False)
+
+    Notes
+    -----
+    Example behavior with 500 MW thermal generator (2 units, 50% min load):
+    - Before: p_min_pu=0.5 (static), p_max_pu=1.0
+    - One unit out (Outage Rating=250 MW) → schedule=0.5
+    - After: p_min_pu=0.25 (time series, 125 MW), p_max_pu=0.5 (250 MW)
+    - Maintains 50% turndown ratio while respecting reduced capacity
+    """
+    applied_to_p_max_count = 0
+    applied_to_p_min_count = 0
+    affected_generators = []
+
+    # Step 1: Apply schedule to p_max_pu
+    if apply_to_p_max:
+        for gen in outage_schedule.columns:
+            if gen in network.generators_t.p_max_pu.columns:
+                network.generators_t.p_max_pu[gen] *= outage_schedule[gen]
+                applied_to_p_max_count += 1
+                if gen not in affected_generators:
+                    affected_generators.append(gen)
+
+    # Step 2: Apply schedule to p_min_pu
+    if apply_to_p_min:
+        for gen in outage_schedule.columns:
+            if gen in network.generators_t.p_min_pu.columns:
+                network.generators_t.p_min_pu[gen] *= outage_schedule[gen]
+                applied_to_p_min_count += 1
+                if gen not in affected_generators:
+                    affected_generators.append(gen)
+
+    # Log summary
+    logger.info(f"Applied outage schedule to {len(affected_generators)} generators")
+    if apply_to_p_max:
+        logger.info(f"  p_max_pu: {applied_to_p_max_count} generators")
+    if apply_to_p_min:
+        logger.info(f"  p_min_pu: {applied_to_p_min_count} generators")
+
+    return {
+        "affected_generators": len(affected_generators),
+        "applied_to_p_max": applied_to_p_max_count,
+        "applied_to_p_min": applied_to_p_min_count,
+    }
 
 
 def load_precomputed_outage_schedules(
