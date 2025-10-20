@@ -57,15 +57,14 @@ except Exception:
 # Generate outages (explicit + stochastic with proper accounting)
 csv_dir = "src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model"
 
-# Step 1: Parse explicit outages from "Units Out" property
+# Parse explicit outages from "Units Out" property
 explicit_events = parse_explicit_outages_from_properties(
     csv_dir=csv_dir,
     network=network,
     property_name="Units Out",
 )
-print(f"✓ Found {len(explicit_events)} explicit outage events")
 
-# Step 2: Generate stochastic outages accounting for explicit outages
+# Generate stochastic outages accounting for explicit outages
 stochastic_events = generate_stochastic_outages_csv(
     csv_dir=csv_dir,
     network=network,
@@ -77,64 +76,19 @@ stochastic_events = generate_stochastic_outages_csv(
     generator_filter=lambda gen: "Wind" not in gen
     and "Solar" not in gen,  # Exclude VRE (variability already in capacity factors)
 )
-print(f"✓ Generated {len(stochastic_events)} stochastic outage events")
 
-# Step 3: Combine all events
+# Combine all events
 events = explicit_events + stochastic_events
 
-print(f"\n✓ Generated {len(events)} total outage events")
-
 # Build outage schedule
-print("\nBuilding outage schedule...")
 schedule = build_outage_schedule(events, network.snapshots)
-print(f"✓ Schedule shape: {schedule.shape}")
 
 # Apply to network using generalized function
-print("\nApplying outages to network...")
 summary2 = apply_outage_schedule(network, schedule)
-print(f"✓ Applied outages to {summary2['affected_generators']} generators")
-
-# Show statistics
-forced_events = [e for e in events if e.outage_type == "forced"]
-maint_events = [e for e in events if e.outage_type == "maintenance"]
-print(f"  Forced outages: {len(forced_events)} events")
-print(f"  Maintenance: {len(maint_events)} events")
-print(f"  Total affected generators: {len(schedule.columns)}")
-
-print("\nDEBUG: Checking for p_min_pu > p_max_pu violations...")
-for gen in network.generators.index:
-    if (
-        gen in network.generators_t.p_min_pu.columns
-        and gen in network.generators_t.p_max_pu.columns
-    ):
-        violations = (
-            network.generators_t.p_min_pu[gen]
-            > network.generators_t.p_max_pu[gen] + 1e-6
-        ).sum()
-        if violations > 0:
-            print(f"⚠️   {gen}: {violations} hours where p_min_pu > p_max_pu")
-            print(f"    Max p_min_pu: {network.generators_t.p_min_pu[gen].max():.4f}")
-            print(f"    Min p_max_pu: {network.generators_t.p_max_pu[gen].min():.4f}")
-            print(
-                f"    Carrier: {network.generators.at[gen, 'carrier'] if 'carrier' in network.generators.columns else 'unknown'}"
-            )
-            if gen in schedule.columns:
-                print(f"    Has outage schedule: YES (min={schedule[gen].min():.4f})")
-            else:
-                print("    Has outage schedule: NO")
-
-# Sample generator impact
-if len(schedule.columns) > 0:
-    sample_gen = schedule.columns[0]
-    outage_hours = (schedule[sample_gen] < 1.0).sum()
-    print(f"\nSample impact ({sample_gen}):")
-    print(f"  Hours with outages: {outage_hours}")
-    print(f"  Minimum capacity factor: {schedule[sample_gen].min():.3f}")
 
 # Consistency check
 network.consistency_check()
 
-print("\nOptimizing network...")
 # select 2023 snapshots as subset
 network_subset = network.snapshots[network.snapshots.year == 2023]
 network.optimize(solver_name="gurobi", snapshots=network_subset)
