@@ -45,6 +45,30 @@ def _raise_invalid_apply_mode(mode: str) -> None:
     raise ValueError(msg)
 
 
+def _calculate_capacity_factor(
+    p_nom: float | None, outage_rating: float | None
+) -> float:
+    """Calculate capacity factor during outage based on outage rating.
+
+    Parameters
+    ----------
+    p_nom : float | None
+        Nominal generator capacity (MW)
+    outage_rating : float | None
+        Capacity unavailable during outage (MW)
+
+    Returns
+    -------
+    float
+        Capacity factor during outage (0.0 = full outage, 1.0 = fully available)
+    """
+    if outage_rating is not None and p_nom is not None and p_nom > 0:
+        # Partial outage: CF = (p_nom - outage_rating) / p_nom
+        return max(0.0, (p_nom - outage_rating) / p_nom)
+    # Full outage
+    return 0.0
+
+
 @dataclass
 class OutageEvent:
     """Represents a single generator outage event.
@@ -794,48 +818,34 @@ def parse_generator_outage_properties_csv(
     # Parse properties for each generator
     properties_list = []
 
+    property_mappings = {
+        "forced_outage_rate": (
+            "Forced Outage Rate",
+            True,
+        ),  # (property_name, is_percentage)
+        "maintenance_rate": ("Maintenance Rate", True),
+        "mean_time_to_repair": ("Mean Time to Repair", False),
+        "outage_rating": ("Outage Rating", False),
+    }
+
     for gen in generator_df.index:
-        # Forced Outage Rate (percentage → fraction)
-        for_raw = get_property_from_static_csv(generator_df, gen, "Forced Outage Rate")
-        forced_outage_rate = None
-        if for_raw is not None:
-            for_value = parse_numeric_value(for_raw, use_first=True)
-            if for_value is not None:
-                forced_outage_rate = for_value / 100.0  # Convert percentage to fraction
+        gen_props = {"generator": gen}
 
-        # Maintenance Rate (percentage → fraction)
-        mr_raw = get_property_from_static_csv(generator_df, gen, "Maintenance Rate")
-        maintenance_rate = None
-        if mr_raw is not None:
-            mr_value = parse_numeric_value(mr_raw, use_first=True)
-            if mr_value is not None:
-                maintenance_rate = mr_value / 100.0  # Convert percentage to fraction
+        for prop_key, (plexos_name, is_percentage) in property_mappings.items():
+            raw_value = get_property_from_static_csv(generator_df, gen, plexos_name)
+            if raw_value is not None:
+                parsed_value = parse_numeric_value(raw_value, use_first=True)
+                if parsed_value is not None:
+                    # Convert percentage to fraction if needed
+                    gen_props[prop_key] = (
+                        parsed_value / 100.0 if is_percentage else parsed_value
+                    )
+                else:
+                    gen_props[prop_key] = None
+            else:
+                gen_props[prop_key] = None
 
-        # Mean Time to Repair (hours)
-        mttr_raw = get_property_from_static_csv(
-            generator_df, gen, "Mean Time to Repair"
-        )
-        mean_time_to_repair = None
-        if mttr_raw is not None:
-            mean_time_to_repair = parse_numeric_value(mttr_raw, use_first=True)
-
-        # Outage Rating (MW)
-        outage_rating_raw = get_property_from_static_csv(
-            generator_df, gen, "Outage Rating"
-        )
-        outage_rating = None
-        if outage_rating_raw is not None:
-            outage_rating = parse_numeric_value(outage_rating_raw, use_first=True)
-
-        properties_list.append(
-            {
-                "generator": gen,
-                "forced_outage_rate": forced_outage_rate,
-                "maintenance_rate": maintenance_rate,
-                "mean_time_to_repair": mean_time_to_repair,
-                "outage_rating": outage_rating,
-            }
-        )
+        properties_list.append(gen_props)
 
     # Create DataFrame
     properties_df = pd.DataFrame(properties_list)
@@ -1019,12 +1029,7 @@ def generate_forced_outages_simplified(
         outage_rating = row["outage_rating"]
 
         # Calculate capacity factor during outage
-        if outage_rating is not None and p_nom is not None and p_nom > 0:
-            # Partial outage: CF = (p_nom - outage_rating) / p_nom
-            capacity_factor = max(0.0, (p_nom - outage_rating) / p_nom)
-        else:
-            # Full outage
-            capacity_factor = 0.0
+        capacity_factor = _calculate_capacity_factor(p_nom, outage_rating)
 
         # Generate random outage events
         for _ in range(num_outages):
@@ -1263,12 +1268,7 @@ def schedule_maintenance_simplified(
         outage_rating = row["outage_rating"]
 
         # Calculate capacity factor during maintenance
-        if outage_rating is not None and p_nom is not None and p_nom > 0:
-            # Partial outage
-            capacity_factor = max(0.0, (p_nom - outage_rating) / p_nom)
-        else:
-            # Full outage
-            capacity_factor = 0.0
+        capacity_factor = _calculate_capacity_factor(p_nom, outage_rating)
 
         # Schedule maintenance in blocks (using adjusted hours)
         remaining_hours = adjusted_required_hours
