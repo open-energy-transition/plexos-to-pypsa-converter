@@ -573,6 +573,67 @@ def apply_expected_outage_derating(
 # =============================================================================
 
 
+def _calculate_explicit_outage_hours(
+    existing_outage_events: list[OutageEvent] | None,
+    snapshots: pd.DatetimeIndex,
+) -> dict[str, float]:
+    """Calculate total explicit outage hours per generator from existing events.
+
+    Helper function for stochastic generation that accounts for explicit outages.
+    Computes the total duration of explicit outage events for each generator,
+    which can then be deducted from FOR/MR budgets.
+
+    Parameters
+    ----------
+    existing_outage_events : list[OutageEvent] | None
+        List of existing explicit outage events. If None, returns empty dict.
+    snapshots : pd.DatetimeIndex
+        Network snapshots to constrain outage duration calculation
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary mapping generator name to total explicit outage hours.
+        Only includes generators that have explicit outages.
+
+    Examples
+    --------
+    >>> explicit_events = parse_explicit_outages_from_properties(csv_dir, network)
+    >>> explicit_hours = _calculate_explicit_outage_hours(explicit_events, network.snapshots)
+    >>> explicit_hours["AA1"]  # Total explicit outage hours for generator AA1
+    263.5
+    """
+    if existing_outage_events is None or len(existing_outage_events) == 0:
+        return {}
+
+    # Calculate total outage hours per generator
+    explicit_hours: dict[str, float] = {}
+
+    for event in existing_outage_events:
+        # Only count explicit outages (not forced/maintenance from previous runs)
+        if event.outage_type != "explicit":
+            continue
+
+        # Calculate duration in hours, constrained to snapshots
+        start = max(event.start, snapshots[0])
+        end = min(event.end, snapshots[-1])
+
+        if end <= start:
+            continue  # Event outside snapshot range
+
+        duration_hours = (end - start).total_seconds() / 3600
+
+        # Accumulate hours for this generator
+        gen = event.generator
+        explicit_hours[gen] = explicit_hours.get(gen, 0.0) + duration_hours
+
+    logger.debug(
+        f"Calculated explicit outage hours for {len(explicit_hours)} generators"
+    )
+
+    return explicit_hours
+
+
 def parse_generator_outage_properties_csv(
     csv_dir: str | Path,
     network: Network,
@@ -701,6 +762,7 @@ def generate_forced_outages_simplified(
     network: Network,
     random_seed: int | None = None,
     generator_filter: Callable[[str], bool] | None = None,
+    existing_outage_events: list[OutageEvent] | None = None,
 ) -> list[OutageEvent]:
     """Generate forced outage events using simplified Monte Carlo simulation.
 
@@ -715,6 +777,11 @@ def generate_forced_outages_simplified(
     - Number of outages ≈ (FOR × total_hours) / MTTR
     - Each outage duration = MTTR hours (simplified from exponential)
     - Random uniform placement without overlap checking
+
+    If existing_outage_events is provided, explicit outage hours are deducted
+    from the FOR budget to avoid double-counting:
+    - Adjusted outage hours = (FOR × total_hours) - explicit_hours
+    - Only generates forced outages for remaining adjusted hours
 
     Limitations vs PLEXOS:
     - Fixed duration instead of exponential distribution
@@ -733,6 +800,10 @@ def generate_forced_outages_simplified(
     generator_filter : callable, optional
         Function taking generator name and returning True to process.
         Example: lambda gen: network.generators.at[gen, "carrier"] in ["Coal", "Gas"]
+    existing_outage_events : list[OutageEvent], optional
+        List of existing explicit outage events. If provided, explicit outage
+        hours are deducted from FOR budget to prevent double-counting.
+        Example: parse_explicit_outages_from_properties(csv_dir, network)
 
     Returns
     -------
@@ -752,6 +823,15 @@ def generate_forced_outages_simplified(
     157
     >>> events[0].outage_type
     'forced'
+
+    >>> # Account for existing explicit outages to avoid double-counting
+    >>> explicit_events = parse_explicit_outages_from_properties(csv_dir, network)
+    >>> forced_events = generate_forced_outages_simplified(
+    ...     csv_dir=csv_dir,
+    ...     network=network,
+    ...     random_seed=42,
+    ...     existing_outage_events=explicit_events,  # Deducts explicit hours from FOR budget
+    ... )
     """
     csv_dir = Path(csv_dir)
 
@@ -759,6 +839,15 @@ def generate_forced_outages_simplified(
     rng = np.random.default_rng(random_seed)
     if random_seed is not None:
         logger.info(f"Using random seed: {random_seed}")
+
+    # Calculate explicit outage hours per generator (if provided)
+    explicit_hours_by_gen = _calculate_explicit_outage_hours(
+        existing_outage_events, network.snapshots
+    )
+    if explicit_hours_by_gen:
+        logger.info(
+            f"Accounting for {len(explicit_hours_by_gen)} generators with explicit outages"
+        )
 
     # Parse outage properties
     properties_df = parse_generator_outage_properties_csv(csv_dir, network)
@@ -803,11 +892,25 @@ def generate_forced_outages_simplified(
 
         # Calculate expected outage statistics
         expected_outage_hours = FOR * total_hours
-        num_outages = int(np.round(expected_outage_hours / MTTR))
+
+        # Deduct explicit outage hours if provided
+        explicit_hours = explicit_hours_by_gen.get(str(gen), 0.0)
+        adjusted_outage_hours = expected_outage_hours - explicit_hours
+
+        if adjusted_outage_hours <= 0:
+            logger.debug(
+                f"{gen}: Explicit outages ({explicit_hours:.1f}h) already cover FOR budget "
+                f"({expected_outage_hours:.1f}h), skipping forced outage generation"
+            )
+            continue
+
+        num_outages = int(np.round(adjusted_outage_hours / MTTR))
 
         if num_outages == 0:
             logger.debug(
-                f"{gen}: FOR too low for outages (FOR={FOR:.2%}, expected={expected_outage_hours:.1f}h)"
+                f"{gen}: Adjusted FOR too low for outages (FOR={FOR:.2%}, "
+                f"expected={expected_outage_hours:.1f}h, explicit={explicit_hours:.1f}h, "
+                f"adjusted={adjusted_outage_hours:.1f}h)"
             )
             continue
 
@@ -854,10 +957,17 @@ def generate_forced_outages_simplified(
 
             outage_events.append(event)
 
-        logger.debug(
-            f"{gen}: Generated {num_outages} forced outages "
-            f"(FOR={FOR:.2%}, MTTR={MTTR:.1f}h, CF={capacity_factor:.2f})"
-        )
+        if explicit_hours > 0:
+            logger.debug(
+                f"{gen}: Generated {num_outages} forced outages "
+                f"(FOR={FOR:.2%}, MTTR={MTTR:.1f}h, CF={capacity_factor:.2f}, "
+                f"explicit={explicit_hours:.1f}h deducted)"
+            )
+        else:
+            logger.debug(
+                f"{gen}: Generated {num_outages} forced outages "
+                f"(FOR={FOR:.2%}, MTTR={MTTR:.1f}h, CF={capacity_factor:.2f})"
+            )
 
     # Calculate statistics
     total_events = len(outage_events)
@@ -885,6 +995,7 @@ def schedule_maintenance_simplified(
     generator_filter: Callable[[str], bool] | None = None,
     min_spacing_days: int = 7,
     maintenance_window_days: int = 14,
+    existing_outage_events: list[OutageEvent] | None = None,
 ) -> list[OutageEvent]:
     """Schedule maintenance outages in low-demand periods using heuristic.
 
@@ -900,6 +1011,11 @@ def schedule_maintenance_simplified(
     3. Schedule maintenance in lowest-demand windows
     4. Enforce minimum spacing between maintenance events
     5. Try to schedule in contiguous blocks (realistic maintenance windows)
+
+    If existing_outage_events is provided, explicit outage hours are deducted
+    from the MR budget to avoid double-counting:
+    - Adjusted maintenance hours = (MR × total_hours) - explicit_hours
+    - Only schedules maintenance for remaining adjusted hours
 
     Limitations vs PLEXOS PASA:
     - Heuristic instead of optimization
@@ -923,6 +1039,10 @@ def schedule_maintenance_simplified(
         Minimum days between maintenance events for same generator
     maintenance_window_days : int, default 14
         Preferred duration of maintenance window (days)
+    existing_outage_events : list[OutageEvent], optional
+        List of existing explicit outage events. If provided, explicit outage
+        hours are deducted from MR budget to prevent double-counting.
+        Example: parse_explicit_outages_from_properties(csv_dir, network)
 
     Returns
     -------
@@ -943,8 +1063,26 @@ def schedule_maintenance_simplified(
     47
     >>> events[0].outage_type
     'maintenance'
+
+    >>> # Account for existing explicit outages to avoid double-counting
+    >>> explicit_events = parse_explicit_outages_from_properties(csv_dir, network)
+    >>> maint_events = schedule_maintenance_simplified(
+    ...     csv_dir=csv_dir,
+    ...     network=network,
+    ...     demand_profile=demand,
+    ...     existing_outage_events=explicit_events,  # Deducts explicit hours from MR budget
+    ... )
     """
     csv_dir = Path(csv_dir)
+
+    # Calculate explicit outage hours per generator (if provided)
+    explicit_hours_by_gen = _calculate_explicit_outage_hours(
+        existing_outage_events, network.snapshots
+    )
+    if explicit_hours_by_gen:
+        logger.info(
+            f"Accounting for {len(explicit_hours_by_gen)} generators with explicit outages"
+        )
 
     # Parse outage properties
     properties_df = parse_generator_outage_properties_csv(csv_dir, network)
@@ -1001,9 +1139,22 @@ def schedule_maintenance_simplified(
         # Calculate required maintenance hours
         required_hours = MR * total_hours
 
-        if required_hours < 1.0:
+        # Deduct explicit outage hours if provided
+        explicit_hours = explicit_hours_by_gen.get(str(gen), 0.0)
+        adjusted_required_hours = required_hours - explicit_hours
+
+        if adjusted_required_hours <= 0:
             logger.debug(
-                f"{gen}: MR too low for maintenance (MR={MR:.2%}, required={required_hours:.1f}h)"
+                f"{gen}: Explicit outages ({explicit_hours:.1f}h) already cover MR budget "
+                f"({required_hours:.1f}h), skipping maintenance scheduling"
+            )
+            continue
+
+        if adjusted_required_hours < 1.0:
+            logger.debug(
+                f"{gen}: Adjusted MR too low for maintenance (MR={MR:.2%}, "
+                f"required={required_hours:.1f}h, explicit={explicit_hours:.1f}h, "
+                f"adjusted={adjusted_required_hours:.1f}h)"
             )
             continue
 
@@ -1023,8 +1174,8 @@ def schedule_maintenance_simplified(
             # Full outage
             capacity_factor = 0.0
 
-        # Schedule maintenance in blocks
-        remaining_hours = required_hours
+        # Schedule maintenance in blocks (using adjusted hours)
+        remaining_hours = adjusted_required_hours
         scheduled_periods: list[
             tuple[pd.Timestamp, pd.Timestamp]
         ] = []  # Track scheduled dates to enforce spacing
@@ -1110,10 +1261,17 @@ def schedule_maintenance_simplified(
         total_scheduled = sum(
             (end - start).total_seconds() / 3600 for start, end in scheduled_periods
         )
-        logger.debug(
-            f"{gen}: Total scheduled {total_scheduled:.1f}h / {required_hours:.1f}h required "
-            f"(MR={MR:.2%}, CF={capacity_factor:.2f})"
-        )
+        if explicit_hours > 0:
+            logger.debug(
+                f"{gen}: Total scheduled {total_scheduled:.1f}h / {adjusted_required_hours:.1f}h adjusted "
+                f"(MR={MR:.2%}, original={required_hours:.1f}h, explicit={explicit_hours:.1f}h deducted, "
+                f"CF={capacity_factor:.2f})"
+            )
+        else:
+            logger.debug(
+                f"{gen}: Total scheduled {total_scheduled:.1f}h / {required_hours:.1f}h required "
+                f"(MR={MR:.2%}, CF={capacity_factor:.2f})"
+            )
 
     # Calculate statistics
     total_events = len(outage_events)
@@ -1142,6 +1300,7 @@ def generate_stochastic_outages_csv(
     demand_profile: pd.Series | None = None,
     random_seed: int | None = None,
     generator_filter: Callable[[str], bool] | None = None,
+    existing_outage_events: list[OutageEvent] | None = None,
 ) -> list[OutageEvent]:
     """Generate both forced and maintenance outages from CSV properties.
 
@@ -1151,6 +1310,10 @@ def generate_stochastic_outages_csv(
 
     This is the recommended high-level function for generating stochastic
     outages from PLEXOS CSV properties.
+
+    If existing_outage_events is provided, explicit outage hours are deducted
+    from FOR/MR budgets to avoid double-counting. This is the recommended
+    workflow when combining explicit and stochastic outages.
 
     Parameters
     ----------
@@ -1171,6 +1334,11 @@ def generate_stochastic_outages_csv(
     generator_filter : callable, optional
         Function taking generator name and returning True to process.
         Applied to both forced and maintenance generation.
+    existing_outage_events : list[OutageEvent], optional
+        List of existing explicit outage events. If provided, explicit outage
+        hours are deducted from FOR/MR budgets to prevent double-counting.
+        Recommended workflow: parse explicit outages first, then generate
+        stochastic outages with this parameter.
 
     Returns
     -------
@@ -1195,6 +1363,18 @@ def generate_stochastic_outages_csv(
     >>> maint_count = sum(1 for e in events if e.outage_type == "maintenance")
     >>> print(f"Forced: {forced_count}, Maintenance: {maint_count}")
     Forced: 157, Maintenance: 47
+
+    >>> # Recommended workflow: account for explicit outages to avoid double-counting
+    >>> explicit_events = parse_explicit_outages_from_properties(csv_dir, network)
+    >>> stochastic_events = generate_stochastic_outages_csv(
+    ...     csv_dir=csv_dir,
+    ...     network=network,
+    ...     demand_profile=demand,
+    ...     random_seed=42,
+    ...     existing_outage_events=explicit_events,  # Deducts explicit hours from FOR/MR
+    ... )
+    >>> all_events = explicit_events + stochastic_events
+    >>> schedule = build_outage_schedule(all_events, network.snapshots)
     """
     csv_dir = Path(csv_dir)
 
@@ -1212,6 +1392,7 @@ def generate_stochastic_outages_csv(
             network=network,
             random_seed=random_seed,
             generator_filter=generator_filter,
+            existing_outage_events=existing_outage_events,
         )
         all_events.extend(forced_events)
         logger.info(f"✓ Generated {len(forced_events)} forced outage events\n")
@@ -1224,6 +1405,7 @@ def generate_stochastic_outages_csv(
             network=network,
             demand_profile=demand_profile,
             generator_filter=generator_filter,
+            existing_outage_events=existing_outage_events,
         )
         all_events.extend(maintenance_events)
         logger.info(f"✓ Scheduled {len(maintenance_events)} maintenance events\n")
