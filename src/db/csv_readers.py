@@ -905,6 +905,8 @@ def read_plexos_input_csv(
 
     if format_type == "periods_in_columns_ymd":
         return _parse_periods_in_columns_ymd(df, scenario)
+    elif format_type == "periods_in_columns_ymd_numeric":
+        return _parse_periods_in_columns_ymd_numeric(df, scenario)
     elif format_type == "periods_in_columns_datetime":
         return _parse_periods_in_columns_datetime(df, object_name, scenario)
     elif format_type == "names_in_columns":
@@ -930,6 +932,13 @@ def _detect_plexos_csv_format(df: pd.DataFrame) -> str:
     # Check for Year/Month/Day/Period format (SEM-style)
     if all(col in columns_lower for col in ["year", "month", "day", "period"]):
         return "periods_in_columns_ymd"
+
+    # Check for Year/Month/Day + numeric period columns (AEMO-style without Period column)
+    if all(col in columns_lower for col in ["year", "month", "day"]):
+        # Check if we have numeric columns (01, 02, ..., 24/48)
+        numeric_cols = [col for col in df.columns if str(col).strip().isdigit()]
+        if len(numeric_cols) in [24, 48]:
+            return "periods_in_columns_ymd_numeric"
 
     # Check for Datetime + numeric period columns (AEMO-style VRE profiles)
     if "datetime" in columns_lower:
@@ -997,6 +1006,57 @@ def _parse_periods_in_columns_ymd(
         result = df[["datetime"] + value_cols].copy()
 
     result.set_index("datetime", inplace=True)
+    return result
+
+
+def _parse_periods_in_columns_ymd_numeric(
+    df: pd.DataFrame, scenario: str | int | None = None
+) -> pd.DataFrame:
+    """Parse Periods in Columns format with Year/Month/Day + numeric period columns.
+
+    Used by AEMO trace files with Year, Month, Day + columns (01, 02, ..., 48).
+    Similar to _parse_periods_in_columns_ymd but without a Period column.
+    """
+    # Create base datetime from Year, Month, Day (start of day)
+    df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+
+    # Find numeric period columns (01, 02, 03, ..., 24/48)
+    numeric_cols = sorted(
+        [col for col in df.columns if str(col).strip().isdigit()], key=lambda x: int(x)
+    )
+
+    if not numeric_cols:
+        msg = "No numeric period columns found in Year/Month/Day format"
+        raise ValueError(msg)
+
+    # Determine resolution (hourly = 24 columns, half-hourly = 48 columns)
+    if len(numeric_cols) == 24:
+        resolution_minutes = 60
+    elif len(numeric_cols) == 48:
+        resolution_minutes = 30
+    else:
+        resolution_minutes = 60  # Default to hourly
+
+    # Melt the dataframe to long format
+    df_long = df.melt(
+        id_vars=["datetime"],
+        value_vars=numeric_cols,
+        var_name="period",
+        value_name="value",
+    )
+
+    # Convert period number to timedelta (period 1 = 00:00-00:30 or 00:00-01:00)
+    df_long["period"] = pd.to_timedelta(
+        (df_long["period"].astype(int) - 1) * resolution_minutes, unit="min"
+    )
+
+    # Add period offset to datetime
+    df_long["datetime"] = df_long["datetime"] + df_long["period"]
+
+    # Select and rename columns
+    result = df_long[["datetime", "value"]].copy()
+    result.set_index("datetime", inplace=True)
+
     return result
 
 
