@@ -1209,14 +1209,12 @@ def _discover_datafile_mappings(csv_dir: str | Path) -> dict[str, str]:
         filename_text = row.get("Filename(text)")
 
         if obj_name and filename_text and pd.notna(filename_text):
-            # Extract just the filename from path like "CSV Files\NI Wind_5base years - 2018-2033.csv"
-            # Handle both Windows backslash and Unix forward slash
-            if "\\" in str(filename_text):
-                filename = str(filename_text).split("\\")[-1]
-            elif "/" in str(filename_text):
-                filename = str(filename_text).split("/")[-1]
-            else:
-                filename = str(filename_text)
+            # Keep the relative path from Filename(text) column
+            # Examples:
+            # - "CSV Files\NI Wind_5base years - 2018-2033.csv" (SEM - just filename)
+            # - "Traces\solar\Adelaide_Desal_FFP_RefYear4006.csv" (AEMO - preserve subdirectory)
+            # Convert backslashes to forward slashes for cross-platform compatibility
+            filename = str(filename_text).replace("\\", "/")
 
             profile_mapping[obj_name] = filename
 
