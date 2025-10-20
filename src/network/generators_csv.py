@@ -130,6 +130,109 @@ def parse_generator_ratings_csv(
     return p_max_pu_timeseries
 
 
+def parse_generator_min_stable_levels_csv(
+    csv_dir: str | Path, network: Network, timeslice_csv: str | None = None
+) -> pd.DataFrame:
+    """Parse generator minimum stable levels from COAD CSV exports and return DataFrame with p_min_pu time series.
+
+    This is the CSV-based version of parse_generator_min_stable_levels() from generators.py.
+
+    Applies minimum generation constraints according to these rules:
+    - If "Min Stable Factor" is present (percentage), use it as p_min_pu (Min Stable Factor / 100)
+    - If "Min Stable Level" is present (MW), use it as p_min_pu (Min Stable Level / p_nom)
+    - If "Min Pump Load" is present (for storage), use it as p_min_pu (Min Pump Load / p_nom)
+    - If none present, fallback to p_min_pu = 0.0 (no minimum constraint)
+
+    Time-dependent handling:
+    - "date_from" Only: Value is effective from this date onward, until superseded.
+    - "date_to" Only: Value applies up to and including this date.
+    - Both: Value applies within the defined date range.
+    - If timeslice exists, use the timeslice timeseries file to determine when property is active.
+
+    Parameters
+    ----------
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    network : Network
+        PyPSA network with generators already added
+    timeslice_csv : str, optional
+        Path to the timeslice activity CSV file
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with index=network.snapshots, columns=generator names, values=p_min_pu
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> # ... add generators to network ...
+    >>> csv_dir = "models/sem-2024/SEM Forecast model/"
+    >>> min_levels = parse_generator_min_stable_levels_csv(csv_dir, network, "timeslice.csv")
+    >>> network.generators_t.p_min_pu = min_levels
+    """
+    snapshots = network.snapshots
+
+    # Load timeslice activity if provided
+    timeslice_activity = None
+    if timeslice_csv is not None:
+        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshots)
+
+    # Load static generator properties
+    generator_df = load_static_properties(csv_dir, "Generator")
+
+    # Only keep generators that are in the network
+    generator_df = generator_df[generator_df.index.isin(network.generators.index)]
+
+    if generator_df.empty:
+        logger.warning("No generators found in CSV that match network generators")
+        return pd.DataFrame(
+            index=snapshots, columns=network.generators.index, dtype=float
+        )
+
+    # Load time-varying properties for Min Stable properties
+    time_varying = load_time_varying_properties(csv_dir)
+
+    if time_varying.empty:
+        logger.info(
+            "No time-varying properties CSV found. Using static properties only (defaulting to p_min_pu=0.0)."
+        )
+        # Build simple p_min_pu from static properties (all zeros)
+        gen_series = {}
+        for gen in generator_df.index:
+            if gen in network.generators.index:
+                gen_series[gen] = pd.Series(0.0, index=snapshots, dtype=float)
+        result = pd.DataFrame(gen_series, index=snapshots)
+        return result
+
+    # Filter to Generator class and relevant properties
+    gen_time_varying = time_varying[
+        (time_varying["class"] == "Generator")
+        & (
+            time_varying["property"].isin(
+                ["Min Stable Level", "Min Stable Factor", "Min Pump Load"]
+            )
+        )
+    ].copy()
+
+    # Build data_id to timeslice mapping
+    dataid_to_timeslice = {}
+    if timeslice_csv is not None:
+        dataid_to_timeslice = get_dataid_timeslice_map_csv(gen_time_varying)
+
+    # Build p_min_pu time series for each generator
+    p_min_pu_timeseries = _build_generator_p_min_pu_timeseries_csv(
+        gen_time_varying=gen_time_varying,
+        generator_df=generator_df,
+        network=network,
+        snapshots=snapshots,
+        timeslice_activity=timeslice_activity,
+        dataid_to_timeslice=dataid_to_timeslice,
+    )
+
+    return p_min_pu_timeseries
+
+
 def _build_static_ratings(generator_df: pd.DataFrame, network: Network) -> pd.DataFrame:
     """Build p_max_pu DataFrame from static properties when no time-varying data available.
 
@@ -291,6 +394,196 @@ def _build_generator_p_max_pu_timeseries_csv(
 
         # Where neither is present, fallback to 1.0
         ts = ts.fillna(1.0)
+        gen_series[gen] = ts
+
+    # Concatenate all generator Series into a single DataFrame
+    if gen_series:
+        result = pd.DataFrame(gen_series, index=snapshots)
+    else:
+        result = pd.DataFrame(index=snapshots)
+
+    return result
+
+
+def _build_generator_p_min_pu_timeseries_csv(
+    gen_time_varying: pd.DataFrame,
+    generator_df: pd.DataFrame,
+    network: Network,
+    snapshots: pd.DatetimeIndex,
+    timeslice_activity: pd.DataFrame | None = None,
+    dataid_to_timeslice: dict | None = None,
+) -> pd.DataFrame:
+    """Build p_min_pu time series for each generator using time-varying CSV data.
+
+    Parameters
+    ----------
+    gen_time_varying : pd.DataFrame
+        Time-varying properties filtered to Generator class
+    generator_df : pd.DataFrame
+        Static generator properties
+    network : Network
+        PyPSA network
+    snapshots : pd.DatetimeIndex
+        Model time snapshots
+    timeslice_activity : pd.DataFrame, optional
+        Timeslice activity matrix
+    dataid_to_timeslice : dict, optional
+        Mapping from data_id to timeslice names
+
+    Returns
+    -------
+    pd.DataFrame
+        p_min_pu time series with index=snapshots, columns=generator names
+    """
+    gen_series = {}
+
+    for gen in generator_df.index:
+        if gen not in network.generators.index:
+            continue
+
+        # Get properties for this generator from time-varying data
+        gen_props = gen_time_varying[gen_time_varying["object"] == gen].copy()
+
+        # Build property entries
+        property_entries = []
+        for _, p in gen_props.iterrows():
+            entry = {
+                "property": p["property"],
+                "value": float(p["value"]),
+                "from": ensure_datetime(p["date_from"]),
+                "to": ensure_datetime(p["date_to"]),
+                "data_id": int(p["data_id"]) if pd.notnull(p["data_id"]) else None,
+            }
+            property_entries.append(entry)
+
+        if property_entries:
+            prop_df_entries = pd.DataFrame(property_entries)
+        else:
+            # No time-varying properties - create empty DataFrame
+            # Will check static CSV properties as fallback
+            prop_df_entries = pd.DataFrame(
+                columns=["property", "value", "from", "to", "data_id"]
+            )
+
+        # Helper to build a time series for a property
+        def build_ts(
+            prop_name: str, entries: pd.DataFrame, fallback: float | None = None
+        ) -> pd.Series:
+            ts = pd.Series(index=snapshots, dtype=float)
+            prop_rows = entries[entries["property"] == prop_name].copy()
+
+            if prop_rows.empty:
+                if fallback is not None:
+                    ts[:] = fallback
+                return ts
+
+            # Sort by from date (NaT values first)
+            prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
+            prop_rows = prop_rows.sort_values("from_sort", na_position="first")
+
+            # Track which snapshots have been set
+            already_set = pd.Series(False, index=snapshots)
+
+            # Time-specific entries first (these take precedence)
+            for _, row in prop_rows.iterrows():
+                is_time_specific = (
+                    pd.notnull(row.get("from"))
+                    or pd.notnull(row.get("to"))
+                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                )
+
+                if is_time_specific:
+                    mask = get_property_active_mask(
+                        row, snapshots, timeslice_activity, dataid_to_timeslice
+                    )
+                    # Only override where not already set, or where overlapping
+                    to_set = mask & (~already_set | mask)
+                    ts.loc[to_set] = row["value"]
+                    already_set |= mask
+
+            # Non-time-specific entries fill remaining unset values
+            for _, row in prop_rows.iterrows():
+                is_time_specific = (
+                    pd.notnull(row.get("from"))
+                    or pd.notnull(row.get("to"))
+                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                )
+
+                if not is_time_specific:
+                    ts.loc[ts.isnull()] = row["value"]
+
+            if fallback is not None:
+                ts = ts.fillna(fallback)
+
+            return ts
+
+        # Get Max Capacity for this generator (from static or time-varying)
+        maxcap = None
+        maxcap_entries = prop_df_entries[prop_df_entries["property"] == "Max Capacity"]
+        if not maxcap_entries.empty:
+            maxcap = maxcap_entries.iloc[0]["value"]
+        else:
+            # Try static CSV
+            maxcap = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+
+        # Build time series for Min Stable properties
+        min_stable_level_ts = build_ts("Min Stable Level", prop_df_entries)
+        min_stable_factor_ts = build_ts("Min Stable Factor", prop_df_entries)
+        min_pump_load_ts = build_ts("Min Pump Load", prop_df_entries)
+
+        # If no time-varying data, try static CSV as fallback
+        if min_stable_level_ts.isnull().all():
+            static_min_level = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Level"
+            )
+            if static_min_level is not None:
+                parsed_val = parse_numeric_value(static_min_level, use_first=True)
+                if parsed_val is not None:
+                    min_stable_level_ts = pd.Series(parsed_val, index=snapshots)
+
+        if min_stable_factor_ts.isnull().all():
+            static_min_factor = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Factor"
+            )
+            if static_min_factor is not None:
+                parsed_val = parse_numeric_value(static_min_factor, use_first=True)
+                if parsed_val is not None:
+                    min_stable_factor_ts = pd.Series(parsed_val, index=snapshots)
+
+        if min_pump_load_ts.isnull().all():
+            static_pump_load = get_property_from_static_csv(
+                generator_df, gen, "Min Pump Load"
+            )
+            if static_pump_load is not None:
+                parsed_val = parse_numeric_value(static_pump_load, use_first=True)
+                if parsed_val is not None:
+                    min_pump_load_ts = pd.Series(parsed_val, index=snapshots)
+
+        # Get p_nom for scaling Min Stable Level and Min Pump Load
+        p_nom = None
+        if gen in network.generators.index and "p_nom" in network.generators.columns:
+            p_nom = network.generators.loc[gen, "p_nom"]
+        if p_nom is None or (isinstance(p_nom, float) and np.isnan(p_nom)):
+            p_nom = maxcap
+
+        # Build final p_min_pu time series
+        ts = pd.Series(index=snapshots, dtype=float)
+
+        if p_nom:
+            # Priority 1: Use Min Stable Factor if present (convert from percentage)
+            mask_factor = min_stable_factor_ts.notnull()
+            ts[mask_factor] = min_stable_factor_ts[mask_factor] / 100.0
+
+            # Priority 2: Use Min Stable Level if Min Stable Factor not present
+            mask_level = ts.isnull() & min_stable_level_ts.notnull()
+            ts[mask_level] = min_stable_level_ts[mask_level] / p_nom
+
+            # Priority 3: Use Min Pump Load if neither above is present
+            mask_pump = ts.isnull() & min_pump_load_ts.notnull()
+            ts[mask_pump] = min_pump_load_ts[mask_pump] / p_nom
+
+        # Where none is present, fallback to 0.0
+        ts = ts.fillna(0.0)
         gen_series[gen] = ts
 
     # Concatenate all generator Series into a single DataFrame
@@ -540,6 +833,96 @@ def set_capacity_ratings_csv(
     # Warn about missing generators
     for gen in missing_gens:
         print(f"Warning: Generator {gen} not found in ratings DataFrame.")
+
+
+def set_min_stable_levels_csv(
+    network: Network, csv_dir: str | Path, timeslice_csv: str | None = None
+):
+    """Set the minimum stable levels (p_min_pu) for generators using COAD CSV exports.
+
+    This is the CSV-based version of set_min_stable_levels() from generators.py.
+
+    This function retrieves minimum generation constraints from the CSV exports
+    (Min Stable Level, Min Stable Factor, Min Pump Load) and sets the `p_min_pu`
+    time series for generators.
+
+    This ensures thermal generators with minimum load constraints (e.g., 60% min load)
+    have those constraints properly represented in PyPSA, which is critical for:
+    - Realistic unit commitment modeling
+    - Proper handling of generator outages (outages scale both p_max_pu and p_min_pu)
+    - Avoiding infeasibility when generators cannot be fully turned off
+
+    Parameters
+    ----------
+    network : Network
+        The PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    timeslice_csv : str, optional
+        Path to the timeslice CSV file
+
+    Examples
+    --------
+    >>> network = pypsa.Network()
+    >>> # ... add generators ...
+    >>> csv_dir = "models/sem-2024/SEM Forecast model/"
+    >>> set_min_stable_levels_csv(network, csv_dir, "timeslice.csv")
+
+    Notes
+    -----
+    Property precedence (first match wins):
+    1. Min Stable Factor (percentage) → p_min_pu = value / 100
+    2. Min Stable Level (MW) → p_min_pu = value / p_nom
+    3. Min Pump Load (MW, for storage) → p_min_pu = value / p_nom
+    4. Fallback: p_min_pu = 0.0 (no minimum constraint)
+    """
+    # Get the generator minimum stable levels from CSV
+    generator_min_levels = parse_generator_min_stable_levels_csv(
+        csv_dir, network, timeslice_csv
+    )
+
+    if generator_min_levels.empty:
+        print(
+            "No minimum stable levels found. All generators can operate down to 0 MW."
+        )
+        return
+
+    # Only keep generators present in both network and generator_min_levels
+    valid_gens = [
+        gen for gen in network.generators.index if gen in generator_min_levels.columns
+    ]
+    missing_gens = [
+        gen
+        for gen in network.generators.index
+        if gen not in generator_min_levels.columns
+    ]
+
+    # Assign all columns at once to avoid fragmentation
+    if valid_gens:
+        network.generators_t.p_min_pu.loc[:, valid_gens] = generator_min_levels[
+            valid_gens
+        ].copy()
+
+    # Report statistics
+    nonzero_gens = [gen for gen in valid_gens if (generator_min_levels[gen] > 0).any()]
+
+    print(
+        f"Set p_min_pu for {len(valid_gens)} generators ({len(nonzero_gens)} with nonzero minimum)"
+    )
+
+    # Debug: Show some examples
+    if nonzero_gens:
+        sample_gens = nonzero_gens[:3]
+        print("  Sample generators with minimum load constraints:")
+        for gen in sample_gens:
+            min_val = generator_min_levels[gen].min()
+            max_val = generator_min_levels[gen].max()
+            print(f"    - {gen}: p_min_pu range [{min_val:.3f}, {max_val:.3f}]")
+
+    # Warn about missing generators (optional - usually expected for VRE)
+    if missing_gens and len(missing_gens) < 10:
+        for gen in missing_gens:
+            logger.debug(f"Generator {gen} not found in min stable levels DataFrame.")
 
 
 def set_generator_efficiencies_csv(
@@ -1684,6 +2067,10 @@ def port_generators_csv(
     # Step 2: Set capacity ratings (p_max_pu)
     print("2. Setting capacity ratings...")
     set_capacity_ratings_csv(network, csv_dir, timeslice_csv=timeslice_csv)
+
+    # Step 2b: Set minimum stable levels (p_min_pu)
+    print("2b. Setting minimum stable levels (p_min_pu)...")
+    set_min_stable_levels_csv(network, csv_dir, timeslice_csv=timeslice_csv)
 
     # Step 3: Set generator efficiencies
     print("3. Setting generator efficiencies...")
