@@ -459,9 +459,11 @@ def _build_generator_p_min_pu_timeseries_csv(
         if property_entries:
             prop_df_entries = pd.DataFrame(property_entries)
         else:
-            # No time-varying properties for this generator, use default
-            gen_series[gen] = pd.Series(0.0, index=snapshots, dtype=float)
-            continue
+            # No time-varying properties - create empty DataFrame
+            # Will check static CSV properties as fallback
+            prop_df_entries = pd.DataFrame(
+                columns=["property", "value", "from", "to", "data_id"]
+            )
 
         # Helper to build a time series for a property
         def build_ts(
