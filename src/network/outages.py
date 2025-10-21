@@ -1038,14 +1038,29 @@ def generate_forced_outages_simplified(
             max_start_hour = max(0, total_hours - MTTR)
             start_hour = rng.uniform(0, max_start_hour)
 
-            # Convert to timestamp
-            outage_start = start_time + pd.Timedelta(hours=start_hour)
+            # Convert to timestamp (use integer hours to avoid floating-point precision issues)
+            # For long time periods, use snapshot index sampling instead
+            if total_hours > 100000:  # For very long simulations
+                # Sample from snapshot indices instead
+                max_start_idx = max(
+                    0, len(snapshots) - int(MTTR * 2)
+                )  # *2 for safety margin
+                start_idx = int(rng.uniform(0, max_start_idx))
+                outage_start = snapshots[start_idx]
+            else:
+                # For shorter simulations, use timedelta
+                outage_start = start_time + pd.Timedelta(hours=start_hour)
 
             # Duration equals MTTR hours
             outage_end = outage_start + pd.Timedelta(hours=MTTR)
 
             # Ensure doesn't exceed simulation period
-            outage_end = min(outage_end, end_time)
+            if outage_end > end_time:
+                outage_end = end_time
+                # Skip if outage would be too short (< 10% of MTTR)
+                actual_duration = (outage_end - outage_start).total_seconds() / 3600
+                if actual_duration < MTTR * 0.1:
+                    continue
 
             # Create event
             event = OutageEvent(
