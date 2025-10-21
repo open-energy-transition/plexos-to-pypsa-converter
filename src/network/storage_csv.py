@@ -853,26 +853,46 @@ def port_batteries_csv(
             if max_charge_power is not None and max_charge_power > 0:
                 storage_unit_data["p_nom_max_charge"] = max_charge_power
 
-            # TEMPORARILY DISABLED: Additional property mappings
-            # These may be causing infeasibility constraints in AEMO model
-            # Testing if p_nom_min/p_nom_max constraints are the issue
+            # Additional property mappings for better model fidelity
 
-            # # Additional property mappings for better model fidelity
-            #
-            # # WACC / Discount rate
-            # wacc = get_property_value(battery_name, "WACC")
-            # if wacc is not None and wacc > 0:
-            #     storage_unit_data["discount_rate"] = wacc / 100 if wacc > 1 else wacc
-            #
-            # # Firm capacity (capacity credit for reliability)
-            # firm_cap = get_property_value(battery_name, "Firm Capacity")
-            # if firm_cap is not None and firm_cap > 0:
-            #     storage_unit_data["p_nom_min"] = firm_cap
-            #
-            # # Max Units Built (for expansion planning)
-            # max_units = get_property_value(battery_name, "Max Units Built")
-            # if max_units is not None and max_units > 0:
-            #     storage_unit_data["p_nom_max"] = max_power * max_units
+            # Capital cost (Build Cost in PLEXOS) - cost per MW of capacity
+            build_cost = get_property_value(battery_name, "Build Cost")
+            if build_cost is not None and build_cost > 0:
+                storage_unit_data["capital_cost"] = build_cost
+
+            # Fixed O&M cost (FO&M Charge) - treated as part of capital cost annuity
+            # Note: This should ideally be added to capital_cost as annualized value
+            # For now, we'll set it separately if capital_cost isn't already set
+            fom_charge = get_property_value(battery_name, "FO&M Charge")
+            if (
+                fom_charge is not None
+                and fom_charge > 0
+                and "capital_cost" not in storage_unit_data
+                and lifetime is not None
+                and lifetime > 0
+            ):
+                # Annualize FOM over lifetime
+                storage_unit_data["capital_cost"] = fom_charge * lifetime
+
+            # Variable O&M cost (VO&M Charge) - cost per MWh dispatched
+            vom_charge = get_property_value(battery_name, "VO&M Charge")
+            if vom_charge is not None and vom_charge > 0:
+                storage_unit_data["marginal_cost"] = vom_charge
+
+            # Firm capacity (capacity credit for reliability) - minimum capacity requirement
+            # This sets p_nom_min for expansion planning
+            firm_cap = get_property_value(battery_name, "Firm Capacity")
+            if firm_cap is not None and firm_cap > 0:
+                storage_unit_data["p_nom_min"] = firm_cap
+                # Enable expansion if firm capacity is specified
+                storage_unit_data["p_nom_extendable"] = True
+
+            # Max Units Built (for expansion planning) - maximum buildable capacity
+            max_units = get_property_value(battery_name, "Max Units Built")
+            if max_units is not None and max_units > 0:
+                storage_unit_data["p_nom_max"] = max_power * max_units
+                # Enable expansion if max units is specified
+                storage_unit_data["p_nom_extendable"] = True
 
             # Add to network
             network.add("StorageUnit", battery_name, **storage_unit_data)
