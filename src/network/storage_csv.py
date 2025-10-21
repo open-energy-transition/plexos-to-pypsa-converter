@@ -853,31 +853,11 @@ def port_batteries_csv(
             if max_charge_power is not None and max_charge_power > 0:
                 storage_unit_data["p_nom_max_charge"] = max_charge_power
 
-            # Additional property mappings for better model fidelity
-
-            # Capital cost (Build Cost in PLEXOS) - cost per MW of capacity
-            build_cost = get_property_value(battery_name, "Build Cost")
-            if build_cost is not None and build_cost > 0:
-                storage_unit_data["capital_cost"] = build_cost
-
-            # Fixed O&M cost (FO&M Charge) - treated as part of capital cost annuity
-            # Note: This should ideally be added to capital_cost as annualized value
-            # For now, we'll set it separately if capital_cost isn't already set
-            fom_charge = get_property_value(battery_name, "FO&M Charge")
-            if (
-                fom_charge is not None
-                and fom_charge > 0
-                and "capital_cost" not in storage_unit_data
-                and lifetime is not None
-                and lifetime > 0
-            ):
-                # Annualize FOM over lifetime
-                storage_unit_data["capital_cost"] = fom_charge * lifetime
-
-            # Variable O&M cost (VO&M Charge) - cost per MWh dispatched
-            vom_charge = get_property_value(battery_name, "VO&M Charge")
-            if vom_charge is not None and vom_charge > 0:
-                storage_unit_data["marginal_cost"] = vom_charge
+            # Expansion planning parameters
+            # Note: Cost parameters (capital_cost, marginal_cost) are set by
+            # costs_csv.py::set_battery_capital_costs_csv() and
+            # costs_csv.py::set_battery_marginal_costs_csv() with proper
+            # WACC-based annualization and unit conversion
 
             # Firm capacity (capacity credit for reliability) - minimum capacity requirement
             # This sets p_nom_min for expansion planning
