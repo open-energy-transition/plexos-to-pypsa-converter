@@ -10,6 +10,10 @@ from pypsa import Network
 from db.csv_readers import load_static_properties
 from network.carriers_csv import parse_fuel_prices_csv
 from network.core import add_loads_flexible, add_snapshots
+from network.costs_csv import (
+    set_battery_capital_costs_csv,
+    set_battery_marginal_costs_csv,
+)
 from network.generators_csv import port_generators_csv
 from network.links_csv import port_links_csv
 from network.storage_csv import add_storage_csv
@@ -233,6 +237,13 @@ def setup_network_csv(
         csv_dir=csv_dir,
         timeslice_csv=timeslice_csv,
     )
+
+    # 5b. Set battery costs
+    if len(network.storage_units) > 0:
+        logger.info("Setting battery costs...")
+
+        set_battery_capital_costs_csv(network, csv_dir)
+        set_battery_marginal_costs_csv(network, csv_dir)
 
     # 6. Add transmission links
     logger.info("Adding transmission links from CSV...")

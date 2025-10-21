@@ -15,6 +15,7 @@ from db.csv_readers import (
     find_bus_for_storage_via_generators_csv,
     get_property_from_static_csv,
     load_static_properties,
+    parse_numeric_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -707,13 +708,60 @@ def port_batteries_csv(
     added_count = 0
 
     def get_property_value(battery_name: str, property_name: str, default=None):
-        """Extract property value by name."""
+        """Extract property value with flexible column name matching.
+
+        Tries multiple column name patterns to handle variations across models:
+        - Exact match (e.g., "Max Power")
+        - .Variable suffix (SEM style: "Max Power.Variable")
+        - .Timeslice suffix (AEMO style: "Max Power.Timeslice") - extracts max value from array
+
+        For Max Power specifically:
+        1. Try static Max Power column
+        2. If array format, extract max value using parse_numeric_value(strategy="max")
+        3. If empty, try Max Power.Timeslice column (extracts max from timeslice array)
+        4. If still missing, return default (0 for Max Power per PLEXOS default)
+        """
+        # Try exact match first
         val = get_property_from_static_csv(battery_df, battery_name, property_name)
-        if val is not None:
+        if val is not None and val != "":
+            # Use parse_numeric_value to handle arrays intelligently
+            # For Max Power, use "max" strategy to get maximum capacity
+            if property_name == "Max Power":
+                parsed = parse_numeric_value(val, strategy="max")
+            else:
+                parsed = parse_numeric_value(val, strategy="first")
+
+            if parsed is not None:
+                return parsed
+            # If parse_numeric_value fails, try direct float conversion
             try:
                 return float(val)
             except (ValueError, TypeError):
-                return default
+                pass
+
+        # Try .Variable suffix (SEM style)
+        val = get_property_from_static_csv(
+            battery_df, battery_name, f"{property_name}.Variable"
+        )
+        if val is not None and val != "":
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                pass
+
+        # Try .Timeslice suffix (AEMO style) - extract max value from timeslice array
+        # For Max Power, this gives us the maximum power capacity across timeslices
+        timeslice_col = f"{property_name}.Timeslice"
+        val = get_property_from_static_csv(battery_df, battery_name, timeslice_col)
+        if val is not None and val != "":
+            # Use parse_numeric_value with "max" strategy to extract maximum from array
+            parsed = parse_numeric_value(val, strategy="max")
+            if parsed is not None:
+                logger.debug(
+                    f"Extracted {property_name}={parsed} from {timeslice_col} for {battery_name}"
+                )
+                return parsed
+
         return default
 
     for battery_name in battery_df.index:
@@ -746,18 +794,33 @@ def port_batteries_csv(
                 skipped_batteries.append(f"{battery_name} (no bus)")
                 continue
 
-            # Extract Max Power (required)
-            max_power = get_property_value(battery_name, "Max Power.Variable")
-            if max_power is None or max_power <= 0:
-                logger.warning(
-                    f"No valid 'Max Power.Variable' for battery {battery_name}"
-                )
-                skipped_batteries.append(f"{battery_name} (no Max Power)")
-                continue
+            # Extract Max Power - tries Max Power, Max Power.Variable, Max Power.Timeslice
+            # Default to 0 if not found (PLEXOS default value)
+            max_power = get_property_value(battery_name, "Max Power", default=0)
 
-            # Extract volume properties - try Capacity.Variable first, then fallback options
+            # If still zero after all attempts, log warning but continue processing
+            # Battery might have Capacity that we can use
+            if max_power is None or max_power == 0:
+                logger.debug(
+                    f"Battery {battery_name} has no Max Power, will derive from Capacity if available"
+                )
+
+            # Check if Max Power seems to be per-unit value (AEMO pattern)
+            # Skip these batteries until Units multiplication is properly implemented
+            if max_power <= 1.0:
+                units = get_property_value(battery_name, "Units")
+                if units is not None and units > 1:
+                    logger.warning(
+                        f"Skipping battery {battery_name}: Max Power={max_power} appears to be per-unit "
+                        f"(Units={units}). Total capacity would be {max_power * units} MW. "
+                        "Needs Units multiplication support."
+                    )
+                    skipped_batteries.append(f"{battery_name} (per-unit Max Power)")
+                    continue
+
+            # Extract volume properties - flexible column name matching for each
             max_volume = (
-                get_property_value(battery_name, "Capacity.Variable")
+                get_property_value(battery_name, "Capacity")
                 or get_property_value(battery_name, "Max Volume")
                 or get_property_value(battery_name, "Max SoC")
             )
@@ -767,6 +830,24 @@ def port_batteries_csv(
             min_volume = get_property_value(
                 battery_name, "Min Volume"
             ) or get_property_value(battery_name, "Min SoC", 0.0)
+
+            # Derive max_power from max_volume if max_power is 0
+            # Assume default 4 hours duration for energy storage
+            if max_power == 0 and max_volume is not None and max_volume > 0:
+                default_hours = 4.0
+                max_power = max_volume / default_hours
+                logger.info(
+                    f"Derived Max Power={max_power:.2f} MW for {battery_name} "
+                    f"from Capacity={max_volume:.2f} MWh (assuming {default_hours}h duration)"
+                )
+
+            # If still no max_power, skip this battery
+            if max_power == 0:
+                logger.warning(
+                    f"Skipping battery {battery_name}: No Max Power and no Capacity to derive from"
+                )
+                skipped_batteries.append(f"{battery_name} (no Max Power or Capacity)")
+                continue
 
             # Calculate max_hours
             if max_volume is not None and max_volume > 0:
@@ -796,8 +877,8 @@ def port_batteries_csv(
             if lifetime is None:
                 lifetime = get_property_value(battery_name, "Economic Life")
 
-            # Extract max charge power (optional)
-            max_charge_power = get_property_value(battery_name, "Max Load.Variable")
+            # Extract max charge power (optional) - tries Max Load, Max Load.Variable
+            max_charge_power = get_property_value(battery_name, "Max Load")
 
             # Create storage unit entry
             storage_unit_data = {
@@ -816,6 +897,27 @@ def port_batteries_csv(
 
             if max_charge_power is not None and max_charge_power > 0:
                 storage_unit_data["p_nom_max_charge"] = max_charge_power
+
+            # TEMPORARILY DISABLED: Additional property mappings
+            # These may be causing infeasibility constraints in AEMO model
+            # Testing if p_nom_min/p_nom_max constraints are the issue
+
+            # # Additional property mappings for better model fidelity
+            #
+            # # WACC / Discount rate
+            # wacc = get_property_value(battery_name, "WACC")
+            # if wacc is not None and wacc > 0:
+            #     storage_unit_data["discount_rate"] = wacc / 100 if wacc > 1 else wacc
+            #
+            # # Firm capacity (capacity credit for reliability)
+            # firm_cap = get_property_value(battery_name, "Firm Capacity")
+            # if firm_cap is not None and firm_cap > 0:
+            #     storage_unit_data["p_nom_min"] = firm_cap
+            #
+            # # Max Units Built (for expansion planning)
+            # max_units = get_property_value(battery_name, "Max Units Built")
+            # if max_units is not None and max_units > 0:
+            #     storage_unit_data["p_nom_max"] = max_power * max_units
 
             # Add to network
             network.add("StorageUnit", battery_name, **storage_unit_data)
