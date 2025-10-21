@@ -259,104 +259,14 @@ def add_storage_csv(
     csv_dir = Path(csv_dir)
 
     # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
-    logger.info("Processing PLEXOS Storage class objects from CSV...")
-
-    storage_df = load_static_properties(csv_dir, "Storage")
-
-    if storage_df.empty:
-        logger.info("No Storage.csv found or no storage units in CSV")
-        storage_units = []
-    else:
-        storage_units = list(storage_df.index)
-        logger.info(f"Found {len(storage_units)} PLEXOS storage units in CSV")
-
-        # Get unique categories for carriers
-        storage_categories = {}
-        unique_storage_carriers = set()
-
-        for storage_name in storage_units:
-            category = get_property_from_static_csv(
-                storage_df, storage_name, "Category"
-            )
-            carrier = str(category) if category else "hydro"
-            storage_categories[storage_name] = carrier
-            unique_storage_carriers.add(carrier)
-
-        logger.info(f"Storage carriers found: {sorted(unique_storage_carriers)}")
-
-        # Ensure all storage carriers exist in network
-        for carrier in unique_storage_carriers:
-            if carrier not in network.carriers.index:
-                network.add("Carrier", name=carrier)
-                logger.info(f"Added storage carrier: {carrier}")
-
-        # Detect pumped hydro pairs
-        storage_pairs = detect_pumped_hydro_pairs_csv(storage_df)
-        logger.info(
-            f"Detected storage configuration: "
-            f"{len([p for p in storage_pairs.values() if p['type'] == 'pumped_hydro_pair'])} pumped hydro pairs, "
-            f"{len([p for p in storage_pairs.values() if p['type'] == 'standalone_storage'])} standalone units"
-        )
-
-        added_storage_units = 0
-        skipped_storage_units = []
-
-        # Process each storage configuration
-        for config_name, config in storage_pairs.items():
-            try:
-                if config["type"] == "pumped_hydro_pair":
-                    # Handle pumped hydro HEAD/TAIL pair
-                    head_carrier = storage_categories.get(
-                        config["head"], "pumped_hydro"
-                    )
-                    tail_carrier = storage_categories.get(
-                        config["tail"], "pumped_hydro"
-                    )
-                    success = port_pumped_hydro_pair_csv(
-                        network,
-                        csv_dir,
-                        config["head"],
-                        config["tail"],
-                        head_carrier,
-                        tail_carrier,
-                    )
-                    if success:
-                        added_storage_units += 1
-                        logger.info(
-                            f"Added pumped hydro pair: {config['head']} + {config['tail']}"
-                        )
-                    else:
-                        skipped_storage_units.extend([config["head"], config["tail"]])
-
-                elif config["type"] == "standalone_storage":
-                    # Handle standalone storage unit
-                    storage_carrier = storage_categories.get(config_name, "hydro")
-                    success = port_standalone_storage_csv(
-                        network, csv_dir, config_name, storage_carrier
-                    )
-                    if success:
-                        added_storage_units += 1
-                        logger.info(f"Added standalone storage: {config_name}")
-                    else:
-                        skipped_storage_units.append(config_name)
-
-            except Exception:
-                logger.exception(
-                    f"Error processing storage configuration {config_name}"
-                )
-                if config["type"] == "pumped_hydro_pair":
-                    skipped_storage_units.extend([config["head"], config["tail"]])
-                else:
-                    skipped_storage_units.append(config_name)
-
-        logger.info(
-            f"Successfully added {added_storage_units} PLEXOS Storage configurations"
-        )
-        if skipped_storage_units:
-            logger.warning(
-                f"Skipped {len(skipped_storage_units)} PLEXOS Storage units: "
-                f"{skipped_storage_units[:10]}{'...' if len(skipped_storage_units) > 10 else ''}"
-            )
+    # TEMPORARILY DISABLED: Pumped hydro storage porting
+    # These are complex hydro storage systems from Storage.csv that need careful modeling
+    # with HEAD/TAIL pairs, natural inflows, volume tracking, etc.
+    # For now, skip them to avoid infeasibility issues and focus on batteries only.
+    logger.info(
+        "Skipping PLEXOS Storage class objects (pumped hydro) - focusing on Battery class only"
+    )
+    storage_units = []
 
     # ===== PROCESS PLEXOS BATTERY CLASS OBJECTS =====
     logger.info("Processing PLEXOS Battery class objects from CSV...")
@@ -477,7 +387,18 @@ def port_standalone_storage_csv(
 
         # Calculate state of charge parameters
         if max_energy > 0:
-            state_of_charge_initial = initial_energy / max_energy
+            raw_soc = initial_energy / max_energy
+            state_of_charge_initial = min(1.0, max(0.0, raw_soc))
+            if raw_soc > 1.0:
+                logger.warning(
+                    f"Storage {storage_name}: Initial volume ({initial_energy:.1f}) exceeds max volume ({max_energy:.1f}), "
+                    f"clamping state_of_charge_initial from {raw_soc:.2f} to 1.0"
+                )
+            elif raw_soc < 0.0:
+                logger.warning(
+                    f"Storage {storage_name}: Initial volume is negative ({initial_energy:.1f}), "
+                    f"clamping state_of_charge_initial to 0.0"
+                )
         else:
             state_of_charge_initial = 0.5
 
@@ -612,8 +533,22 @@ def port_pumped_hydro_pair_csv(
         p_nom = max_energy / default_hours if max_energy > 0 else 200.0
         max_hours = max_energy / p_nom if p_nom > 0 else default_hours
 
-        # Initial state of charge
-        state_of_charge_initial = initial_energy / max_energy if max_energy > 0 else 0.5
+        # Initial state of charge (clamp to [0, 1] range to avoid infeasibility)
+        if max_energy > 0:
+            raw_soc = initial_energy / max_energy
+            state_of_charge_initial = min(1.0, max(0.0, raw_soc))
+            if raw_soc > 1.0:
+                logger.warning(
+                    f"Pumped hydro {head_name}/{tail_name}: Initial volume ({initial_energy:.1f}) exceeds max volume ({max_energy:.1f}), "
+                    f"clamping state_of_charge_initial from {raw_soc:.2f} to 1.0"
+                )
+            elif raw_soc < 0.0:
+                logger.warning(
+                    f"Pumped hydro {head_name}/{tail_name}: Initial volume is negative ({initial_energy:.1f}), "
+                    f"clamping state_of_charge_initial to 0.0"
+                )
+        else:
+            state_of_charge_initial = 0.5
 
         # Pumped hydro efficiency
         efficiency = 0.85
@@ -824,12 +759,32 @@ def port_batteries_csv(
                 or get_property_value(battery_name, "Max Volume")
                 or get_property_value(battery_name, "Max SoC")
             )
-            initial_volume = get_property_value(
+
+            # Initial SoC can be:
+            # - "Initial Volume" (absolute MWh)
+            # - "Initial SoC" (percentage 0-100)
+            # If it's a percentage (>1), convert to fraction
+            initial_volume_raw = get_property_value(
                 battery_name, "Initial Volume"
             ) or get_property_value(battery_name, "Initial SoC", 0.0)
-            min_volume = get_property_value(
+
+            # Convert percentage to fraction if needed
+            if initial_volume_raw and initial_volume_raw > 1.0:
+                # Likely a percentage (e.g., 50 = 50%), convert to fraction
+                initial_volume = initial_volume_raw / 100.0
+            else:
+                initial_volume = initial_volume_raw if initial_volume_raw else 0.0
+
+            # Min SoC is typically a percentage
+            min_volume_raw = get_property_value(
                 battery_name, "Min Volume"
             ) or get_property_value(battery_name, "Min SoC", 0.0)
+
+            if min_volume_raw and min_volume_raw > 1.0:
+                # Percentage to fraction
+                min_volume = min_volume_raw / 100.0
+            else:
+                min_volume = min_volume_raw if min_volume_raw else 0.0
 
             # Derive max_power from max_volume if max_power is 0
             # Assume default 4 hours duration for energy storage
