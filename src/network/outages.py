@@ -46,26 +46,66 @@ def _raise_invalid_apply_mode(mode: str) -> None:
 
 
 def _calculate_capacity_factor(
-    p_nom: float | None, outage_rating: float | None
+    p_nom: float | None,
+    outage_rating: float | None,
+    outage_factor: float | None = None,
 ) -> float:
-    """Calculate capacity factor during outage based on outage rating.
+    """Calculate capacity factor during outage.
+
+    PLEXOS Priority:
+    1. Outage Factor (if provided) - overrides Outage Rating
+    2. Outage Rating (absolute MW unavailable)
+    3. Default: Full outage (CF=0.0)
 
     Parameters
     ----------
     p_nom : float | None
-        Nominal generator capacity (MW)
+        Nominal generator capacity (MW) from network.generators
     outage_rating : float | None
         Capacity unavailable during outage (MW)
+    outage_factor : float | None
+        Proportion of capacity available during outage (0-1)
+        In PLEXOS: Outage Factor = % of capacity that remains AVAILABLE
+        Example: 0.9 (90%) means 90% available, 10% unavailable
+        Note: Outage Factor overrides Outage Rating if both defined
 
     Returns
     -------
     float
         Capacity factor during outage (0.0 = full outage, 1.0 = fully available)
+
+    Examples
+    --------
+    >>> # Full outage with Outage Factor
+    >>> _calculate_capacity_factor(100, None, 0.0)
+    0.0
+
+    >>> # Partial outage: 33.7% available during outage
+    >>> _calculate_capacity_factor(100, None, 0.337)
+    0.337
+
+    >>> # Outage Rating: 10 MW unavailable from 100 MW
+    >>> _calculate_capacity_factor(100, 10, None)
+    0.9
+
+    >>> # Outage Factor takes precedence over Outage Rating
+    >>> _calculate_capacity_factor(100, 50, 0.8)
+    0.8
     """
+    # Priority 1: Outage Factor (if provided)
+    # In PLEXOS: Outage Factor is the proportion AVAILABLE during outage
+    if outage_factor is not None:
+        # Clamp to valid range [0, 1]
+        return max(0.0, min(1.0, outage_factor))
+
+    # Priority 2: Outage Rating (absolute MW unavailable)
     if outage_rating is not None and p_nom is not None and p_nom > 0:
-        # Partial outage: CF = (p_nom - outage_rating) / p_nom
+        # Calculate available capacity
+        # Outage Rating = capacity unavailable
+        # So available = (p_nom - outage_rating) / p_nom
         return max(0.0, (p_nom - outage_rating) / p_nom)
-    # Full outage
+
+    # Default: Full outage
     return 0.0
 
 
@@ -760,8 +800,14 @@ def parse_generator_outage_properties_csv(
 ) -> pd.DataFrame:
     """Extract outage-related properties from Generator.csv.
 
-    Parses Forced Outage Rate, Maintenance Rate, Mean Time to Repair, and
-    Outage Rating properties for all generators in the network.
+    Parses Forced Outage Rate, Maintenance Rate, Mean Time to Repair,
+    Outage Rating, and Outage Factor properties for all generators in the network.
+
+    Outage Factor Priority:
+    - If Outage Factor is present, it overrides Outage Rating (PLEXOS behavior)
+    - Outage Factor represents the proportion of capacity AVAILABLE during outage
+    - For time-series Outage Factor values, uses MIN for conservative outages
+    - Example: Outage Factor=0.337 means 33.7% available, 66.3% unavailable
 
     Parameters
     ----------
@@ -774,8 +820,8 @@ def parse_generator_outage_properties_csv(
     -------
     pd.DataFrame
         DataFrame with columns: [generator, forced_outage_rate, maintenance_rate,
-        mean_time_to_repair, outage_rating]. Indexed by generator name.
-        Rates are converted from percentages to fractions (10.9 → 0.109).
+        mean_time_to_repair, outage_rating, outage_factor]. Indexed by generator name.
+        Rates and factors are converted from percentages to fractions (10.9 → 0.109).
 
     Examples
     --------
@@ -784,6 +830,7 @@ def parse_generator_outage_properties_csv(
     ...     network=network,
     ... )
     >>> props.loc["AA1", "forced_outage_rate"]  # Returns 0.109 (10.9%)
+    >>> props.loc["AGLHAL01", "outage_factor"]  # Returns 0.337 (33.7% available during outage)
     """
     csv_dir = Path(csv_dir)
 
@@ -798,6 +845,7 @@ def parse_generator_outage_properties_csv(
                 "maintenance_rate",
                 "mean_time_to_repair",
                 "outage_rating",
+                "outage_factor",
             ]
         )
 
@@ -812,6 +860,7 @@ def parse_generator_outage_properties_csv(
                 "maintenance_rate",
                 "mean_time_to_repair",
                 "outage_rating",
+                "outage_factor",
             ]
         )
 
@@ -826,6 +875,10 @@ def parse_generator_outage_properties_csv(
         "maintenance_rate": ("Maintenance Rate", True),
         "mean_time_to_repair": ("Mean Time to Repair", False),
         "outage_rating": ("Outage Rating", False),
+        "outage_factor": (
+            "Outage Factor",
+            True,
+        ),  # Percentage -> fraction, use MIN for conservative outages
     }
 
     for gen in generator_df.index:
@@ -834,7 +887,22 @@ def parse_generator_outage_properties_csv(
         for prop_key, (plexos_name, is_percentage) in property_mappings.items():
             raw_value = get_property_from_static_csv(generator_df, gen, plexos_name)
             if raw_value is not None:
-                parsed_value = parse_numeric_value(raw_value, use_first=True)
+                # Special handling for Outage Factor: use MIN for conservative outages
+                if prop_key == "outage_factor":
+                    parsed_value = parse_numeric_value(raw_value, strategy="min")
+                    # Log if time-series detected
+                    if (
+                        parsed_value is not None
+                        and isinstance(raw_value, str)
+                        and "[" in raw_value
+                    ):
+                        logger.debug(
+                            f"{gen}: Outage Factor is time-varying {raw_value}, "
+                            f"using min value: {parsed_value}"
+                        )
+                else:
+                    parsed_value = parse_numeric_value(raw_value, use_first=True)
+
                 if parsed_value is not None:
                     # Convert percentage to fraction if needed
                     gen_props[prop_key] = (
@@ -855,9 +923,11 @@ def parse_generator_outage_properties_csv(
     for_count = properties_df["forced_outage_rate"].notna().sum()
     mr_count = properties_df["maintenance_rate"].notna().sum()
     mttr_count = properties_df["mean_time_to_repair"].notna().sum()
+    of_count = properties_df["outage_factor"].notna().sum()
 
     logger.info(
-        f"Parsed outage properties: FOR={for_count}, MR={mr_count}, MTTR={mttr_count} generators"
+        f"Parsed outage properties: FOR={for_count}, MR={mr_count}, "
+        f"MTTR={mttr_count}, OutageFactor={of_count} generators"
     )
 
     return properties_df
@@ -1027,9 +1097,19 @@ def generate_forced_outages_simplified(
             else None
         )
         outage_rating = row["outage_rating"]
+        outage_factor = row.get("outage_factor")
 
-        # Calculate capacity factor during outage
-        capacity_factor = _calculate_capacity_factor(p_nom, outage_rating)
+        # Calculate capacity factor during outage (Outage Factor takes priority)
+        capacity_factor = _calculate_capacity_factor(
+            p_nom, outage_rating, outage_factor
+        )
+
+        # Log if using Outage Factor
+        if outage_factor is not None:
+            logger.debug(
+                f"{gen}: Using Outage Factor={outage_factor:.2%} "
+                f"(capacity_factor={capacity_factor:.2%} during outage)"
+            )
 
         # Generate random outage events
         for _ in range(num_outages):
@@ -1281,9 +1361,19 @@ def schedule_maintenance_simplified(
             else None
         )
         outage_rating = row["outage_rating"]
+        outage_factor = row.get("outage_factor")
 
-        # Calculate capacity factor during maintenance
-        capacity_factor = _calculate_capacity_factor(p_nom, outage_rating)
+        # Calculate capacity factor during maintenance (Outage Factor takes priority)
+        capacity_factor = _calculate_capacity_factor(
+            p_nom, outage_rating, outage_factor
+        )
+
+        # Log if using Outage Factor
+        if outage_factor is not None:
+            logger.debug(
+                f"{gen}: Using Outage Factor={outage_factor:.2%} "
+                f"(capacity_factor={capacity_factor:.2%} during maintenance)"
+            )
 
         # Schedule maintenance in blocks (using adjusted hours)
         remaining_hours = adjusted_required_hours
