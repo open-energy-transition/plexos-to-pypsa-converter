@@ -220,26 +220,32 @@ def set_battery_marginal_costs_csv(network: pypsa.Network, csv_dir: str | Path) 
     successful_count = 0
 
     for battery_name in network.storage_units.index:
-        # Get VO&M Charge - handle column name variations
-        vo_m = get_property_from_static_csv(
-            battery_df, battery_name, "VO&M Charge"
-        ) or get_property_from_static_csv(battery_df, battery_name, "Variable Cost")
-
-        # SEM may have "Charging VO&M Charge" separate
-        # Note: PyPSA doesn't natively support separate charge/discharge costs
-        # This would need custom implementation if needed
-        charging_vo_m = get_property_from_static_csv(
-            battery_df, battery_name, "Charging VO&M Charge.Variable"
-        ) or get_property_from_static_csv(
-            battery_df, battery_name, "Charging VO&M Charge"
+        # Get VO&M Charge - handle column name variations across models
+        # Try multiple property names in order of preference:
+        # 1. Standard: "VO&M Charge"
+        # 2. SEM style: "Charging VO&M Charge" (with .Variable suffix)
+        # 3. Generic: "Variable Cost"
+        vo_m = (
+            get_property_from_static_csv(battery_df, battery_name, "VO&M Charge")
+            or get_property_from_static_csv(
+                battery_df, battery_name, "Charging VO&M Charge.Variable"
+            )
+            or get_property_from_static_csv(
+                battery_df, battery_name, "Charging VO&M Charge"
+            )
+            or get_property_from_static_csv(battery_df, battery_name, "Variable Cost")
         )
+
+        # Note: PyPSA doesn't natively support separate charge/discharge costs
+        # If different charging vs discharging costs are needed, this would require
+        # custom implementation (e.g., using separate Links for charge/discharge)
 
         try:
             vo_m_val = (
-                float(vo_m) if vo_m is not None else 0.1
-            )  # Small default to avoid zero
+                float(vo_m) if vo_m is not None else 0.0
+            )  # Default matches PLEXOS default (0)
         except (ValueError, TypeError):
-            vo_m_val = 0.1  # Default small positive value
+            vo_m_val = 0.0  # Default matches PLEXOS default (0)
 
         # Create constant time series
         marginal_costs_dict[battery_name] = pd.Series(vo_m_val, index=snapshots)
