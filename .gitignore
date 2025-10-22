@@ -191,4 +191,7 @@ doc/visualization/html/
 src/examples/data/
 
 # claude
-CLAUDE.md
+CLAUDE.mdsrc/
+
+# scratch
+scratch/

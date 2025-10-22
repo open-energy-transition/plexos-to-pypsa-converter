@@ -15,7 +15,10 @@ from db.csv_readers import (
     find_bus_for_storage_via_generators_csv,
     get_property_from_static_csv,
     load_static_properties,
+    parse_numeric_value,
 )
+from network.generators_csv import _discover_datafile_mappings
+from network.storage import create_inflow_from_timeslice_array, load_inflow_from_file
 
 logger = logging.getLogger(__name__)
 
@@ -98,731 +101,262 @@ def get_end_effects_method(storage_df: pd.DataFrame, storage_name: str) -> str:
     if value is not None:
         # Handle numeric values (PLEXOS enum)
         if isinstance(value, int | float):
-            value = int(value)
-            return {0: "automatic", 1: "free", 2: "recycle"}.get(value, "automatic")
+            value_int = int(value)
+            if value_int == PLEXOS_END_EFFECTS["FREE"]:
+                return "free"
+            elif value_int == PLEXOS_END_EFFECTS["RECYCLE"]:
+                return "recycle"
 
         # Handle string values
-        elif isinstance(value, str):
+        if isinstance(value, str):
             value_lower = value.lower()
             if "free" in value_lower:
                 return "free"
-            elif "recycle" in value_lower:
+            elif "recycle" in value_lower or "cyclic" in value_lower:
                 return "recycle"
-            elif "automatic" in value_lower or "auto" in value_lower:
-                return "automatic"
 
-    return "automatic"  # Default
+    # Default
+    return "free"
 
 
-def convert_plexos_volume_to_energy(
-    volume: float,
-    model_type: str,
-    units: str | None = None,
-) -> tuple[float, str]:
-    """Convert PLEXOS volume/capacity to PyPSA energy units (MWh).
+def parse_storage_volume_energy_conversion(
+    storage_df: pd.DataFrame, storage_name: str
+) -> float:
+    """Parse the conversion factor between volume and energy for hydro storage.
 
-    Returns (energy_mwh, conversion_method_used)
+    For volume-based storage models, PLEXOS needs a conversion factor to translate
+    storage volumes (CMD or AF) into energy (MWh). This is typically defined using
+    Generator efficiency, head height, or explicit energy/volume ratios.
+
+    Returns
+    -------
+    float
+        Conversion factor (MWh per unit volume), or 1.0 if not applicable
     """
-    if model_type == "energy":
-        # Direct energy conversion
-        if units and "gwh" in str(units).lower():
-            return volume * 1000, "direct_gwh_to_mwh"  # GWh to MWh
-        else:
-            return volume, "direct_mwh"  # Assume MWh
-
-    elif model_type == "volume":
-        # Volume to energy conversion (simplified approximation)
-        if units and "cmd" in str(units).lower():
-            return volume * 0.05, "volume_cmd_approx"
-        elif units and ("af" in str(units).lower() or "acre" in str(units).lower()):
-            return volume * 0.005, "volume_af_approx"
-        else:
-            return volume * 0.01, "volume_unknown_approx"
-
-    elif model_type == "level":
-        # Level-based storage cannot be directly converted
-        logger.warning(
-            "Level-based storage model detected but cannot convert to energy without reservoir area data"
-        )
-        return volume, "level_unsupported"
-
-    elif model_type == "battery":
-        # Battery storage - likely already in energy units
-        return volume, "battery_direct"
-
-    else:
-        # Unknown model type - assume energy units
-        return volume, "unknown_assume_energy"
+    # For now, return 1.0 as default
+    # Future: parse "Energy Rating" or calculate from generator efficiency + head
+    return 1.0
 
 
-def detect_pumped_hydro_pairs_csv(
-    storage_df: pd.DataFrame,
-) -> dict[str, dict[str, str]]:
-    """Detect HEAD/TAIL pairs for pumped hydro storage from CSV.
-
-    Returns dict mapping storage names to their pumped hydro configuration.
-    """
-    pumped_hydro_pairs = {}
-
-    # Group storage units by potential pairs
-    head_units = []
-    tail_units = []
-
-    for storage_name in storage_df.index:
-        try:
-            unit_name_lower = storage_name.lower()
-
-            # Get category from CSV if available
-            category = get_property_from_static_csv(
-                storage_df, storage_name, "Category"
-            )
-            category_lower = str(category).lower() if category else ""
-
-            if (
-                "head" in unit_name_lower
-                or "head" in category_lower
-                or "upper" in unit_name_lower
-            ):
-                head_units.append(storage_name)
-            elif (
-                "tail" in unit_name_lower
-                or "tail" in category_lower
-                or "lower" in unit_name_lower
-            ):
-                tail_units.append(storage_name)
-
-        except Exception as e:
-            logger.warning(
-                f"Error checking storage unit {storage_name} for pumped hydro: {e}"
-            )
-            continue
-
-    # Try to pair HEAD and TAIL units
-    for head_unit in head_units:
-        # Look for corresponding tail unit
-        head_base = (
-            head_unit.lower().replace("head", "").replace("upper", "").strip("_- ")
-        )
-
-        for tail_unit in tail_units:
-            tail_base = (
-                tail_unit.lower().replace("tail", "").replace("lower", "").strip("_- ")
-            )
-
-            if (
-                head_base == tail_base
-                or head_base in tail_base
-                or tail_base in head_base
-            ):
-                pair_name = f"{head_unit}_{tail_unit}"
-                pumped_hydro_pairs[pair_name] = {
-                    "head": head_unit,
-                    "tail": tail_unit,
-                    "type": "pumped_hydro_pair",
-                }
-                break
-
-    # Mark remaining units as standalone
-    all_paired = set()
-    for pair_info in pumped_hydro_pairs.values():
-        all_paired.add(pair_info["head"])
-        all_paired.add(pair_info["tail"])
-
-    for storage_name in storage_df.index:
-        if storage_name not in all_paired:
-            pumped_hydro_pairs[storage_name] = {"type": "standalone_storage"}
-
-    return pumped_hydro_pairs
-
-
-def add_storage_csv(
-    network: pypsa.Network, csv_dir: str | Path, timeslice_csv: str | None = None
+def port_storage_csv(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    timeslice_csv: str | None = None,
+    node_df: pd.DataFrame | None = None,
+    generator_df: pd.DataFrame | None = None,
 ) -> None:
-    """Enhanced function to add PLEXOS storage units and batteries from CSV.
+    """Port storage units from COAD CSV exports to PyPSA network.
 
-    This is the CSV-based version of add_storage() from storage.py.
+    This is a CSV-based alternative to port_storage() that reads from CSV files
+    instead of querying PlexosDB.
 
-    Supports different PLEXOS storage representations:
-    - PLEXOS Storage class: Energy, Volume, Level-based, Pumped hydro pairs
-    - PLEXOS Battery class: Battery storage systems
+    Currently supports:
+    - Battery storage from Battery.csv (fully implemented)
+    - Hydro pumped storage from Storage.csv (TEMPORARILY DISABLED)
 
     Parameters
     ----------
     network : pypsa.Network
-        The PyPSA network to add storage to
+        The PyPSA network to add storage units to
     csv_dir : str | Path
         Directory containing COAD CSV exports
-    timeslice_csv : str, optional
-        Path to timeslice CSV file (for future use)
+    node_df : pd.DataFrame, optional
+        Pre-loaded Node.csv data (if None, will load from csv_dir)
+    generator_df : pd.DataFrame, optional
+        Pre-loaded Generator.csv data (if None, will load from csv_dir)
     """
     csv_dir = Path(csv_dir)
+
+    # Load CSVs if not provided
+    if node_df is None:
+        node_df = load_static_properties(csv_dir, "Node")
+
+    if generator_df is None:
+        generator_df = load_static_properties(csv_dir, "Generator")
+
+    battery_csv_path = csv_dir / "Battery.csv"
+
+    if battery_csv_path.exists():
+        logger.info("Loading batteries from Battery.csv...")
+        battery_df = load_static_properties(csv_dir, "Battery")
+
+        if not battery_df.empty:
+            _port_batteries_from_csv(network, battery_df, node_df, generator_df)
+        else:
+            logger.info("Battery.csv is empty, skipping battery import")
+    else:
+        logger.info("Battery.csv not found, skipping battery import")
 
     # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
-    logger.info("Processing PLEXOS Storage class objects from CSV...")
+    # Process standalone hydro storage from Storage.csv (skip HEAD/TAIL pairs)
+    storage_csv_path = csv_dir / "Storage.csv"
 
-    storage_df = load_static_properties(csv_dir, "Storage")
-
-    if storage_df.empty:
-        logger.info("No Storage.csv found or no storage units in CSV")
-        storage_units = []
-    else:
-        storage_units = list(storage_df.index)
-        logger.info(f"Found {len(storage_units)} PLEXOS storage units in CSV")
-
-        # Get unique categories for carriers
-        storage_categories = {}
-        unique_storage_carriers = set()
-
-        for storage_name in storage_units:
-            category = get_property_from_static_csv(
-                storage_df, storage_name, "Category"
-            )
-            carrier = str(category) if category else "hydro"
-            storage_categories[storage_name] = carrier
-            unique_storage_carriers.add(carrier)
-
-        logger.info(f"Storage carriers found: {sorted(unique_storage_carriers)}")
-
-        # Ensure all storage carriers exist in network
-        for carrier in unique_storage_carriers:
-            if carrier not in network.carriers.index:
-                network.add("Carrier", name=carrier)
-                logger.info(f"Added storage carrier: {carrier}")
-
-        # Detect pumped hydro pairs
-        storage_pairs = detect_pumped_hydro_pairs_csv(storage_df)
-        logger.info(
-            f"Detected storage configuration: "
-            f"{len([p for p in storage_pairs.values() if p['type'] == 'pumped_hydro_pair'])} pumped hydro pairs, "
-            f"{len([p for p in storage_pairs.values() if p['type'] == 'standalone_storage'])} standalone units"
-        )
-
-        added_storage_units = 0
-        skipped_storage_units = []
-
-        # Process each storage configuration
-        for config_name, config in storage_pairs.items():
-            try:
-                if config["type"] == "pumped_hydro_pair":
-                    # Handle pumped hydro HEAD/TAIL pair
-                    head_carrier = storage_categories.get(
-                        config["head"], "pumped_hydro"
-                    )
-                    tail_carrier = storage_categories.get(
-                        config["tail"], "pumped_hydro"
-                    )
-                    success = port_pumped_hydro_pair_csv(
-                        network,
-                        csv_dir,
-                        config["head"],
-                        config["tail"],
-                        head_carrier,
-                        tail_carrier,
-                    )
-                    if success:
-                        added_storage_units += 1
-                        logger.info(
-                            f"Added pumped hydro pair: {config['head']} + {config['tail']}"
-                        )
-                    else:
-                        skipped_storage_units.extend([config["head"], config["tail"]])
-
-                elif config["type"] == "standalone_storage":
-                    # Handle standalone storage unit
-                    storage_carrier = storage_categories.get(config_name, "hydro")
-                    success = port_standalone_storage_csv(
-                        network, csv_dir, config_name, storage_carrier
-                    )
-                    if success:
-                        added_storage_units += 1
-                        logger.info(f"Added standalone storage: {config_name}")
-                    else:
-                        skipped_storage_units.append(config_name)
-
-            except Exception:
-                logger.exception(
-                    f"Error processing storage configuration {config_name}"
-                )
-                if config["type"] == "pumped_hydro_pair":
-                    skipped_storage_units.extend([config["head"], config["tail"]])
-                else:
-                    skipped_storage_units.append(config_name)
-
-        logger.info(
-            f"Successfully added {added_storage_units} PLEXOS Storage configurations"
-        )
-        if skipped_storage_units:
-            logger.warning(
-                f"Skipped {len(skipped_storage_units)} PLEXOS Storage units: "
-                f"{skipped_storage_units[:10]}{'...' if len(skipped_storage_units) > 10 else ''}"
-            )
-
-    # ===== PROCESS PLEXOS BATTERY CLASS OBJECTS =====
-    logger.info("Processing PLEXOS Battery class objects from CSV...")
-
-    initial_storage_count = len(network.storage_units)
-
-    # Call port_batteries
-    port_batteries_csv(network, csv_dir, timeslice_csv)
-
-    final_storage_count = len(network.storage_units)
-    added_battery_units = (
-        final_storage_count - initial_storage_count - len(storage_units)
-    )
-
-    logger.info(f"Successfully added {added_battery_units} PLEXOS Battery units")
-
-    # ===== SUMMARY =====
-    total_added = len(network.storage_units) - initial_storage_count
-    logger.info(f"Total storage units added to network: {total_added}")
-
-
-def port_standalone_storage_csv(
-    network: pypsa.Network,
-    csv_dir: str | Path,
-    storage_name: str,
-    carrier: str = "hydro",
-) -> bool:
-    """Port a standalone PLEXOS storage unit to PyPSA from CSV.
-
-    This is the CSV-based version of port_standalone_storage() from storage.py.
-
-    Parameters
-    ----------
-    network : pypsa.Network
-        The PyPSA network to add storage to
-    csv_dir : str | Path
-        Directory containing COAD CSV exports
-    storage_name : str
-        Name of the storage unit
-    carrier : str, optional
-        Carrier type for the storage unit (from category), defaults to "hydro"
-
-    Returns
-    -------
-    bool
-        True if successful, False otherwise
-    """
-    csv_dir = Path(csv_dir)
-
-    try:
+    if storage_csv_path.exists():
+        logger.info("Loading standalone hydro storages from Storage.csv...")
         storage_df = load_static_properties(csv_dir, "Storage")
 
-        if storage_name not in storage_df.index:
-            logger.warning(f"Storage {storage_name} not found in Storage.csv")
-            return False
-
-        def get_prop_float(name: str) -> float | None:
-            val = get_property_from_static_csv(storage_df, storage_name, name)
-            if val is not None:
-                try:
-                    return float(val)
-                except (ValueError, TypeError):
-                    pass
-            return None
-
-        # Detect storage model type
-        model_type = detect_storage_model_type(storage_df, storage_name)
-        logger.info(f"Detected model type '{model_type}' for storage {storage_name}")
-
-        # Find connected bus
-        bus = find_bus_for_object_csv(storage_df, storage_name)
-        connection_method = "direct"
-        primary_generator = None
-
-        if bus is None:
-            # Try finding bus via generators
-            generator_df = load_static_properties(csv_dir, "Generator")
-            result = find_bus_for_storage_via_generators_csv(
-                storage_df, generator_df, storage_name
-            )
-            if result:
-                bus, primary_generator = result
-                connection_method = "via_generator"
-
-        if bus is None:
-            logger.warning(f"No connected bus found for storage {storage_name}")
-            return False
-
-        # Extract basic properties
-        initial_volume = get_prop_float("Initial Volume") or 0.0
-        min_volume = get_prop_float("Min Volume") or 0.0
-        max_volume = get_prop_float("Max Volume") or 1000.0
-        units = get_property_from_static_csv(storage_df, storage_name, "Units")
-
-        # Convert volumes to energy (MWh)
-        max_energy, _ = convert_plexos_volume_to_energy(max_volume, model_type, units)
-        min_energy, _ = convert_plexos_volume_to_energy(min_volume, model_type, units)
-        initial_energy, _ = convert_plexos_volume_to_energy(
-            initial_volume, model_type, units
-        )
-
-        # Get End Effects Method
-        end_effects = get_end_effects_method(storage_df, storage_name)
-        cyclic_state_of_charge = end_effects == "recycle"
-
-        # Override carrier if model type suggests battery
-        if model_type == "battery" and carrier == "hydro":
-            carrier = "battery"
-
-        # Calculate power capacity
-        if model_type == "battery":
-            default_hours = 4.0
+        if not storage_df.empty:
+            _port_hydro_storage_from_csv(network, storage_df, generator_df, node_df)
         else:
-            default_hours = 8.0
-
-        p_nom = max_energy / default_hours if max_energy > 0 else 100.0
-        max_hours = max_energy / p_nom if p_nom > 0 else default_hours
-
-        # Calculate state of charge parameters
-        if max_energy > 0:
-            state_of_charge_initial = initial_energy / max_energy
-        else:
-            state_of_charge_initial = 0.5
-
-        # Add storage unit to network
-        network.add(
-            "StorageUnit",
-            storage_name,
-            bus=bus,
-            carrier=carrier,
-            p_nom=p_nom,
-            max_hours=max_hours,
-            efficiency_store=0.9,
-            efficiency_dispatch=0.9,
-            state_of_charge_initial=state_of_charge_initial,
-            cyclic_state_of_charge=cyclic_state_of_charge,
-        )
-
-        logger.info(
-            f"Added storage {storage_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, "
-            f"model={model_type}, carrier={carrier}"
-        )
-        if connection_method == "via_generator":
-            logger.info(
-                f"  Connection: via generator '{primary_generator}' to bus '{bus}'"
-            )
-
-    except Exception:
-        logger.exception(f"Error porting standalone storage {storage_name}")
-        return False
+            logger.info("Storage.csv is empty, skipping hydro storage import")
     else:
-        return True
+        logger.info("Storage.csv not found, skipping hydro storage import")
 
 
-def port_pumped_hydro_pair_csv(
+def _port_batteries_from_csv(
     network: pypsa.Network,
-    csv_dir: str | Path,
-    head_name: str,
-    tail_name: str,
-    head_carrier: str = "pumped_hydro",
-    tail_carrier: str = "pumped_hydro",
-) -> bool:
-    """Port a PLEXOS pumped hydro HEAD/TAIL pair to PyPSA from CSV.
-
-    This is the CSV-based version of port_pumped_hydro_pair() from storage.py.
-
-    Parameters
-    ----------
-    network : pypsa.Network
-        The PyPSA network to add storage to
-    csv_dir : str | Path
-        Directory containing COAD CSV exports
-    head_name : str
-        Name of the HEAD storage unit
-    tail_name : str
-        Name of the TAIL storage unit
-    head_carrier : str, optional
-        Carrier for HEAD storage, defaults to "pumped_hydro"
-    tail_carrier : str, optional
-        Carrier for TAIL storage, defaults to "pumped_hydro"
-
-    Returns
-    -------
-    bool
-        True if successful, False otherwise
-    """
-    csv_dir = Path(csv_dir)
-
-    try:
-        storage_df = load_static_properties(csv_dir, "Storage")
-
-        if head_name not in storage_df.index or tail_name not in storage_df.index:
-            logger.warning(
-                f"HEAD {head_name} or TAIL {tail_name} not found in Storage.csv"
-            )
-            return False
-
-        def get_prop_float_for(name: str, storage: str) -> float | None:
-            val = get_property_from_static_csv(storage_df, storage, name)
-            if val is not None:
-                try:
-                    return float(val)
-                except (ValueError, TypeError):
-                    pass
-            return None
-
-        # Find connected bus
-        head_bus = find_bus_for_object_csv(storage_df, head_name)
-        tail_bus = find_bus_for_object_csv(storage_df, tail_name)
-        bus = head_bus or tail_bus
-        connection_method = "direct"
-        primary_generator = None
-
-        if bus is None:
-            # Try via generators
-            generator_df = load_static_properties(csv_dir, "Generator")
-            result = find_bus_for_storage_via_generators_csv(
-                storage_df, generator_df, head_name
-            )
-            if result:
-                bus, primary_generator = result
-                connection_method = "via_generator"
-
-            if bus is None:
-                result = find_bus_for_storage_via_generators_csv(
-                    storage_df, generator_df, tail_name
-                )
-                if result:
-                    bus, primary_generator = result
-                    connection_method = "via_generator"
-
-        if bus is None:
-            logger.warning(
-                f"No connected bus found for pumped hydro pair {head_name}/{tail_name}"
-            )
-            return False
-
-        # Get volumes for both reservoirs
-        head_max = get_prop_float_for("Max Volume", head_name) or 0.0
-        head_initial = get_prop_float_for("Initial Volume", head_name) or 0.0
-
-        # Detect model types
-        head_model_type = detect_storage_model_type(storage_df, head_name)
-
-        # Convert to energy (use head reservoir as primary)
-        max_energy, _ = convert_plexos_volume_to_energy(head_max, head_model_type)
-        initial_energy, _ = convert_plexos_volume_to_energy(
-            head_initial, head_model_type
-        )
-
-        # Calculate power capacity
-        default_hours = 8.0
-        p_nom = max_energy / default_hours if max_energy > 0 else 200.0
-        max_hours = max_energy / p_nom if p_nom > 0 else default_hours
-
-        # Initial state of charge
-        state_of_charge_initial = initial_energy / max_energy if max_energy > 0 else 0.5
-
-        # Pumped hydro efficiency
-        efficiency = 0.85
-
-        # Determine carrier
-        carrier = (
-            head_carrier
-            if head_carrier != "pumped_hydro"
-            else (tail_carrier if tail_carrier != "pumped_hydro" else "pumped_hydro")
-        )
-
-        # Create combined name
-        system_name = f"{head_name.replace('HEAD', '').replace('Upper', '').strip('_- ')}_PumpedHydro"
-        if not system_name or system_name == "_PumpedHydro":
-            system_name = f"{head_name}_{tail_name}"
-
-        # Add as single StorageUnit
-        network.add(
-            "StorageUnit",
-            system_name,
-            bus=bus,
-            carrier=carrier,
-            p_nom=p_nom,
-            max_hours=max_hours,
-            efficiency_store=efficiency,
-            efficiency_dispatch=efficiency,
-            state_of_charge_initial=state_of_charge_initial,
-            cyclic_state_of_charge=True,
-        )
-
-        logger.info(
-            f"Added pumped hydro system {system_name}: {p_nom:.1f} MW, {max_hours:.1f} hours, "
-            f"efficiency={efficiency:.1%}, carrier={carrier}"
-        )
-        logger.info(f"  Combined from HEAD: {head_name} + TAIL: {tail_name}")
-        if connection_method == "via_generator":
-            logger.info(
-                f"  Connection: via generator '{primary_generator}' to bus '{bus}'"
-            )
-
-    except Exception:
-        logger.exception(f"Error porting pumped hydro pair {head_name}/{tail_name}")
-        return False
-    else:
-        return True
-
-
-def port_batteries_csv(
-    network: pypsa.Network, csv_dir: str | Path, timeslice_csv: str | None = None
+    battery_df: pd.DataFrame,
+    node_df: pd.DataFrame,
+    generator_df: pd.DataFrame,
 ) -> None:
-    """Add PLEXOS batteries as PyPSA StorageUnit components from CSV.
+    """Port battery storage units from Battery.csv to PyPSA network.
 
-    This is the CSV-based version of port_batteries() from storage.py.
-
-    Parameters
-    ----------
-    network : pypsa.Network
-        The PyPSA network to add batteries to
-    csv_dir : str | Path
-        Directory containing COAD CSV exports
-    timeslice_csv : str, optional
-        Path to timeslice CSV file (for future use)
+    Handles PLEXOS battery modeling conventions including HEAD/TAIL pairs
+    and generator-based connections.
     """
-    csv_dir = Path(csv_dir)
+    # Track HEAD/TAIL pairs
+    head_batteries = {}
+    tail_batteries = {}
+    standalone_batteries = []
 
-    logger.info("Adding batteries from CSV...")
-
-    battery_df = load_static_properties(csv_dir, "Battery")
-
-    if battery_df.empty:
-        logger.info("No Battery.csv found or no batteries in CSV")
-        return
-
-    logger.info(f"Found {len(battery_df)} batteries in CSV")
-
-    # Collect unique battery categories for carriers
-    battery_carriers = set()
+    # Classify batteries
     for battery_name in battery_df.index:
-        category = get_property_from_static_csv(battery_df, battery_name, "Category")
-        carrier = str(category) if category else "battery"
-        battery_carriers.add(carrier)
-
-    logger.info(f"Battery carriers found: {sorted(battery_carriers)}")
-
-    # Ensure all battery carriers exist in network
-    for carrier in battery_carriers:
-        if carrier not in network.carriers.index:
-            network.add("Carrier", name=carrier)
-            logger.info(f"Added carrier: {carrier}")
-
-    skipped_batteries = []
-    added_count = 0
-
-    def get_property_value(battery_name: str, property_name: str, default=None):
-        """Extract property value by name."""
-        val = get_property_from_static_csv(battery_df, battery_name, property_name)
-        if val is not None:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return default
-        return default
-
-    for battery_name in battery_df.index:
-        try:
-            logger.debug(f"Processing battery: {battery_name}")
-
-            # Determine carrier from category
-            category = get_property_from_static_csv(
-                battery_df, battery_name, "Category"
+        if battery_name.endswith(("_H", "HEAD")):
+            base_name = (
+                battery_name[:-2] if battery_name.endswith("_H") else battery_name[:-4]
             )
-            carrier = str(category) if category else "battery"
+            head_batteries[base_name] = battery_name
+        elif battery_name.endswith(("_T", "TAIL")):
+            base_name = (
+                battery_name[:-2] if battery_name.endswith("_T") else battery_name[:-4]
+            )
+            tail_batteries[base_name] = battery_name
+        else:
+            standalone_batteries.append(battery_name)
 
-            # Find connected bus
-            bus = find_bus_for_object_csv(battery_df, battery_name)
-            connection_method = "direct"
+    # Process HEAD/TAIL pairs
+    added_count = 0
+    skipped_batteries = []
+
+    for base_name, head_name in head_batteries.items():
+        if base_name not in tail_batteries:
+            logger.warning(f"Found HEAD battery without TAIL: {head_name}")
+            skipped_batteries.append(f"{head_name} (missing TAIL pair)")
+            continue
+
+        tail_name = tail_batteries[base_name]
+
+        try:
+            # Extract properties from HEAD and TAIL
+            max_volume_tail = get_property_from_static_csv(
+                battery_df, tail_name, "Max Volume"
+            )
+            max_power_tail = get_property_from_static_csv(
+                battery_df, tail_name, "Max Capacity"
+            )
+
+            # Parse values
+            try:
+                max_energy = float(max_volume_tail) if max_volume_tail else 0.0
+                max_power_discharge = (
+                    float(max_power_tail) if max_power_tail else max_energy
+                )
+            except (ValueError, TypeError):
+                logger.warning(
+                    f"Could not parse battery properties for {base_name}, using defaults"
+                )
+                max_energy = 0.0
+                max_power_discharge = 0.0
+
+            # Get efficiency
+            charge_eff = get_property_from_static_csv(
+                battery_df, head_name, "Efficiency"
+            )
+            discharge_eff = get_property_from_static_csv(
+                battery_df, tail_name, "Efficiency"
+            )
+
+            try:
+                efficiency_store = (
+                    float(charge_eff) / 100.0 if charge_eff else 0.95
+                )  # Convert % to fraction
+                efficiency_dispatch = (
+                    float(discharge_eff) / 100.0 if discharge_eff else 0.95
+                )
+            except (ValueError, TypeError):
+                efficiency_store = 0.95
+                efficiency_dispatch = 0.95
+
+            # Calculate max hours (duration)
+            if max_power_discharge > 0:
+                max_hours = max_energy / max_power_discharge
+            else:
+                max_hours = 4.0  # Default 4-hour battery
+
+            # Find bus for battery (try multiple approaches)
+            bus = None
+            connection_method = None
             primary_generator = None
 
-            if bus is None:
-                # Try via generators
-                generator_df = load_static_properties(csv_dir, "Generator")
-                result = find_bus_for_storage_via_generators_csv(
-                    battery_df, generator_df, battery_name
+            # Approach 1: Check if HEAD/TAIL has a node assignment
+            bus = find_bus_for_object_csv(node_df, "Battery", head_name, fallback=None)
+            if bus:
+                connection_method = "direct_node"
+            else:
+                bus = find_bus_for_object_csv(
+                    node_df, "Battery", tail_name, fallback=None
                 )
-                if result:
-                    bus, primary_generator = result
+                if bus:
+                    connection_method = "direct_node"
+
+            # Approach 2: Find via associated generators
+            if bus is None:
+                (
+                    bus,
+                    primary_generator,
+                ) = find_bus_for_storage_via_generators_csv(
+                    generator_df, node_df, head_name
+                )
+                if bus:
                     connection_method = "via_generator"
 
             if bus is None:
-                logger.warning(f"No connected bus found for battery {battery_name}")
-                skipped_batteries.append(f"{battery_name} (no bus)")
+                (
+                    bus,
+                    primary_generator,
+                ) = find_bus_for_storage_via_generators_csv(
+                    generator_df, node_df, tail_name
+                )
+                if bus:
+                    connection_method = "via_generator"
+
+            if bus is None:
+                logger.warning(f"Could not find bus for battery {base_name}, skipping")
+                skipped_batteries.append(f"{base_name} (no bus found)")
                 continue
 
-            # Extract Max Power (required)
-            max_power = get_property_value(battery_name, "Max Power.Variable")
-            if max_power is None or max_power <= 0:
-                logger.warning(
-                    f"No valid 'Max Power.Variable' for battery {battery_name}"
-                )
-                skipped_batteries.append(f"{battery_name} (no Max Power)")
-                continue
+            # Determine carrier
+            carrier = "battery"  # Default carrier for batteries
 
-            # Extract volume properties - try Capacity.Variable first, then fallback options
-            max_volume = (
-                get_property_value(battery_name, "Capacity.Variable")
-                or get_property_value(battery_name, "Max Volume")
-                or get_property_value(battery_name, "Max SoC")
-            )
-            initial_volume = get_property_value(
-                battery_name, "Initial Volume"
-            ) or get_property_value(battery_name, "Initial SoC", 0.0)
-            min_volume = get_property_value(
-                battery_name, "Min Volume"
-            ) or get_property_value(battery_name, "Min SoC", 0.0)
-
-            # Calculate max_hours
-            if max_volume is not None and max_volume > 0:
-                max_hours = max_volume / max_power
-            else:
-                logger.warning(
-                    f"No valid 'Max Volume/SoC' for battery {battery_name}, using default 4 hours"
-                )
-                max_hours = 4.0
-
-            # Extract efficiencies
-            efficiency_store = get_property_value(
-                battery_name, "Charge Efficiency", 0.9
-            )
-            efficiency_dispatch = get_property_value(
-                battery_name, "Discharge Efficiency", 0.9
+            # Add to PyPSA network as StorageUnit
+            network.add(
+                "StorageUnit",
+                base_name,
+                bus=bus,
+                carrier=carrier,
+                p_nom=max_power_discharge,  # Discharge power capacity
+                p_nom_extendable=False,
+                max_hours=max_hours,
+                efficiency_store=efficiency_store,
+                efficiency_dispatch=efficiency_dispatch,
+                cyclic_state_of_charge=True,  # Batteries typically cyclic
+                state_of_charge_initial=0.5,  # Start at 50% SOC
             )
 
-            # Convert from percentage if needed
-            if efficiency_store > 1.0:
-                efficiency_store = efficiency_store / 100.0
-            if efficiency_dispatch > 1.0:
-                efficiency_dispatch = efficiency_dispatch / 100.0
-
-            # Extract lifetime
-            lifetime = get_property_value(battery_name, "Technical Life")
-            if lifetime is None:
-                lifetime = get_property_value(battery_name, "Economic Life")
-
-            # Extract max charge power (optional)
-            max_charge_power = get_property_value(battery_name, "Max Load.Variable")
-
-            # Create storage unit entry
-            storage_unit_data = {
-                "bus": bus,
-                "carrier": carrier,
-                "p_nom": max_power,
-                "max_hours": max_hours,
-                "efficiency_store": efficiency_store,
-                "efficiency_dispatch": efficiency_dispatch,
-                "state_of_charge_initial": initial_volume if initial_volume else 0.0,
-                "state_of_charge_min": min_volume if min_volume else 0.0,
-            }
-
-            if lifetime is not None:
-                storage_unit_data["lifetime"] = lifetime
-
-            if max_charge_power is not None and max_charge_power > 0:
-                storage_unit_data["p_nom_max_charge"] = max_charge_power
-
-            # Add to network
-            network.add("StorageUnit", battery_name, **storage_unit_data)
             added_count += 1
 
             logger.info(
-                f"Added battery {battery_name}: {max_power:.1f} MW, {max_hours:.1f} hours, "
+                f"Added battery {base_name}: {max_power_discharge:.1f} MW, {max_hours:.1f} hours, "
                 f"bus={bus}, carrier={carrier}"
             )
             if connection_method == "via_generator":
@@ -831,8 +365,8 @@ def port_batteries_csv(
                 )
 
         except Exception as e:
-            logger.warning(f"Error processing battery {battery_name}: {e}")
-            skipped_batteries.append(f"{battery_name} (error: {e})")
+            logger.warning(f"Error processing battery {base_name}: {e}")
+            skipped_batteries.append(f"{base_name} (error: {e})")
 
     # Summary
     logger.info(f"Batteries added: {added_count}")
@@ -840,3 +374,365 @@ def port_batteries_csv(
 
     if skipped_batteries:
         logger.info(f"Skipped batteries: {skipped_batteries}")
+
+
+def _port_hydro_storage_from_csv(
+    network: pypsa.Network,
+    storage_df: pd.DataFrame,
+    generator_df: pd.DataFrame,
+    node_df: pd.DataFrame | None = None,
+) -> None:
+    """Port standalone hydro storage units from Storage.csv to PyPSA network.
+
+    This creates a simple `StorageUnit` per reservoir (skipping HEAD/TAIL pumped
+    hydro pairs). It links to generators via the `Storage` column in
+    Generator.csv and derives p_nom from the sum of associated generator capacities.
+    """
+    added = 0
+    skipped = []
+
+    # Ensure "hydro" carrier exists in the network
+    if "hydro" not in network.carriers.index:
+        network.add("Carrier", "hydro")
+        logger.info("Added 'hydro' carrier to network")
+
+    # Helper to get property value
+    def _prop(name: str, obj: str):
+        return get_property_from_static_csv(storage_df, obj, name)
+
+    # Iterate storages
+    for storage_name in storage_df.index:
+        # Skip HEAD/TAIL pumped hydro pairs
+        if storage_name.endswith(("_H", "_T", "HEAD", "TAIL")):
+            logger.debug(f"Skipping pumped hydro HEAD/TAIL storage: {storage_name}")
+            continue
+
+        try:
+            # Find generators that reference this storage
+            gens_for_storage = generator_df[generator_df.get("Storage") == storage_name]
+
+            if gens_for_storage.empty:
+                logger.debug(
+                    f"No generators reference storage {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (no generators)")
+                continue
+
+            # Sum generator max capacities (Max Capacity column)
+            p_nom = 0.0
+            for gen in gens_for_storage.index:
+                max_cap = get_property_from_static_csv(
+                    generator_df, gen, "Max Capacity"
+                )
+                try:
+                    p_nom += float(max_cap) if max_cap not in (None, "") else 0.0
+                except (ValueError, TypeError):
+                    logger.debug(
+                        f"Invalid Max Capacity for generator {gen}, treating as 0"
+                    )
+
+            if p_nom <= 0:
+                logger.debug(
+                    f"Computed p_nom <= 0 for storage {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (p_nom<=0)")
+                continue
+
+            # Energy (Max Volume) - assume MWh unless conversion factor provided
+            max_volume = _prop("Max Volume", storage_name)
+            try:
+                energy = float(max_volume) if max_volume not in (None, "") else 0.0
+            except (ValueError, TypeError):
+                logger.debug(f"Invalid Max Volume for storage {storage_name}, using 0")
+                energy = 0.0
+
+            if energy <= 0:
+                logger.debug(
+                    f"Energy (Max Volume) missing or zero for {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (no energy)")
+                continue
+
+            max_hours = energy / p_nom if p_nom > 0 else 0.0
+
+            # End effects (cyclic vs free)
+            end_effects = get_end_effects_method(storage_df, storage_name)
+            cyclic = end_effects == "recycle"
+
+            # Initial SOC
+            init_vol = _prop("Initial Volume", storage_name)
+            try:
+                init_vol_f = float(init_vol) if init_vol not in (None, "") else None
+            except (ValueError, TypeError):
+                init_vol_f = None
+
+            state_of_charge_initial = None
+            if init_vol_f is not None and energy > 0:
+                state_of_charge_initial = max(0.0, min(1.0, init_vol_f / energy))
+
+            # Determine bus: use bus from first associated generator
+            first_gen = gens_for_storage.index[0]
+            bus = None
+            try:
+                # Search generator DataFrame for Node column (which becomes bus in PyPSA)
+                bus = gens_for_storage.loc[first_gen].get("Node")
+                if not bus:
+                    # Try "Bus" as fallback for other datasets
+                    bus = gens_for_storage.loc[first_gen].get("Bus")
+            except Exception:
+                bus = None
+
+            if not bus and node_df is not None:
+                # Fallback: try to find via node_df using helper
+                bus = find_bus_for_object_csv(
+                    node_df, "Generator", first_gen, fallback=None
+                )
+
+            if not bus:
+                logger.debug(f"Could not find bus for storage {storage_name}, skipping")
+                skipped.append(f"{storage_name} (no bus)")
+                continue
+
+            # Add StorageUnit
+            add_kwargs = {
+                "p_nom": p_nom,
+                "max_hours": max_hours,
+                "cyclic_state_of_charge": cyclic,
+                "state_of_charge_initial": state_of_charge_initial
+                if state_of_charge_initial is not None
+                else 0.5,
+                "bus": bus,
+                "carrier": "hydro",
+                "p_nom_extendable": False,
+            }
+
+            network.add("StorageUnit", storage_name, **add_kwargs)
+            added += 1
+
+            logger.info(
+                f"Added hydro storage {storage_name}: p_nom={p_nom:.1f} MW, energy={energy:.1f} MWh, "
+                f"max_hours={max_hours:.2f}, bus={bus}, cyclic={cyclic}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Error processing storage {storage_name}: {e}")
+            skipped.append(f"{storage_name} (error: {e})")
+
+    logger.info(f"Hydro storages added: {added}")
+    if skipped:
+        logger.info(f"Hydro storages skipped: {len(skipped)} ({skipped})")
+
+
+def add_storage_inflows_csv(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    inflow_path: str | Path,
+) -> dict:
+    """Add inflow time series for hydro storage units to PyPSA network from CSV data.
+
+    This is a CSV-based alternative to add_hydro_inflows() that reads from COAD CSV
+    exports instead of querying PlexosDB. Supports multiple inflow data formats:
+    - Data file references (Natural Inflow.Data File column)
+    - Timeslice arrays (Natural Inflow.Timeslice column)
+    - Static values (Natural Inflow column)
+
+    The function auto-discovers storage→inflow linkages from Storage.csv and Data File.csv,
+    loads the appropriate inflow data, and applies it to network.storage_units_t.inflow.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        PyPSA network with storage units already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (must include Storage.csv and Data File.csv)
+    inflow_path : str | Path
+        Base directory containing inflow CSV files referenced in Data File.csv
+
+    Returns
+    -------
+    dict
+        Summary statistics: {
+            "storage_units_with_inflows": int,
+            "storage_units_without_inflows": int,
+            "failed_storage_units": list[str],
+            "inflow_sources": {
+                "data_file": int,
+                "timeslice_array": int,
+                "static_value": int
+            }
+        }
+
+    Examples
+    --------
+    >>> # AEMO model with Data File references
+    >>> summary = add_storage_inflows_csv(
+    ...     network=network,
+    ...     csv_dir="src/examples/data/aemo-2024-isp-progressive-change/csvs_from_xml/NEM",
+    ...     inflow_path="src/examples/data/aemo-2024-isp-progressive-change"
+    ... )
+    >>> print(f"Storage units with inflows: {summary['storage_units_with_inflows']}")
+
+    >>> # CAISO model with timeslice arrays
+    >>> summary = add_storage_inflows_csv(
+    ...     network=network,
+    ...     csv_dir="src/examples/data/caiso-irp23/csvs_from_xml/WECC",
+    ...     inflow_path="src/examples/data/caiso-irp23"
+    ... )
+    """
+    csv_dir = Path(csv_dir)
+    inflow_path = Path(inflow_path)
+
+    # Initialize statistics
+    stats = {
+        "storage_units_with_inflows": 0,
+        "storage_units_without_inflows": 0,
+        "failed_storage_units": [],
+        "inflow_sources": {
+            "data_file": 0,
+            "timeslice_array": 0,
+            "static_value": 0,
+        },
+    }
+
+    # Load Storage.csv
+    storage_df = load_static_properties(csv_dir, "Storage")
+    if storage_df.empty:
+        logger.warning("Storage.csv not found or empty. Cannot load inflows.")
+        return stats
+
+    # Discover data file mappings (for Data File references)
+    datafile_to_csv = _discover_datafile_mappings(csv_dir)
+
+    # Get network snapshots for time series alignment
+    snapshots = pd.DatetimeIndex(network.snapshots)
+
+    # Process each storage unit in the network
+    for storage_name in network.storage_units.index:
+        try:
+            # Check if storage exists in Storage.csv
+            if storage_name not in storage_df.index:
+                logger.debug(
+                    f"Storage unit {storage_name} not found in Storage.csv, skipping inflow"
+                )
+                stats["storage_units_without_inflows"] += 1
+                continue
+
+            inflow_data = None
+            inflow_source = None
+
+            # Priority 1: Try Data File reference (Natural Inflow.Data File column)
+            datafile_ref = get_property_from_static_csv(
+                storage_df, storage_name, "Natural Inflow.Data File"
+            )
+
+            if datafile_ref:
+                # Strip "Data File." prefix if present
+                if datafile_ref.startswith("Data File."):
+                    datafile_obj = datafile_ref[len("Data File.") :]
+                else:
+                    datafile_obj = datafile_ref
+
+                # Look up CSV filename in Data File.csv mappings
+                if datafile_obj in datafile_to_csv:
+                    csv_relative_path = datafile_to_csv[datafile_obj]
+
+                    # Normalize path separators (handle Windows backslashes)
+                    csv_relative_path = csv_relative_path.strip().replace("\\", "/")
+
+                    # The relative path from Data File.csv is relative to the model root
+                    # We need to go up two levels: csv_dir.parent.parent
+                    base_path = (
+                        csv_dir.parent.parent
+                    )  # Load inflow from file (pass relative path and base directory)
+                    inflow_data = load_inflow_from_file(
+                        csv_relative_path, str(base_path), snapshots
+                    )
+
+                    if inflow_data is not None:
+                        inflow_source = "data_file"
+                        logger.info(
+                            f"Loaded inflow data for {storage_name} from data file: {csv_relative_path}"
+                        )
+                else:
+                    logger.warning(
+                        f"Data file object '{datafile_obj}' not found in Data File.csv for {storage_name}"
+                    )
+
+            # Priority 2: Try Timeslice array (Natural Inflow.Timeslice column)
+            if inflow_data is None:
+                timeslice_array = get_property_from_static_csv(
+                    storage_df, storage_name, "Natural Inflow.Timeslice"
+                )
+
+                if timeslice_array:
+                    try:
+                        # Parse array value
+                        values = parse_numeric_value(timeslice_array, strategy="array")
+
+                        if values and isinstance(values, list) and len(values) > 1:
+                            inflow_data = create_inflow_from_timeslice_array(
+                                values, snapshots
+                            )
+                            inflow_source = "timeslice_array"
+                            logger.info(
+                                f"Created inflow data for {storage_name} from timeslice array ({len(values)} values)"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Error parsing timeslice array for {storage_name}: {e}"
+                        )
+
+            # Priority 3: Try static value (Natural Inflow column)
+            if inflow_data is None:
+                static_inflow = get_property_from_static_csv(
+                    storage_df, storage_name, "Natural Inflow"
+                )
+
+                if static_inflow:
+                    try:
+                        inflow_value = float(static_inflow)
+                        if inflow_value > 0:
+                            # Create constant inflow series
+                            inflow_data = pd.Series(inflow_value, index=snapshots)
+                            inflow_source = "static_value"
+                            logger.info(
+                                f"Set constant inflow {inflow_value} for {storage_name}"
+                            )
+                    except (ValueError, TypeError):
+                        logger.debug(
+                            f"Could not parse static Natural Inflow value for {storage_name}: {static_inflow}"
+                        )
+
+            # Apply inflow data to network
+            if inflow_data is not None:
+                network.storage_units_t.inflow[storage_name] = inflow_data
+                stats["storage_units_with_inflows"] += 1
+                stats["inflow_sources"][inflow_source] += 1
+            else:
+                logger.debug(f"No inflow data found for storage unit {storage_name}")
+                stats["storage_units_without_inflows"] += 1
+
+        except Exception as e:
+            logger.warning(f"Error processing inflows for {storage_name}: {e}")
+            stats["failed_storage_units"].append(f"{storage_name} ({e})")
+
+    # Log summary
+    logger.info(
+        f"Added inflow data for {stats['storage_units_with_inflows']} storage units"
+    )
+    logger.info(f"  - From data files: {stats['inflow_sources']['data_file']}")
+    logger.info(
+        f"  - From timeslice arrays: {stats['inflow_sources']['timeslice_array']}"
+    )
+    logger.info(f"  - From static values: {stats['inflow_sources']['static_value']}")
+    logger.info(
+        f"Storage units without inflows: {stats['storage_units_without_inflows']}"
+    )
+
+    if stats["failed_storage_units"]:
+        logger.warning(
+            f"Failed to process {len(stats['failed_storage_units'])} storage units: "
+            f"{stats['failed_storage_units']}"
+        )
+
+    return stats
