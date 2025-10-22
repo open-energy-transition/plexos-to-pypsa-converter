@@ -1,25 +1,32 @@
-from collections import defaultdict
-
-import pandas as pd
-
 from network.conversion import create_model
-from network.generators_csv import load_data_file_profiles_csv
+from network.generators_csv import (
+    apply_generator_units_timeseries_csv,
+    load_data_file_profiles_csv,
+)
 from network.outages import (
     apply_outage_schedule,
     build_outage_schedule,
     generate_stochastic_outages_csv,
     parse_explicit_outages_from_properties,
 )
+from network.storage_csv import add_storage_inflows_csv
 
 # Constants
 MODEL_ID = "sem-2024-2032"
 SNAPSHOTS_PER_YEAR = 60
-
-# Create network
-print("Creating SEM network...")
-network, summary = create_model(MODEL_ID, use_csv=True)
-
-# Load VRE profiles (if needed)
+SOLVER_CONFIG = {
+    "solver_name": "gurobi",
+    "solver_options": {
+        "Threads": 6,
+        "Method": 2,  # barrier
+        "Crossover": 0,
+        "BarConvTol": 1.0e-5,
+        "Seed": 123,
+        "AggFill": 0,
+        "PreDual": 0,
+        "GURO_PAR_BARDENSETHRESH": 200,
+    },
+}
 SEM_VRE_MAPPINGS = {
     "Wind NI -- All": "StochasticWindNI",
     "Wind ROI": "StochasticWindROI",
@@ -29,20 +36,43 @@ SEM_VRE_MAPPINGS = {
     "Solar ROI": "StochasticSolarROI",
 }
 
-load_data_file_profiles_csv(
+xml_csv_dir = "src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model"
+model_path = "src/examples/data/sem-2024-2032"
+
+# Create the model
+network, summary = create_model(MODEL_ID, use_csv=True)
+
+# scale all p_min_pu down to avoid infeasibility due to must-run constraints
+for gen in network.generators.index:
+    if gen in network.generators_t.p_min_pu.columns:
+        network.generators_t.p_min_pu[gen] *= 0.7
+
+# Load VRE profiles from CSVs, allowing curtailment (p_min_pu = 0)
+vre_summary = load_data_file_profiles_csv(
     network=network,
-    csv_dir="src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model",
-    profiles_path="src/examples/data/sem-2024-2032/CSV Files",
+    csv_dir=xml_csv_dir,
+    profiles_path=model_path,
     property_name="Rating",
     target_property="p_max_pu",
     target_type="generators_t",
-    apply_mode="set_both_min_max",
-    scenario="1",
+    apply_mode="replace",  # Allow curtailment: p_min_pu = 0, p_max_pu = profile
+    scenario=1,  # No scenario filtering needed
     generator_filter=lambda gen: "Wind" in gen or "Solar" in gen,
     carrier_mapping={"Wind": "Wind", "Solar": "Solar"},
     value_scaling=0.01,
     manual_mappings=SEM_VRE_MAPPINGS,
 )
+
+# Add hydrological inflows to storage units
+inflows_summary = add_storage_inflows_csv(
+    network=network,
+    csv_dir=xml_csv_dir,
+    inflow_path=model_path,
+)
+
+# Apply generator Units time series (retirements, new builds, capacity scaling)
+# IMPORTANT: Must be called AFTER VRE profiles are loaded
+units_summary = apply_generator_units_timeseries_csv(network, xml_csv_dir)
 
 # Get demand profile for intelligent maintenance scheduling
 try:
@@ -54,219 +84,123 @@ except Exception:
     demand = None
     has_demand = False
 
-# Generate outages (explicit + stochastic with proper accounting)
-csv_dir = "src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model"
-
+# Get explicit outages from CSV
 # Parse explicit outages from "Units Out" property
 explicit_events = parse_explicit_outages_from_properties(
-    csv_dir=csv_dir,
+    csv_dir=xml_csv_dir,
     network=network,
     property_name="Units Out",
 )
 
-# Generate stochastic outages accounting for explicit outages
+# Generate stochastic outages (uses Forced Outage Rate from Time varying properties)
+# For AEMO: Filter out VRE generators by carrier (empty carrier = VRE)
 stochastic_events = generate_stochastic_outages_csv(
-    csv_dir=csv_dir,
+    csv_dir=xml_csv_dir,
     network=network,
     include_forced=True,  # Monte Carlo forced outages
     include_maintenance=True,  # PASA-like maintenance scheduling
     demand_profile=demand if has_demand else None,
     random_seed=42,  # For reproducibility
-    existing_outage_events=explicit_events,  # Deducts explicit hours from FOR/MR budgets
-    generator_filter=lambda gen: "Wind" not in gen
-    and "Solar" not in gen,  # Exclude VRE (variability already in capacity factors)
+    existing_outage_events=None,  # AEMO has no explicit outages
+    generator_filter=lambda gen: network.generators.at[gen, "carrier"]
+    != "",  # Exclude VRE (empty carrier)
 )
 
-# Combine all events
-events = explicit_events + stochastic_events
+# Build outage schedule (only stochastic events for AEMO)
+schedule = build_outage_schedule(stochastic_events, network.snapshots)
+outage_summary = apply_outage_schedule(network, schedule)
 
-# Build outage schedule
-schedule = build_outage_schedule(events, network.snapshots)
-
-# Apply to network using generalized function
-summary2 = apply_outage_schedule(network, schedule)
-
-# Consistency check
 network.consistency_check()
-
-# select 2023 snapshots as subset
 network_subset = network.snapshots[network.snapshots.year == 2023]
-network.optimize(solver_name="gurobi", snapshots=network_subset)
-print(f"✓ Optimization complete: objective = {network.objective:.2f}")
+network.optimize(**SOLVER_CONFIG)
+
+# # Add curtailment/slack link to handle excess must-run generation
+# if "curtailment" not in network.carriers.index:
+#     network.add("Carrier", "curtailment")
+#     print("Added 'curtailment' carrier")
+
+# # Add dummy dump bus
+# network.add("Bus", "curtailment_dump")
+
+# # Add Link from SEM to dump (consumes excess power)
+# network.add(
+#     "Link",
+#     "Curtailment_SEM",
+#     bus0="SEM",  # From SEM
+#     bus1="curtailment_dump",  # To nowhere (dump)
+#     p_nom=5000,  # Max curtailment capacity (MW)
+#     marginal_cost=1000,
+# )
 
 
-if __name__ == "__main__":
-    # Create network using unified factory (uses default target_node strategy)
-    network, setup_summary = create_model(MODEL_ID, use_csv=True)
+# # Helper function to report curtailment usage
+# def report_curtailment(network):
+#     """Report curtailment generator usage after optimization."""
+#     if "Curtailment_SEM" in network.links.index:
+#         if (
+#             not network.links_t.p0.empty
+#             and "Curtailment_SEM" in network.links_t.p0.columns
+#         ):
+#             curtailment = network.links_t.p0["Curtailment_SEM"]
+#             total_curtailed = curtailment.sum()
+#             max_curtailed = curtailment.max()
+#             hours_used = (curtailment > 0.1).sum()  # Hours with >0.1 MW curtailment
 
-    print("\nSetup Summary:")
-    if "target_node" in setup_summary:
-        print(f"  Target node: {setup_summary['target_node']}")
-    if "peak_demand" in setup_summary:
-        print(f"  Peak demand: {setup_summary['peak_demand']:.2f} MW")
-    print(f"  Total buses: {len(network.buses)}")
-    print(f"  Total generators: {len(network.generators)}")
-    print(f"  Total storage units: {len(network.storage_units)}")
+#             print("\n=== Curtailment Report ===")
+#             print(f"Total energy curtailed: {total_curtailed:.1f} MWh")
+#             print(f"Max curtailment: {max_curtailed:.1f} MW")
+#             print(f"Hours with curtailment: {hours_used} / {len(curtailment)}")
 
-    # Load VRE profiles using generic loader with manual mappings
-    print("\nLoading VRE profiles...")
-    summary = load_data_file_profiles_csv(
-        network=network,
-        csv_dir="src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model",
-        profiles_path="src/examples/data/sem-2024-2032/CSV Files",
-        property_name="Rating",
-        target_property="p_max_pu",
-        target_type="generators_t",
-        apply_mode="replace",
-        scenario="1",
-        generator_filter=lambda gen: "Wind" in gen or "Solar" in gen,
-        carrier_mapping={"Wind": "Wind", "Solar": "Solar"},
-        value_scaling=0.01,  # Convert percentage to fraction
-        manual_mappings=SEM_VRE_MAPPINGS,  # Fallback for incomplete CSV export
-    )
+#             if total_curtailed > 0:
+#                 print("✓ Curtailment generator absorbed excess must-run generation")
+#             else:
+#                 print("✓ No curtailment needed (demand always > must-run)")
 
-    # Also set p_min_pu for VRE generators (must-run at capacity factor)
-    if summary["processed_generators"] > 0:
-        for gen in network.generators.index:
-            if (
-                "Wind" in gen or "Solar" in gen
-            ) and gen in network.generators_t.p_max_pu.columns:
-                network.generators_t.p_min_pu[gen] = network.generators_t.p_max_pu[gen]
+# # Report curtailment usage
+# report_curtailment(network)
 
-    print(
-        f"✓ Successfully loaded VRE profiles for {summary['processed_generators']} generators"
-    )
+# # DIAGNOSTIC: Check for infeasibility issues
+# diagnostic_results = diagnose_infeasibility(network)
+# suggest_fixes(diagnostic_results)
 
-    # Test outages module functionality
-    print("\n" + "=" * 70)
-    print("TESTING OUTAGES MODULE")
-    print("=" * 70)
+# # Calculate minimum required generation from must-run constraints
+# min_required_gen = pd.Series(0.0, index=network.snapshots)
+# for gen in network.generators.index:
+#     if gen in network.generators_t.p_min_pu.columns:
+#         p_nom = network.generators.at[gen, "p_nom"]
+#         p_min_pu = network.generators_t.p_min_pu[gen]
+#         min_required_gen += p_nom * p_min_pu
 
-    # Part 1: Explicit Outages (from CSV properties)
-    print("\n1. EXPLICIT OUTAGES (from Units Out property)")
-    print("-" * 70)
-    from network.outages import (
-        build_outage_schedule,
-        parse_explicit_outages_from_properties,
-    )
+# # Get total demand
+# if not network.loads_t.p_set.empty:
+#     total_demand = network.loads_t.p_set.sum(axis=1)
 
-    explicit_events = parse_explicit_outages_from_properties(
-        csv_dir="src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model",
-        network=network,
-        property_name="Units Out",
-    )
+#     # Check if must-run exceeds demand
+#     exceeds = min_required_gen > total_demand
+#     if exceeds.any():
+#         violation_count = exceeds.sum()
+#         print(
+#             f"Must-run generation exceeds demand at {violation_count} timesteps! This makes the problem INFEASIBLE (can't reduce generation below minimum)"
+#         )
 
-    if explicit_events:
-        print(f"✓ Found {len(explicit_events)} explicit outage events")
-        print("  Sample events:")
-        for event in explicit_events[:3]:
-            print(
-                f"    - {event.generator}: {event.start} to {event.end} (CF={event.capacity_factor})"
-            )
+#         # Show worst violations
+#         excess = min_required_gen - total_demand
+#         worst_times = excess.nlargest(5).index
+#         print("\n    Worst violations:")
+#         for t in worst_times:
+#             print(
+#                 f"      {t}: must-run={min_required_gen.loc[t]:.2f} MW, "
+#                 f"demand={total_demand.loc[t]:.2f} MW, "
+#                 f"excess={excess.loc[t]:.2f} MW"
+#             )
 
-        # Build and apply explicit outage schedule
-        explicit_schedule = build_outage_schedule(
-            outage_events=explicit_events,
-            snapshots=network.snapshots,
-        )
-        print(f"✓ Built explicit outage schedule: {explicit_schedule.shape}")
-
-        # Apply to network using generalized function
-        summary = apply_outage_schedule(network, explicit_schedule)
-        print(
-            f"✓ Applied explicit outages to {summary['affected_generators']} generators"
-        )
-        if summary["initialized_p_min_pu"] > 0:
-            print(
-                f"  Initialized p_min_pu for {summary['initialized_p_min_pu']} generators"
-            )
-    else:
-        print("  No explicit outages found in SEM data")
-
-    # Part 2: Stochastic Outages (Monte Carlo + Maintenance Scheduling)
-    print("\n2. STOCHASTIC OUTAGES (Monte Carlo + PASA-like)")
-    print("-" * 70)
-    from network.outages import generate_stochastic_outages_csv
-
-    # Get demand profile for maintenance scheduling
-    try:
-        demand = network.loads_t.p_set.sum(axis=1)
-        has_demand = True
-        print(
-            f"  Using demand profile for maintenance scheduling (peak={demand.max():.1f} MW)"
-        )
-    except Exception:
-        demand = None
-        has_demand = False
-        print("  No demand profile available, using uniform maintenance scheduling")
-
-    # Generate stochastic outages accounting for explicit outages (exclude VRE, limit to AA* for testing)
-    stochastic_events = generate_stochastic_outages_csv(
-        csv_dir="src/examples/data/sem-2024-2032/csvs_from_xml/SEM Forecast model",
-        network=network,
-        include_forced=True,
-        include_maintenance=True,
-        demand_profile=demand if has_demand else None,
-        random_seed=42,  # For reproducibility
-        existing_outage_events=explicit_events,  # Deducts explicit hours from FOR/MR budgets
-        generator_filter=lambda gen: gen.startswith("AA")
-        and "Wind" not in gen
-        and "Solar" not in gen,  # Limit to AA* thermal generators for testing
-    )
-
-    if stochastic_events:
-        # Build and apply stochastic outage schedule
-        stochastic_schedule = build_outage_schedule(
-            outage_events=stochastic_events,
-            snapshots=network.snapshots,
-        )
-
-        # Apply to network using generalized function
-        summary = apply_outage_schedule(network, stochastic_schedule)
-        print(
-            f"✓ Applied stochastic outages to {summary['affected_generators']} generators"
-        )
-        if summary["initialized_p_min_pu"] > 0:
-            print(
-                f"  Initialized p_min_pu for {summary['initialized_p_min_pu']} generators"
-            )
-
-        # Show statistics by outage type
-        forced_count = sum(1 for e in stochastic_events if e.outage_type == "forced")
-        maint_count = sum(
-            1 for e in stochastic_events if e.outage_type == "maintenance"
-        )
-        forced_hours = sum(
-            (e.end - e.start).total_seconds() / 3600
-            for e in stochastic_events
-            if e.outage_type == "forced"
-        )
-        maint_hours = sum(
-            (e.end - e.start).total_seconds() / 3600
-            for e in stochastic_events
-            if e.outage_type == "maintenance"
-        )
-
-        print("\nStochastic Outage Statistics:")
-        print(
-            f"  Forced outages: {forced_count} events, {forced_hours:.1f} hours total"
-        )
-        print(f"  Maintenance: {maint_count} events, {maint_hours:.1f} hours total")
-    else:
-        print("  No stochastic outages generated")
-
-    print("\n" + "=" * 70 + "\n")
-
-    network.consistency_check()
-
-    # Select subset of snapshots for optimization
-    snapshots_by_year: defaultdict[int, list] = defaultdict(list)
-    for snap in network.snapshots:
-        year = pd.Timestamp(snap).year
-        if len(snapshots_by_year[year]) < SNAPSHOTS_PER_YEAR:
-            snapshots_by_year[year].append(snap)
-
-    subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
-
-    # Optimize network
-    network.optimize(solver_name="gurobi")
+#         print("\n💡 SOLUTION: Reduce p_min_pu constraints or add flexibility")
+#         print("   Option 1: Scale down p_min_pu proportionally")
+#         print("   Option 2: Allow some generators to curtail (set p_min_pu=0)")
+#         print("   Option 3: Add storage or flexible demand")
+#     else:
+#         print("✓ Must-run constraints are feasible (never exceed demand)")
+#         min_excess = (total_demand - min_required_gen).min()
+#         print(f"  Minimum flexibility: {min_excess:.2f} MW")
+# else:
+#     print("⚠️  No demand found - cannot check must-run feasibility")
