@@ -16,7 +16,7 @@ from network.costs_csv import (
 )
 from network.generators_csv import port_generators_csv
 from network.links_csv import port_links_csv
-from network.storage_csv import add_storage_csv
+from network.storage_csv import port_storage_csv
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,7 @@ def setup_network_csv(
 
     # 5. Add storage
     logger.info("Adding storage from CSV...")
-    add_storage_csv(
+    port_storage_csv(
         network=network,
         csv_dir=csv_dir,
         timeslice_csv=timeslice_csv,
