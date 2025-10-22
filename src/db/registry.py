@@ -499,6 +499,7 @@ MODEL_REGISTRY = {
         "model_type": "electricity",
         "default_config": {
             "demand_assignment_strategy": "per_node",
+            "demand_file": "Input files/DA/Load/LoadR1DA.csv",
         },
         "recipe": [
             # Download main XML file
