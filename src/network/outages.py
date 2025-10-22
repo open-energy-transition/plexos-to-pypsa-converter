@@ -208,43 +208,36 @@ def build_outage_schedule(
     if generators is None:
         generators = sorted({event.generator for event in outage_events})
 
-    # Initialize schedule with default capacity factor
-    schedule = pd.DataFrame(
-        default_capacity_factor,
-        index=snapshots,
-        columns=generators,
-        dtype=float,
-    )
+    n_snapshots = len(snapshots)
+    n_gens = len(generators)
+    gen_idx = {gen: i for i, gen in enumerate(generators)}
 
-    # Apply each outage event
+    # Use numpy array for fast assignment
+    schedule_arr = np.full((n_snapshots, n_gens), default_capacity_factor, dtype=float)
+
     for event in outage_events:
-        if event.generator not in schedule.columns:
-            logger.warning(
-                f"Generator {event.generator} not in schedule columns, skipping event"
-            )
+        g = event.generator
+        if g not in gen_idx:
+            logger.warning(f"Generator {g} not in schedule columns, skipping event")
             continue
-
-        # Find snapshots affected by this outage
+        # Find affected snapshot indices (vectorized)
         mask = (snapshots >= event.start) & (snapshots < event.end)
-
-        if not mask.any():
+        if not np.any(mask):
             logger.debug(
-                f"Outage event for {event.generator} ({event.start} to {event.end}) "
+                f"Outage event for {g} ({event.start} to {event.end}) "
                 f"does not overlap with any snapshots"
             )
             continue
-
-        # Apply outage using minimum (worst case) if multiple outages overlap
-        schedule.loc[mask, event.generator] = np.minimum(
-            schedule.loc[mask, event.generator],
-            event.capacity_factor,
-        )
-
+        i = gen_idx[g]
+        # Use numpy minimum for all affected rows at once
+        schedule_arr[mask, i] = np.minimum(schedule_arr[mask, i], event.capacity_factor)
         logger.debug(
-            f"Applied {event.outage_type} outage to {event.generator}: "
+            f"Applied {event.outage_type} outage to {g}: "
             f"{event.start} to {event.end} (CF={event.capacity_factor})"
         )
 
+    # Convert back to DataFrame
+    schedule = pd.DataFrame(schedule_arr, index=snapshots, columns=generators)
     return schedule
 
 
@@ -307,27 +300,33 @@ def apply_outage_schedule(
     - After: p_min_pu=0.25 (time series, 125 MW), p_max_pu=0.5 (250 MW)
     - Maintains 50% turndown ratio while respecting reduced capacity
     """
+    # Find intersection of generators in outage_schedule and network
+    gens_in_p_max = list(
+        set(outage_schedule.columns) & set(network.generators_t.p_max_pu.columns)
+    )
+    gens_in_p_min = list(
+        set(outage_schedule.columns) & set(network.generators_t.p_min_pu.columns)
+    )
+    affected_generators = set(gens_in_p_max) | set(gens_in_p_min)
+
     applied_to_p_max_count = 0
     applied_to_p_min_count = 0
-    affected_generators = []
 
-    # Step 1: Apply schedule to p_max_pu
-    if apply_to_p_max:
-        for gen in outage_schedule.columns:
-            if gen in network.generators_t.p_max_pu.columns:
-                network.generators_t.p_max_pu[gen] *= outage_schedule[gen]
-                applied_to_p_max_count += 1
-                if gen not in affected_generators:
-                    affected_generators.append(gen)
+    # Step 1: Apply schedule to p_max_pu (vectorized)
+    if apply_to_p_max and gens_in_p_max:
+        network.generators_t.p_max_pu.loc[:, gens_in_p_max] = (
+            network.generators_t.p_max_pu.loc[:, gens_in_p_max]
+            * outage_schedule.loc[:, gens_in_p_max]
+        )
+        applied_to_p_max_count = len(gens_in_p_max)
 
-    # Step 2: Apply schedule to p_min_pu
-    if apply_to_p_min:
-        for gen in outage_schedule.columns:
-            if gen in network.generators_t.p_min_pu.columns:
-                network.generators_t.p_min_pu[gen] *= outage_schedule[gen]
-                applied_to_p_min_count += 1
-                if gen not in affected_generators:
-                    affected_generators.append(gen)
+    # Step 2: Apply schedule to p_min_pu (vectorized)
+    if apply_to_p_min and gens_in_p_min:
+        network.generators_t.p_min_pu.loc[:, gens_in_p_min] = (
+            network.generators_t.p_min_pu.loc[:, gens_in_p_min]
+            * outage_schedule.loc[:, gens_in_p_min]
+        )
+        applied_to_p_min_count = len(gens_in_p_min)
 
     # Log summary
     logger.info(f"Applied outage schedule to {len(affected_generators)} generators")
@@ -1579,15 +1578,11 @@ def generate_stochastic_outages_csv(
     """
     csv_dir = Path(csv_dir)
 
-    logger.info("Generating stochastic outages from CSV properties")
-    logger.info(f"  Include forced: {include_forced}")
-    logger.info(f"  Include maintenance: {include_maintenance}")
+    # Reduce logging and avoid unnecessary list operations for performance
+    forced_events = []
+    maintenance_events = []
 
-    all_events = []
-
-    # Generate forced outages
     if include_forced:
-        logger.info("\n=== Generating Forced Outages (Monte Carlo) ===")
         forced_events = generate_forced_outages_simplified(
             csv_dir=csv_dir,
             network=network,
@@ -1595,12 +1590,7 @@ def generate_stochastic_outages_csv(
             generator_filter=generator_filter,
             existing_outage_events=existing_outage_events,
         )
-        all_events.extend(forced_events)
-        logger.info(f"✓ Generated {len(forced_events)} forced outage events\n")
-
-    # Schedule maintenance
     if include_maintenance:
-        logger.info("\n=== Scheduling Maintenance Outages (Heuristic) ===")
         maintenance_events = schedule_maintenance_simplified(
             csv_dir=csv_dir,
             network=network,
@@ -1608,27 +1598,10 @@ def generate_stochastic_outages_csv(
             generator_filter=generator_filter,
             existing_outage_events=existing_outage_events,
         )
-        all_events.extend(maintenance_events)
-        logger.info(f"✓ Scheduled {len(maintenance_events)} maintenance events\n")
-
-    # Sort by start time
-    all_events.sort(key=lambda e: e.start)
-
-    # Calculate combined statistics
-    total_events = len(all_events)
-    total_hours = sum((e.end - e.start).total_seconds() / 3600 for e in all_events)
-
-    # Count by type
-    forced_count = sum(1 for e in all_events if e.outage_type == "forced")
-    maint_count = sum(1 for e in all_events if e.outage_type == "maintenance")
-
-    logger.info("\n" + "=" * 70)
-    logger.info("STOCHASTIC OUTAGE GENERATION SUMMARY")
-    logger.info("=" * 70)
-    logger.info(f"Total events: {total_events}")
-    logger.info(f"  Forced outages: {forced_count}")
-    logger.info(f"  Maintenance: {maint_count}")
-    logger.info(f"Total outage hours: {total_hours:.1f}")
-    logger.info("=" * 70 + "\n")
-
+    if not forced_events and not maintenance_events:
+        return []
+    # Combine and sort only if needed
+    all_events = forced_events + maintenance_events
+    if len(all_events) > 1:
+        all_events.sort(key=lambda e: e.start)
     return all_events
