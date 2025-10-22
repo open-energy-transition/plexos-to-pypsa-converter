@@ -1,12 +1,46 @@
 """Generator filter presets for workflow system.
 
-This module provides named filter presets that can be referenced in the registry
-workflow definitions, eliminating the need for lambda functions in JSON.
+Provides named filter presets for use in registry workflow definitions.
 """
 
 from collections.abc import Callable
+from typing import Any
 
 import pypsa
+
+
+def make_filter(
+    description: str, requires_network: bool, fn: Callable
+) -> dict[str, Any]:
+    return {
+        "filter": fn,
+        "requires_network": requires_network,
+        "description": description,
+    }
+
+
+FILTER_PRESETS: dict[str, dict[str, Any]] = {
+    "all": make_filter("No filtering", False, None),
+    "vre_only": make_filter(
+        "Only Wind/Solar", False, lambda gen: "Wind" in gen or "Solar" in gen
+    ),
+    "exclude_vre": make_filter(
+        "Exclude VRE generators (empty carrier = VRE)",
+        True,
+        lambda gen, network: network.generators.at[gen, "carrier"] != "",
+    ),
+    "thermal_only": make_filter(
+        "Only thermal/dispatchable generators",
+        True,
+        lambda gen, network: network.generators.at[gen, "carrier"]
+        not in ["", "wind", "solar", "Wind", "Solar"],
+    ),
+    "has_carrier": make_filter(
+        "Generators with non-empty carrier",
+        True,
+        lambda gen, network: network.generators.at[gen, "carrier"] != "",
+    ),
+}
 
 
 def resolve_filter_preset(
@@ -26,45 +60,13 @@ def resolve_filter_preset(
     """
     if filter_name is None or filter_name == "all":
         return None
-
     if filter_name not in FILTER_PRESETS:
         msg = f"Unknown filter preset: {filter_name}. Available presets: {list(FILTER_PRESETS.keys())}"
         raise ValueError(msg)
-
     preset = FILTER_PRESETS[filter_name]
-
-    # If the filter requires network context, bind it
     if preset["requires_network"]:
         if network is None:
             msg = f"Filter preset '{filter_name}' requires a network to be provided"
             raise ValueError(msg)
         return lambda gen: preset["filter"](gen, network)
-    else:
-        return preset["filter"]
-
-
-# Filter preset definitions
-FILTER_PRESETS = {
-    "all": {"filter": None, "requires_network": False, "description": "No filtering"},
-    "vre_only": {
-        "filter": lambda gen: "Wind" in gen or "Solar" in gen,
-        "requires_network": False,
-        "description": "Only generators with 'Wind' or 'Solar' in their name",
-    },
-    "exclude_vre": {
-        "filter": lambda gen, network: network.generators.at[gen, "carrier"] != "",
-        "requires_network": True,
-        "description": "Exclude VRE generators (empty carrier = VRE)",
-    },
-    "thermal_only": {
-        "filter": lambda gen, network: network.generators.at[gen, "carrier"]
-        not in ["", "wind", "solar", "Wind", "Solar"],
-        "requires_network": True,
-        "description": "Only thermal/dispatchable generators",
-    },
-    "has_carrier": {
-        "filter": lambda gen, network: network.generators.at[gen, "carrier"] != "",
-        "requires_network": True,
-        "description": "Generators with non-empty carrier",
-    },
-}
+    return preset["filter"]

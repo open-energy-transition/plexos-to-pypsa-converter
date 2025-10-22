@@ -20,67 +20,19 @@ def run_model_workflow(
 ) -> tuple[pypsa.Network, dict]:
     """Execute model processing workflow from registry definition.
 
-    This function orchestrates the execution of a multi-step workflow defined
-    in the model registry, handling parameter injection, path resolution,
-    and summary aggregation.
-
-    Args:
-        model_id: Model identifier from registry (e.g., "sem-2024-2032")
-        workflow_overrides: Optional dict to completely override workflow definition
-        **step_overrides: Override parameters for specific steps using syntax:
-            step_name__param_name=value (e.g., optimize__year=2024)
-
-    Returns:
-        (network, aggregated_summary) tuple where:
-            - network: Final PyPSA network after all steps
-            - aggregated_summary: Dict containing summaries from all steps
-
-    Raises:
-        ValueError: If model_id not in registry or workflow step not found
-        KeyError: If required workflow configuration is missing
-
-    Example:
-        # Run standard workflow
-        >>> network, summary = run_model_workflow("sem-2024-2032")
-
-        # Override optimization year
-        >>> network, summary = run_model_workflow(
-        ...     "sem-2024-2032",
-        ...     optimize__year=2024
-        ... )
-
-        # Completely custom workflow
-        >>> network, summary = run_model_workflow(
-        ...     "sem-2024-2032",
-        ...     workflow_overrides={
-        ...         "steps": [
-        ...             {"name": "create_model", "params": {}},
-        ...             {"name": "optimize", "params": {"year": 2023}}
-        ...         ]
-        ...     }
-        ... )
+    This function orchestrates the execution of a multi-step workflow defined in the model registry, handling parameter injection, path resolution, and summary aggregation.
     """
-    # Validate model exists in registry
     if model_id not in MODEL_REGISTRY:
         msg = f"Model '{model_id}' not found in registry. Available models: {list(MODEL_REGISTRY.keys())}"
         raise ValueError(msg)
-
     model_meta = MODEL_REGISTRY[model_id]
-
-    # Check if model has processing workflow defined
     if "processing_workflow" not in model_meta:
         msg = f"Model '{model_id}' does not have a processing_workflow defined. This model may not support the workflow system yet."
         raise ValueError(msg)
-
-    # Load workflow definition (use override if provided)
     workflow = workflow_overrides or model_meta["processing_workflow"]
-
-    # Resolve model paths
     model_dir = get_model_directory(model_id)
     csv_dir_pattern = workflow.get("csv_dir_pattern", "csvs_from_xml")
-    # Resolve csv_dir
     csv_dir = model_dir / csv_dir_pattern
-    # Build context for parameter injection
     context = {
         "model_id": model_id,
         "model_dir": str(model_dir),
@@ -89,85 +41,59 @@ def run_model_workflow(
         "inflow_path": str(model_dir),
     }
 
-    # Parse step-specific overrides from kwargs
-    parsed_overrides = {}
-    for key, value in step_overrides.items():
-        if "__" in key:
-            step_name, param_name = key.split("__", 1)
-            if step_name not in parsed_overrides:
-                parsed_overrides[step_name] = {}
-            parsed_overrides[step_name][param_name] = value
-        else:
-            # Direct parameter (applies to all steps?)
-            # For now, ignore - could support global params later
-            pass
+    def parse_step_overrides(step_overrides: dict) -> dict[str, dict]:
+        parsed = {}
+        for key, value in step_overrides.items():
+            if "__" in key:
+                step, param = key.split("__", 1)
+                parsed.setdefault(step, {})[param] = value
+        return parsed
 
-    # Execute workflow steps
-    network = None
-    aggregated_summary = {}
+    parsed_overrides = parse_step_overrides(step_overrides)
 
-    print(f"Running workflow for model: {model_id}")
-    print(f"Model directory: {model_dir}")
-    print(f"Workflow steps: {len(workflow.get('steps', []))}\n")
-
-    for step_idx, step_def in enumerate(workflow.get("steps", []), 1):
+    network: pypsa.Network | None = None
+    aggregated_summary: dict = {}
+    steps = workflow.get("steps", [])
+    print(
+        f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
+    )
+    for step_idx, step_def in enumerate(steps, 1):
         step_name = step_def["name"]
         step_params = step_def.get("params", {}).copy()
-
-        # Check if step should be skipped based on condition
         condition = step_def.get("condition")
         if condition and not _evaluate_condition(condition, context):
             print(
-                f"⏭️  Step {step_idx}/{len(workflow['steps'])}: {step_name} (skipped - condition not met)"
+                f"⏭️  Step {step_idx}/{len(steps)}: {step_name} (skipped - condition not met)"
             )
             continue
-
-        # Validate step exists
         if step_name not in STEP_REGISTRY:
             msg = f"Unknown workflow step: {step_name}. Available steps: {list(STEP_REGISTRY.keys())}"
             raise ValueError(msg)
-
-        # Apply step-specific overrides
         if step_name in parsed_overrides:
             step_params.update(parsed_overrides[step_name])
-
-        # Get step function
         step_fn = STEP_REGISTRY[step_name]
-
-        # Inject context parameters (only those the step function accepts)
         step_params = _inject_context(step_params, context, step_fn)
-
-        # Execute step
-        print(f"▶️  Step {step_idx}/{len(workflow['steps'])}: {step_name}")
-
+        print(f"▶️  Step {step_idx}/{len(steps)}: {step_name}")
         try:
-            # Special handling for create_model (returns network, summary)
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
                 aggregated_summary.update(step_summary)
-            # Special handling for optimize (doesn't return summary)
             elif step_name == "optimize":
-                # Inject solver_config from workflow if not in params
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")
                 step_summary = step_fn(network=network, **step_params)
                 aggregated_summary.update(step_summary)
-            # All other steps require network and return summary
             else:
                 if network is None:
                     msg = f"Step '{step_name}' requires a network, but create_model has not been called yet. Ensure 'create_model' is the first step in the workflow."
-                    raise RuntimeError(msg)  # noqa: TRY301 # TODO: Fix type checker
+                    raise RuntimeError(msg)  # noqa: TRY301
                 step_summary = step_fn(network=network, **step_params)
                 aggregated_summary.update(step_summary)
-
             print(f"   ✓ {step_name} completed\n")
-
         except Exception as e:
             print(f"   ✗ {step_name} failed: {e}\n")
             raise
-
     print(f"✅ Workflow complete for model: {model_id}\n")
-
     return network, aggregated_summary
 
 
