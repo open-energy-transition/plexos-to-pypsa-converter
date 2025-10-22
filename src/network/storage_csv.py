@@ -19,7 +19,6 @@ from db.csv_readers import (
 )
 from network.generators_csv import _discover_datafile_mappings
 from network.storage import create_inflow_from_timeslice_array, load_inflow_from_file
-from utils.paths import extract_filename
 
 logger = logging.getLogger(__name__)
 
@@ -190,13 +189,19 @@ def port_storage_csv(
         logger.info("Battery.csv not found, skipping battery import")
 
     # ===== PROCESS PLEXOS STORAGE CLASS OBJECTS =====
-    # TEMPORARILY DISABLED: Pumped hydro storage porting
-    # These are complex hydro storage systems from Storage.csv that need careful modeling
-    # with HEAD/TAIL pairs, natural inflows, volume tracking, etc.
-    # For now, skip them to avoid infeasibility issues and focus on batteries only.
-    logger.info(
-        "Skipping PLEXOS Storage class objects (pumped hydro) - focusing on Battery class only"
-    )
+    # Process standalone hydro storage from Storage.csv (skip HEAD/TAIL pairs)
+    storage_csv_path = csv_dir / "Storage.csv"
+
+    if storage_csv_path.exists():
+        logger.info("Loading standalone hydro storages from Storage.csv...")
+        storage_df = load_static_properties(csv_dir, "Storage")
+
+        if not storage_df.empty:
+            _port_hydro_storage_from_csv(network, storage_df, generator_df, node_df)
+        else:
+            logger.info("Storage.csv is empty, skipping hydro storage import")
+    else:
+        logger.info("Storage.csv not found, skipping hydro storage import")
 
 
 def _port_batteries_from_csv(
@@ -385,6 +390,154 @@ def _port_batteries_from_csv(
         logger.info(f"Skipped batteries: {skipped_batteries}")
 
 
+def _port_hydro_storage_from_csv(
+    network: pypsa.Network,
+    storage_df: pd.DataFrame,
+    generator_df: pd.DataFrame,
+    node_df: pd.DataFrame | None = None,
+) -> None:
+    """Port standalone hydro storage units from Storage.csv to PyPSA network.
+
+    This creates a simple `StorageUnit` per reservoir (skipping HEAD/TAIL pumped
+    hydro pairs). It links to generators via the `Storage` column in
+    Generator.csv and derives p_nom from the sum of associated generator capacities.
+    """
+    added = 0
+    skipped = []
+
+    # Helper to get property value
+    def _prop(name: str, obj: str):
+        return get_property_from_static_csv(storage_df, obj, name)
+
+    # Iterate storages
+    for storage_name in storage_df.index:
+        # Skip HEAD/TAIL pumped hydro pairs
+        if (
+            storage_name.endswith("_H")
+            or storage_name.endswith("_T")
+            or storage_name.endswith("HEAD")
+            or storage_name.endswith("TAIL")
+        ):
+            logger.debug(f"Skipping pumped hydro HEAD/TAIL storage: {storage_name}")
+            continue
+
+        try:
+            # Find generators that reference this storage
+            gens_for_storage = generator_df[generator_df.get("Storage") == storage_name]
+
+            if gens_for_storage.empty:
+                logger.debug(
+                    f"No generators reference storage {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (no generators)")
+                continue
+
+            # Sum generator max capacities (Max Capacity column)
+            p_nom = 0.0
+            for gen in gens_for_storage.index:
+                max_cap = get_property_from_static_csv(
+                    generator_df, gen, "Max Capacity"
+                )
+                try:
+                    p_nom += float(max_cap) if max_cap not in (None, "") else 0.0
+                except (ValueError, TypeError):
+                    logger.debug(
+                        f"Invalid Max Capacity for generator {gen}, treating as 0"
+                    )
+
+            if p_nom <= 0:
+                logger.debug(
+                    f"Computed p_nom <= 0 for storage {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (p_nom<=0)")
+                continue
+
+            # Energy (Max Volume) - assume MWh unless conversion factor provided
+            max_volume = _prop("Max Volume", storage_name)
+            try:
+                energy = float(max_volume) if max_volume not in (None, "") else 0.0
+            except (ValueError, TypeError):
+                logger.debug(f"Invalid Max Volume for storage {storage_name}, using 0")
+                energy = 0.0
+
+            if energy <= 0:
+                logger.debug(
+                    f"Energy (Max Volume) missing or zero for {storage_name}, skipping"
+                )
+                skipped.append(f"{storage_name} (no energy)")
+                continue
+
+            max_hours = energy / p_nom if p_nom > 0 else 0.0
+
+            # End effects (cyclic vs free)
+            end_effects = get_end_effects_method(storage_df, storage_name)
+            cyclic = end_effects == "recycle"
+
+            # Initial SOC
+            init_vol = _prop("Initial Volume", storage_name)
+            try:
+                init_vol_f = float(init_vol) if init_vol not in (None, "") else None
+            except (ValueError, TypeError):
+                init_vol_f = None
+
+            state_of_charge_initial = None
+            if init_vol_f is not None and energy > 0:
+                state_of_charge_initial = max(0.0, min(1.0, init_vol_f / energy))
+
+            # Determine bus: use bus from first associated generator
+            first_gen = gens_for_storage.index[0]
+            bus = None
+            try:
+                # Search generator DataFrame for Node column (which becomes bus in PyPSA)
+                bus = gens_for_storage.loc[first_gen].get("Node")
+                if not bus:
+                    # Try "Bus" as fallback for other datasets
+                    bus = gens_for_storage.loc[first_gen].get("Bus")
+            except Exception:
+                bus = None
+
+            if not bus:
+                # Fallback: try to find via node_df using helper
+                if node_df is not None:
+                    bus = find_bus_for_object_csv(
+                        node_df, "Generator", first_gen, fallback=None
+                    )
+
+            if not bus:
+                logger.debug(f"Could not find bus for storage {storage_name}, skipping")
+                skipped.append(f"{storage_name} (no bus)")
+                continue
+
+            # Add StorageUnit
+            add_kwargs = dict(
+                p_nom=p_nom,
+                max_hours=max_hours,
+                cyclic_state_of_charge=cyclic,
+                state_of_charge_initial=state_of_charge_initial
+                if state_of_charge_initial is not None
+                else 0.5,
+                bus=bus,
+                carrier="hydro",
+                p_nom_extendable=False,
+            )
+
+            network.add("StorageUnit", storage_name, **add_kwargs)
+            added += 1
+
+            logger.info(
+                f"Added hydro storage {storage_name}: p_nom={p_nom:.1f} MW, energy={energy:.1f} MWh, "
+                f"max_hours={max_hours:.2f}, bus={bus}, cyclic={cyclic}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Error processing storage {storage_name}: {e}")
+            skipped.append(f"{storage_name} (error: {e})")
+
+    logger.info(f"Hydro storages added: {added}")
+    if skipped:
+        logger.info(f"Hydro storages skipped: {len(skipped)} ({skipped})")
+
+
 def add_storage_inflows_csv(
     network: pypsa.Network,
     csv_dir: str | Path,
@@ -496,18 +649,26 @@ def add_storage_inflows_csv(
 
                 # Look up CSV filename in Data File.csv mappings
                 if datafile_obj in datafile_to_csv:
-                    csv_filename = datafile_to_csv[datafile_obj]
-                    clean_filename = extract_filename(csv_filename.strip())
+                    csv_relative_path = datafile_to_csv[datafile_obj]
 
-                    # Load inflow from file
+                    # Normalize path separators (handle Windows backslashes)
+                    csv_relative_path = csv_relative_path.strip().replace("\\", "/")
+
+                    # The relative path from Data File.csv is relative to the model root
+                    # e.g., csv_dir = "model_root/csvs_from_xml/NEM"
+                    #       path = "Traces/hydro/file.csv"
+                    # We need to go up two levels: csv_dir.parent.parent
+                    base_path = csv_dir.parent.parent
+
+                    # Load inflow from file (pass relative path and base directory)
                     inflow_data = load_inflow_from_file(
-                        clean_filename, str(inflow_path), snapshots
+                        csv_relative_path, str(base_path), snapshots
                     )
 
                     if inflow_data is not None:
                         inflow_source = "data_file"
                         logger.info(
-                            f"Loaded inflow data for {storage_name} from data file: {clean_filename}"
+                            f"Loaded inflow data for {storage_name} from data file: {csv_relative_path}"
                         )
                 else:
                     logger.warning(
