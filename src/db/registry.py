@@ -982,6 +982,10 @@ MODEL_REGISTRY = {
                     },
                 },
                 {
+                    "name": "add_slack",
+                    "params": {},
+                },
+                {
                     "name": "optimize",
                     "params": {"year": 2023},
                 },
