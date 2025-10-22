@@ -97,17 +97,17 @@ explicit_events = parse_explicit_outages_from_properties(
 stochastic_events = generate_stochastic_outages_csv(
     csv_dir=xml_csv_dir,
     network=network,
-    include_forced=True,  # Monte Carlo forced outages
-    include_maintenance=True,  # PASA-like maintenance scheduling
+    include_forced=True,
+    include_maintenance=True,
     demand_profile=demand if has_demand else None,
     random_seed=42,  # For reproducibility
-    existing_outage_events=None,  # AEMO has no explicit outages
+    existing_outage_events=explicit_events,
     generator_filter=lambda gen: network.generators.at[gen, "carrier"]
     != "",  # Exclude VRE (empty carrier)
 )
 
 # Build outage schedule (only stochastic events for AEMO)
-schedule = build_outage_schedule(stochastic_events, network.snapshots)
+schedule = build_outage_schedule(explicit_events + stochastic_events, network.snapshots)
 outage_summary = apply_outage_schedule(network, schedule)
 
 network.consistency_check()
