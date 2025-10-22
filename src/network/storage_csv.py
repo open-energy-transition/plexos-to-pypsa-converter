@@ -391,6 +391,11 @@ def _port_hydro_storage_from_csv(
     added = 0
     skipped = []
 
+    # Ensure "hydro" carrier exists in the network
+    if "hydro" not in network.carriers.index:
+        network.add("Carrier", "hydro")
+        logger.info("Added 'hydro' carrier to network")
+
     # Helper to get property value
     def _prop(name: str, obj: str):
         return get_property_from_static_csv(storage_df, obj, name)
