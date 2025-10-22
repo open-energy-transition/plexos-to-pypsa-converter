@@ -230,6 +230,10 @@ def setup_network_csv(
         target_node=target_node,
     )
 
+    # NOTE: Generator Units time series (retirements, new builds) are NOT applied here.
+    # Units MUST be applied AFTER VRE profiles are loaded, otherwise they get overwritten.
+    # Call apply_generator_units_timeseries_csv() manually after loading VRE profiles.
+
     # 5. Add storage
     logger.info("Adding storage from CSV...")
     add_storage_csv(

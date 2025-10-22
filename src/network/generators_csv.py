@@ -1579,7 +1579,7 @@ def load_data_file_profiles_csv(
                 )
 
             elif apply_mode == "set_both_min_max":
-                # Set both p_max_pu and p_min_pu (for must-run profiles)
+                # Set both p_max_pu and p_min_pu (for must-run/dispatch profiles)
                 network.generators_t.p_max_pu[gen_name] = aligned_profile
                 network.generators_t.p_min_pu[gen_name] = aligned_profile
 
@@ -1771,6 +1771,484 @@ def load_hydro_dispatch_csv(
         carrier_mapping={"Hydro": "Hydro", "Water": "Hydro"},
         value_scaling=1.0,
     )
+
+
+def build_units_timeseries(
+    generator_name: str,
+    static_units_value: str | float | None,
+    time_varying_df: pd.DataFrame,
+    snapshots: pd.DatetimeIndex,
+) -> pd.Series:
+    """Build Units time series for a single generator.
+
+    Combines static Units value with time-varying Units data to create a complete
+    time series showing when generator is built, operating, and retired.
+
+    Parameters
+    ----------
+    generator_name : str
+        Name of the generator
+    static_units_value : str | float | None
+        Static Units value from Generator.csv (may be array like "['0', '101.4']")
+    time_varying_df : pd.DataFrame
+        Time-varying properties filtered for this generator and Units property
+    snapshots : pd.DatetimeIndex
+        Network snapshots to align time series to
+
+    Returns
+    -------
+    pd.Series
+        Units time series indexed by snapshots, showing Units value at each time
+
+    Examples
+    --------
+    >>> # Generator starts at 0, comes online at 101.4 MW in 2026, retires in 2048
+    >>> units_ts = build_units_timeseries(
+    ...     "Aramara Solar Farm",
+    ...     "['0', '101.4', '0']",
+    ...     time_varying_units_df,
+    ...     snapshots
+    ... )
+    """
+    # Parse static Units value to get maximum/reference value
+    static_units = None
+    if static_units_value is not None:
+        static_units = parse_numeric_value(static_units_value, strategy="max")
+
+    # DEBUG: Log static Units parsing for BARCALDN
+    if generator_name == "BARCALDN":
+        logger.info(
+            f"DEBUG {generator_name}: static_units_value = {static_units_value}"
+        )
+        logger.info(f"DEBUG {generator_name}: parsed static_units = {static_units}")
+
+    # Get time-varying entries for this generator
+    gen_units_tv = time_varying_df[time_varying_df["object"] == generator_name].copy()
+
+    if gen_units_tv.empty and static_units is None:
+        # No Units data at all, assume always 1 unit
+        logger.debug(f"No Units data for {generator_name}, assuming Units=1")
+        return pd.Series(1.0, index=snapshots)
+
+    # Separate entries with and without dates
+    entries_with_dates = gen_units_tv[
+        gen_units_tv["date_from"].notna() | gen_units_tv["date_to"].notna()
+    ].copy()
+    entries_without_dates = gen_units_tv[
+        gen_units_tv["date_from"].isna() & gen_units_tv["date_to"].isna()
+    ].copy()
+
+    # DEBUG: Log entry counts for BARCALDN
+    if generator_name == "BARCALDN":
+        logger.info(
+            f"DEBUG {generator_name}: entries_with_dates count = {len(entries_with_dates)}"
+        )
+        logger.info(
+            f"DEBUG {generator_name}: entries_without_dates count = {len(entries_without_dates)}"
+        )
+        if not entries_with_dates.empty:
+            logger.info(
+                f"DEBUG {generator_name}: dated entries:\n{entries_with_dates[['value', 'date_from', 'date_to']]}"
+            )
+
+    # Determine default/initial Units value
+    # Logic distinguishes retirements (static_units > 0) from new builds (static_units = 0/None)
+    # - Retirements: Use static_units as default, future entry changes to 0
+    # - New builds: Default to 0, future entry brings capacity online
+    if not entries_with_dates.empty:
+        # Sort to find earliest entry
+        entries_with_dates_sorted = entries_with_dates.sort_values("date_from")
+        first_entry_date = entries_with_dates_sorted.iloc[0]["date_from"]
+
+        if pd.notna(first_entry_date) and pd.Timestamp(first_entry_date) > snapshots[0]:
+            # First entry is in the future
+            if static_units is not None and static_units > 0:
+                # Facility exists (static_units > 0), use it as default
+                # Future entry represents a change/retirement
+                default_units = static_units
+            else:
+                # No existing capacity, future entry is a new build
+                default_units = 0.0
+        else:
+            # First entry is at/before simulation start - use static or 1.0
+            default_units = static_units if static_units is not None else 1.0
+    else:
+        # No dated entries - use static Units or 1.0
+        default_units = static_units if static_units is not None else 1.0
+
+    # If there are entries without dates (CAISO pattern), use those as defaults
+    if not entries_without_dates.empty:
+        # Take the first entry without dates as the default
+        default_value = entries_without_dates.iloc[0]["value"]
+        try:
+            default_units = float(default_value)
+        except (ValueError, TypeError):
+            logger.warning(
+                f"Could not parse default Units value '{default_value}' for {generator_name}, using {default_units}"
+            )
+
+    # Initialize Units time series with default value
+    units_ts = pd.Series(default_units, index=snapshots)
+
+    # DEBUG: Log default_units for BARCALDN
+    if generator_name == "BARCALDN":
+        logger.info(f"DEBUG {generator_name}: default_units = {default_units}")
+
+    # Apply chronological changes from dated entries
+    if not entries_with_dates.empty:
+        # Sort by date_from
+        entries_with_dates = entries_with_dates.sort_values("date_from")
+
+        for _, row in entries_with_dates.iterrows():
+            units_value = row["value"]
+            date_from = row["date_from"]
+            date_to = row["date_to"]
+
+            try:
+                units_float = float(units_value)
+            except (ValueError, TypeError):
+                logger.warning(
+                    f"Could not parse Units value '{units_value}' for {generator_name}, skipping"
+                )
+                continue
+
+            # Determine time range for this Units value
+            if pd.notna(date_from):
+                start_date = pd.Timestamp(date_from)
+            else:
+                # No start date, apply from beginning
+                start_date = snapshots[0]
+
+            if pd.notna(date_to):
+                end_date = pd.Timestamp(date_to)
+            else:
+                # No end date, apply until end of simulation
+                end_date = snapshots[-1]
+
+            # Apply Units value to snapshots in this range
+            mask = (snapshots >= start_date) & (snapshots <= end_date)
+            units_ts.loc[mask] = units_float
+
+            # DEBUG: Log dated entry application for BARCALDN
+            if generator_name == "BARCALDN":
+                logger.info(
+                    f"DEBUG {generator_name}: Applying Units={units_float} from {start_date} to {end_date}, {mask.sum()} snapshots affected"
+                )
+
+    # DEBUG: Log final units_ts for BARCALDN
+    if generator_name == "BARCALDN":
+        logger.info(
+            f"DEBUG {generator_name}: units_ts min={units_ts.min()}, max={units_ts.max()}"
+        )
+        logger.info(
+            f"DEBUG {generator_name}: units_ts first 3 values: {units_ts.iloc[:3].tolist()}"
+        )
+        logger.info(
+            f"DEBUG {generator_name}: units_ts last 3 values: {units_ts.iloc[-3:].tolist()}"
+        )
+        # Find transition points
+        transitions = units_ts[units_ts.diff() != 0]
+        if len(transitions) > 0:
+            logger.info(
+                f"DEBUG {generator_name}: transition points: {transitions.index.tolist()}"
+            )
+            logger.info(
+                f"DEBUG {generator_name}: transition values: {transitions.tolist()}"
+            )
+
+    return units_ts
+
+
+def apply_generator_units_timeseries_csv(
+    network: Network,
+    csv_dir: str | Path,
+) -> dict:
+    """Apply time-varying Units to scale generator capacity and handle retirements.
+
+    ⚠️  **CRITICAL EXECUTION ORDER**:
+    This function MUST be called AFTER VRE profiles are loaded via
+    load_data_file_profiles_csv(). If called before VRE loading, Units
+    adjustments will be overwritten.
+
+    **Correct order:**
+    1. create_model() - creates network
+    2. load_data_file_profiles_csv() - loads VRE profiles
+    3. apply_generator_units_timeseries_csv() - applies Units (THIS FUNCTION)
+
+    **Dispatch mode support:**
+    For dispatch mode (p_min_pu = p_max_pu), this function multiplies BOTH
+    p_min_pu and p_max_pu to preserve the dispatch constraint while applying
+    retirement/build schedules and capacity scaling.
+
+    This function handles:
+    - Generator retirements (Units → 0)
+    - New builds coming online (Units 0 → N)
+    - Capacity scaling for multi-unit facilities (Units > 1)
+    - Partial retirements (Units N → M where M < N)
+
+    The implementation:
+    1. Parses static Units from Generator.csv
+    2. Loads time-varying Units from Time varying properties.csv
+    3. Sets p_nom to maximum capacity (p_nom × max_units)
+    4. Applies time-varying capacity via p_max_pu and p_min_pu multipliers
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators already added and VRE profiles loaded
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+
+    Returns
+    -------
+    dict
+        Summary with statistics:
+        - total_generators: Number of generators processed
+        - generators_with_units_data: Generators with Units time series
+        - generators_with_retirements: Generators that retire
+        - generators_with_new_builds: Generators that come online
+        - generators_with_scaling: Generators with Units > 1
+        - p_nom_adjusted: Generators with p_nom scaled
+        - p_max_pu_adjusted: Generators with p_max_pu multiplied
+        - p_min_pu_adjusted: Generators with p_min_pu multiplied
+
+    Examples
+    --------
+    >>> # Load VRE profiles first
+    >>> vre_summary = load_data_file_profiles_csv(
+    ...     network, csv_dir, apply_mode="set_both_min_max", ...
+    ... )
+    >>> # Then apply Units
+    >>> summary = apply_generator_units_timeseries_csv(network, csv_dir)
+    >>> print(f"Processed {summary['generators_with_units_data']} generators with Units data")
+    >>> print(f"  - {summary['generators_with_retirements']} with retirements")
+    >>> print(f"  - {summary['generators_with_new_builds']} with new builds")
+    """
+    csv_dir = Path(csv_dir)
+    snapshots = network.snapshots
+
+    logger.info(
+        "Applying generator Units time series for capacity scaling and retirements..."
+    )
+
+    # Load static generator properties
+    generator_df = load_static_properties(csv_dir, "Generator")
+    if generator_df.empty:
+        logger.warning(f"No generators found in {csv_dir}")
+        return {
+            "total_generators": 0,
+            "generators_with_units_data": 0,
+            "generators_with_retirements": 0,
+            "generators_with_new_builds": 0,
+            "generators_with_scaling": 0,
+        }
+
+    # Load time-varying Units data
+    time_varying = load_time_varying_properties(
+        csv_dir, class_name="Generator", property_name="Units"
+    )
+
+    if time_varying.empty:
+        logger.info("No time-varying Units data found. Using static Units only.")
+
+    # Initialize statistics
+    stats = {
+        "total_generators": len(network.generators),
+        "generators_with_units_data": 0,
+        "generators_with_retirements": 0,
+        "generators_with_new_builds": 0,
+        "generators_with_scaling": 0,
+        "p_nom_adjusted": 0,
+        "p_max_pu_adjusted": 0,
+        "p_min_pu_adjusted": 0,
+    }
+
+    # Process each generator in network
+    for gen in network.generators.index:
+        # Get static Units value
+        static_units_str = get_property_from_static_csv(generator_df, gen, "Units")
+
+        # Check if generator has any Units data
+        has_time_varying = (
+            gen in time_varying["object"].values if not time_varying.empty else False
+        )
+        has_static = static_units_str is not None and static_units_str != ""
+
+        if not has_time_varying and not has_static:
+            # No Units data, skip
+            continue
+
+        # Build Units time series
+        units_ts = build_units_timeseries(
+            gen, static_units_str, time_varying, snapshots
+        )
+
+        # Get max Units value (determines p_nom)
+        max_units = units_ts.max()
+        min_units = units_ts.min()
+
+        # DEBUG: Log units_ts for BARCALDN
+        if gen == "BARCALDN":
+            logger.info(f"DEBUG {gen}: units_ts min={min_units}, max={max_units}")
+
+        if max_units == 0:
+            # Generator never operates, set to 0 capacity
+            logger.debug(f"{gen}: Units always 0, setting p_nom=0")
+            network.generators.loc[gen, "p_nom"] = 0.0
+            stats["p_nom_adjusted"] += 1
+            continue
+
+        # Scale p_nom by max Units
+        original_p_nom = network.generators.loc[gen, "p_nom"]
+        new_p_nom = original_p_nom * max_units
+        network.generators.loc[gen, "p_nom"] = new_p_nom
+
+        # DEBUG: Log p_nom scaling for BARCALDN
+        if gen == "BARCALDN":
+            logger.info(
+                f"DEBUG {gen}: p_nom {original_p_nom} → {new_p_nom} (max_units={max_units})"
+            )
+
+        # Calculate units multiplier (relative to max)
+        units_multiplier = units_ts / max_units
+
+        # DEBUG: Log units_multiplier for BARCALDN
+        if gen == "BARCALDN":
+            logger.info(
+                f"DEBUG {gen}: units_multiplier min={units_multiplier.min()}, max={units_multiplier.max()}"
+            )
+            logger.info(
+                f"DEBUG {gen}: units_multiplier index: {units_multiplier.index[0]} to {units_multiplier.index[-1]}"
+            )
+
+        # Apply to p_max_pu
+        if gen in network.generators_t.p_max_pu.columns:
+            existing_p_max_pu = network.generators_t.p_max_pu[gen]
+
+            # DEBUG: Log existing p_max_pu for BARCALDN
+            if gen == "BARCALDN":
+                logger.info(
+                    f"DEBUG {gen}: existing_p_max_pu min={existing_p_max_pu.min()}, max={existing_p_max_pu.max()}"
+                )
+                logger.info(
+                    f"DEBUG {gen}: existing_p_max_pu index: {existing_p_max_pu.index[0]} to {existing_p_max_pu.index[-1]}"
+                )
+                logger.info(
+                    f"DEBUG {gen}: index alignment check: {existing_p_max_pu.index.equals(units_multiplier.index)}"
+                )
+
+            # Check if existing p_max_pu is meaningful (non-zero VRE profile)
+            # If it's all zeros or all ones (default), replace instead of multiply
+            if existing_p_max_pu.max() == 0 or (
+                existing_p_max_pu.min() == 1.0 and existing_p_max_pu.max() == 1.0
+            ):
+                # Replace with units_multiplier
+                if gen == "BARCALDN":
+                    logger.info(
+                        f"DEBUG {gen}: REPLACE path - p_max_pu is default (all 0 or all 1)"
+                    )
+                network.generators_t.p_max_pu[gen] = units_multiplier
+            else:
+                # Multiply existing p_max_pu (preserves VRE profiles)
+                if gen == "BARCALDN":
+                    logger.info(
+                        f"DEBUG {gen}: MULTIPLY path - p_max_pu has meaningful values"
+                    )
+                result = existing_p_max_pu * units_multiplier
+                network.generators_t.p_max_pu[gen] = result
+
+                # DEBUG: Log result for BARCALDN
+                if gen == "BARCALDN":
+                    logger.info(
+                        f"DEBUG {gen}: result after multiplication min={result.min()}, max={result.max()}"
+                    )
+                    logger.info(
+                        f"DEBUG {gen}: result first 3 values: {result.iloc[:3].tolist()}"
+                    )
+                    logger.info(
+                        f"DEBUG {gen}: result last 3 values: {result.iloc[-3:].tolist()}"
+                    )
+
+            stats["p_max_pu_adjusted"] += 1
+
+            # DEBUG: Verify assignment persisted for BARCALDN
+            if gen == "BARCALDN":
+                final_p_max_pu = network.generators_t.p_max_pu[gen]
+                logger.info(
+                    f"DEBUG {gen}: FINAL p_max_pu after assignment min={final_p_max_pu.min()}, max={final_p_max_pu.max()}"
+                )
+        else:
+            # Create new p_max_pu time series
+            network.generators_t.p_max_pu[gen] = units_multiplier
+            stats["p_max_pu_adjusted"] += 1
+
+        # Apply to p_min_pu (critical for dispatch mode: p_min_pu = p_max_pu)
+        # Must multiply p_min_pu to preserve dispatch constraint after Units applied
+        if gen in network.generators_t.p_min_pu.columns:
+            existing_p_min_pu = network.generators_t.p_min_pu[gen]
+
+            # Check if p_min_pu has meaningful values (dispatch mode)
+            if existing_p_min_pu.max() > 0:
+                if existing_p_min_pu.max() == 0 or (
+                    existing_p_min_pu.min() == 1.0 and existing_p_min_pu.max() == 1.0
+                ):
+                    # Replace with units_multiplier
+                    network.generators_t.p_min_pu[gen] = units_multiplier
+                else:
+                    # Multiply existing p_min_pu (preserves dispatch profiles)
+                    network.generators_t.p_min_pu[gen] = (
+                        existing_p_min_pu * units_multiplier
+                    )
+
+                stats["p_min_pu_adjusted"] += 1
+
+        # Update statistics
+        stats["generators_with_units_data"] += 1
+
+        if max_units > 1:
+            stats["generators_with_scaling"] += 1
+
+        if min_units == 0 and max_units > 0:
+            # Generator comes online or retires
+            if units_ts.iloc[0] == 0 and units_ts.iloc[-1] > 0:
+                stats["generators_with_new_builds"] += 1
+            elif units_ts.iloc[0] > 0 and units_ts.iloc[-1] == 0:
+                stats["generators_with_retirements"] += 1
+            elif (units_ts == 0).any() and (units_ts > 0).any():
+                # Has both periods of operation and non-operation
+                stats["generators_with_new_builds"] += 1
+                stats["generators_with_retirements"] += 1
+
+        stats["p_nom_adjusted"] += 1
+
+        # Log notable cases
+        if max_units > 1:
+            logger.debug(
+                f"{gen}: Scaled capacity {original_p_nom:.1f} → {new_p_nom:.1f} MW (Units: {max_units})"
+            )
+        if min_units == 0 and max_units > 0:
+            logger.debug(
+                f"{gen}: Time-varying operation (Units: {min_units} → {max_units})"
+            )
+
+    # Log summary
+    logger.info("Generator Units processing complete:")
+    logger.info(f"  Total generators: {stats['total_generators']}")
+    logger.info(f"  Generators with Units data: {stats['generators_with_units_data']}")
+    logger.info(
+        f"    - With capacity scaling (Units > 1): {stats['generators_with_scaling']}"
+    )
+    logger.info(f"    - With new builds: {stats['generators_with_new_builds']}")
+    logger.info(f"    - With retirements: {stats['generators_with_retirements']}")
+    logger.info(f"  p_nom adjusted: {stats['p_nom_adjusted']} generators")
+    logger.info(
+        f"  p_max_pu time series adjusted: {stats['p_max_pu_adjusted']} generators"
+    )
+    logger.info(
+        f"  p_min_pu time series adjusted: {stats['p_min_pu_adjusted']} generators"
+    )
+
+    return stats
 
 
 def set_capital_costs_csv(network: Network, csv_dir: str | Path):
