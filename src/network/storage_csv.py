@@ -174,7 +174,6 @@ def port_storage_csv(
     if generator_df is None:
         generator_df = load_static_properties(csv_dir, "Generator")
 
-    # ===== PROCESS PLEXOS BATTERY CLASS OBJECTS =====
     battery_csv_path = csv_dir / "Battery.csv"
 
     if battery_csv_path.exists():
@@ -222,12 +221,12 @@ def _port_batteries_from_csv(
 
     # Classify batteries
     for battery_name in battery_df.index:
-        if battery_name.endswith("_H") or battery_name.endswith("HEAD"):
+        if battery_name.endswith(("_H", "HEAD")):
             base_name = (
                 battery_name[:-2] if battery_name.endswith("_H") else battery_name[:-4]
             )
             head_batteries[base_name] = battery_name
-        elif battery_name.endswith("_T") or battery_name.endswith("TAIL"):
+        elif battery_name.endswith(("_T", "TAIL")):
             base_name = (
                 battery_name[:-2] if battery_name.endswith("_T") else battery_name[:-4]
             )
@@ -239,27 +238,18 @@ def _port_batteries_from_csv(
     added_count = 0
     skipped_batteries = []
 
-    for base_name in head_batteries:
+    for base_name, head_name in head_batteries.items():
         if base_name not in tail_batteries:
-            logger.warning(
-                f"Found HEAD battery without TAIL: {head_batteries[base_name]}"
-            )
-            skipped_batteries.append(f"{head_batteries[base_name]} (missing TAIL pair)")
+            logger.warning(f"Found HEAD battery without TAIL: {head_name}")
+            skipped_batteries.append(f"{head_name} (missing TAIL pair)")
             continue
 
-        head_name = head_batteries[base_name]
         tail_name = tail_batteries[base_name]
 
         try:
             # Extract properties from HEAD and TAIL
-            max_volume_head = get_property_from_static_csv(
-                battery_df, head_name, "Max Volume"
-            )
             max_volume_tail = get_property_from_static_csv(
                 battery_df, tail_name, "Max Volume"
-            )
-            max_power_head = get_property_from_static_csv(
-                battery_df, head_name, "Max Capacity"
             )
             max_power_tail = get_property_from_static_csv(
                 battery_df, tail_name, "Max Capacity"
@@ -268,9 +258,6 @@ def _port_batteries_from_csv(
             # Parse values
             try:
                 max_energy = float(max_volume_tail) if max_volume_tail else 0.0
-                max_power_charge = (
-                    float(max_power_head) if max_power_head else max_energy
-                )
                 max_power_discharge = (
                     float(max_power_tail) if max_power_tail else max_energy
                 )
@@ -279,7 +266,6 @@ def _port_batteries_from_csv(
                     f"Could not parse battery properties for {base_name}, using defaults"
                 )
                 max_energy = 0.0
-                max_power_charge = 0.0
                 max_power_discharge = 0.0
 
             # Get efficiency
@@ -412,12 +398,7 @@ def _port_hydro_storage_from_csv(
     # Iterate storages
     for storage_name in storage_df.index:
         # Skip HEAD/TAIL pumped hydro pairs
-        if (
-            storage_name.endswith("_H")
-            or storage_name.endswith("_T")
-            or storage_name.endswith("HEAD")
-            or storage_name.endswith("TAIL")
-        ):
+        if storage_name.endswith(("_H", "_T", "HEAD", "TAIL")):
             logger.debug(f"Skipping pumped hydro HEAD/TAIL storage: {storage_name}")
             continue
 
@@ -496,12 +477,11 @@ def _port_hydro_storage_from_csv(
             except Exception:
                 bus = None
 
-            if not bus:
+            if not bus and node_df is not None:
                 # Fallback: try to find via node_df using helper
-                if node_df is not None:
-                    bus = find_bus_for_object_csv(
-                        node_df, "Generator", first_gen, fallback=None
-                    )
+                bus = find_bus_for_object_csv(
+                    node_df, "Generator", first_gen, fallback=None
+                )
 
             if not bus:
                 logger.debug(f"Could not find bus for storage {storage_name}, skipping")
@@ -509,17 +489,17 @@ def _port_hydro_storage_from_csv(
                 continue
 
             # Add StorageUnit
-            add_kwargs = dict(
-                p_nom=p_nom,
-                max_hours=max_hours,
-                cyclic_state_of_charge=cyclic,
-                state_of_charge_initial=state_of_charge_initial
+            add_kwargs = {
+                "p_nom": p_nom,
+                "max_hours": max_hours,
+                "cyclic_state_of_charge": cyclic,
+                "state_of_charge_initial": state_of_charge_initial
                 if state_of_charge_initial is not None
                 else 0.5,
-                bus=bus,
-                carrier="hydro",
-                p_nom_extendable=False,
-            )
+                "bus": bus,
+                "carrier": "hydro",
+                "p_nom_extendable": False,
+            }
 
             network.add("StorageUnit", storage_name, **add_kwargs)
             added += 1
@@ -655,12 +635,10 @@ def add_storage_inflows_csv(
                     csv_relative_path = csv_relative_path.strip().replace("\\", "/")
 
                     # The relative path from Data File.csv is relative to the model root
-                    # e.g., csv_dir = "model_root/csvs_from_xml/NEM"
-                    #       path = "Traces/hydro/file.csv"
                     # We need to go up two levels: csv_dir.parent.parent
-                    base_path = csv_dir.parent.parent
-
-                    # Load inflow from file (pass relative path and base directory)
+                    base_path = (
+                        csv_dir.parent.parent
+                    )  # Load inflow from file (pass relative path and base directory)
                     inflow_data = load_inflow_from_file(
                         csv_relative_path, str(base_path), snapshots
                     )
