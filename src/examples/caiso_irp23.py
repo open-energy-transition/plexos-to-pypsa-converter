@@ -1,42 +1,99 @@
-from collections import defaultdict
-
-import pandas as pd
-
 from network.conversion import create_model
+from network.generators_csv import (
+    apply_generator_units_timeseries_csv,
+    load_data_file_profiles_csv,
+)
+from network.outages import (
+    apply_outage_schedule,
+    build_outage_schedule,
+    generate_stochastic_outages_csv,
+    parse_explicit_outages_from_properties,
+)
+from network.storage_csv import add_storage_inflows_csv
 
-# Constants
 MODEL_ID = "caiso-irp23"
 SNAPSHOTS_PER_YEAR = 50
+SOLVER_CONFIG = {
+    "solver_name": "gurobi",
+    "solver_options": {
+        "Threads": 6,
+        "Method": 2,  # barrier
+        "Crossover": 0,
+        "BarConvTol": 1.0e-5,
+        "Seed": 123,
+        "AggFill": 0,
+        "PreDual": 0,
+        "GURO_PAR_BARDENSETHRESH": 200,
+    },
+}
+xml_csv_dir = "src/examples/data/caiso-irp23/csvs_from_xml/WECC"
+model_path = "src/examples/data/caiso-irp23"
 
-if __name__ == "__main__":
-    # Create network using unified factory (uses default aggregate_node strategy)
-    network, setup_summary = create_model(MODEL_ID)
+network, summary = create_model(MODEL_ID, use_csv=True)
 
-    print("\nSetup Summary:")
-    if "aggregate_node_name" in setup_summary:
-        print(f"  Aggregate node: {setup_summary['aggregate_node_name']}")
-    if "peak_demand" in setup_summary:
-        print(f"  Peak demand: {setup_summary['peak_demand']:.2f} MW")
-    if "generator_summary" in setup_summary:
-        print(
-            f"  Generators reassigned: {setup_summary['generator_summary']['reassigned_count']}"
-        )
-    if "link_summary" in setup_summary:
-        print(
-            f"  Links reassigned: {setup_summary['link_summary']['reassigned_count']}"
-        )
-    print(f"  Total storage units: {len(network.storage_units)}")
+# Load VRE profiles from CSVs, applying to both p_max_pu and p_min_pu
+vre_summary = load_data_file_profiles_csv(
+    network=network,
+    csv_dir=xml_csv_dir,
+    profiles_path=model_path,
+    property_name="Rating",
+    target_property="p_max_pu",
+    target_type="generators_t",
+    apply_mode="replace",  # Dispatch mode: p_min_pu = p_max_pu
+    scenario=1,  # No scenario filtering needed
+    generator_filter=None,  # Load all generators that have Rating.Data File references
+    carrier_mapping={"Wind": "wind", "Solar": "solar"},  # Map categories to carriers
+    value_scaling=1.0,  # Trace files already have 0-1 capacity factors
+)
 
-    network.consistency_check()
+# Add hydrological inflows to storage units
+inflows_summary = add_storage_inflows_csv(
+    network=network,
+    csv_dir=xml_csv_dir,
+    inflow_path=model_path,
+)
 
-    # Select subset of snapshots for optimization
-    snapshots_by_year: defaultdict[int, list] = defaultdict(list)
-    for snap in network.snapshots:
-        year = pd.Timestamp(snap).year
-        if len(snapshots_by_year[year]) < SNAPSHOTS_PER_YEAR:
-            snapshots_by_year[year].append(snap)
+# Apply generator Units time series (retirements, new builds, capacity scaling)
+# CRITICAL: Must be called AFTER VRE profiles are loaded
+units_summary = apply_generator_units_timeseries_csv(network, xml_csv_dir)
 
-    subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
+# Get demand profile for intelligent maintenance scheduling
+try:
+    demand = network.loads_t.p_set.sum(axis=1)
+    print(f"\nDemand profile: peak={demand.max():.1f} MW, min={demand.min():.1f} MW")
+    has_demand = True
+except Exception:
+    print("\nNo demand profile available, maintenance will be scheduled uniformly")
+    demand = None
+    has_demand = False
 
-    # Optimize network
-    network.optimize(solver_name="highs", snapshots=subset)  # type: ignore
+# Get explicit outages from CSV
+# Parse explicit outages from "Units Out" property
+explicit_events = parse_explicit_outages_from_properties(
+    csv_dir=xml_csv_dir,
+    network=network,
+    property_name="Units Out",
+)
+
+# Generate stochastic outages (uses Forced Outage Rate from Time varying properties)
+# For AEMO: Filter out VRE generators by carrier (empty carrier = VRE)
+stochastic_events = generate_stochastic_outages_csv(
+    csv_dir=xml_csv_dir,
+    network=network,
+    include_forced=True,  # Monte Carlo forced outages
+    include_maintenance=True,  # PASA-like maintenance scheduling
+    demand_profile=demand if has_demand else None,
+    random_seed=42,  # For reproducibility
+    existing_outage_events=None,  # AEMO has no explicit outages
+    generator_filter=lambda gen: network.generators.at[gen, "carrier"]
+    != "",  # Exclude VRE (empty carrier)
+)
+
+# Build outage schedule (only stochastic events for AEMO)
+schedule = build_outage_schedule(stochastic_events, network.snapshots)
+summary2 = apply_outage_schedule(network, schedule)
+
+# Consistency check and optimize for 2025 subset
+network.consistency_check()
+network_subset = network.snapshots[network.snapshots.year == 2025]
+network.optimize(snapshots=network_subset, **SOLVER_CONFIG)
