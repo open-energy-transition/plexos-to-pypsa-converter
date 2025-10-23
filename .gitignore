@@ -195,3 +195,7 @@ CLAUDE.mdsrc/
 
 # scratch
 scratch/
+
+# archive directory for legacy code
+archive/
+src/examples/archive/
