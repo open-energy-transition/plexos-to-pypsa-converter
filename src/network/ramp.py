@@ -5,7 +5,8 @@ import pandas as pd
 import pypsa
 
 
-def fix_outage_ramp_conflicts(network: pypsa.Network) -> None:
+def fix_outage_ramp_conflicts(network: pypsa.Network) -> dict:
+    summary = {}
     for gen in network.generators.index:
         p_max = network.generators_t.p_max_pu[gen]
         p_min = network.generators_t.p_min_pu[gen]
@@ -56,3 +57,7 @@ def fix_outage_ramp_conflicts(network: pypsa.Network) -> None:
         for idx in conflicts.index:
             timestamp = merged_p.loc[idx, "snapshot"]
             p_max.loc[timestamp] = p_min.loc[timestamp]
+
+    summary["message"] = "Ramp rate conflicts adjusted."
+
+    return {"fix_outage_ramps": summary}
