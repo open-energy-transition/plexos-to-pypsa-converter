@@ -10,6 +10,7 @@ def fix_outage_ramp_conflicts(network: pypsa.Network) -> None:
         p_max = network.generators_t.p_max_pu[gen]
         p_min = network.generators_t.p_min_pu[gen]
         ramp_rate = network.generators.at[gen, "ramp_limit_up"]
+        static_p_max = network.generators.p_max_pu[gen]
 
         # Find where outage ends (recovery: p_max goes from 0 to >0)
         outage_ends = (p_max.shift(1) == 0) & (p_max > 0)
@@ -27,8 +28,10 @@ def fix_outage_ramp_conflicts(network: pypsa.Network) -> None:
                 recovery_hours = int(np.ceil(target_p_min / ramp_rate))
                 for h in range(recovery_hours):
                     timestamp = recovery_start + pd.Timedelta(hours=h)
-                    if timestamp in p_min.index:
+                    # Only adjust if not in actual outage (p_max == 0)
+                    if timestamp in p_min.index and p_max.loc[timestamp] > 0:
                         p_min.loc[timestamp] = min(h * ramp_rate, target_p_min)
+                        p_max.loc[timestamp] = static_p_max
 
         # Handle ramp down before outage starts
         for outage_start in outage_starts[outage_starts].index:
@@ -37,9 +40,10 @@ def fix_outage_ramp_conflicts(network: pypsa.Network) -> None:
                 ramp_down_hours = int(np.ceil(initial_p_min / ramp_rate))
                 for h in range(ramp_down_hours):
                     timestamp = outage_start - pd.Timedelta(hours=h)
-                    if timestamp in p_min.index:
-                        # p_min decreases at ramp rate, but not below 0
+                    # Only adjust if not in actual outage (p_max == 0)
+                    if timestamp in p_min.index and p_max.loc[timestamp] > 0:
                         p_min.loc[timestamp] = max(initial_p_min - h * ramp_rate, 0)
+                        p_max.loc[timestamp] = static_p_max
 
         # Resolve any remaining conflicts where p_min_pu > p_max_pu
         merged_p = p_min.reset_index().merge(
