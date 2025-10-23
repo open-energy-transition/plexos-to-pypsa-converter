@@ -83,6 +83,11 @@ jobs:
                 f.write(f'- Cache key: {cache_key}\\n')
         "
 
+    - name: Download models if incomplete
+      shell: bash
+      run: |
+        python scripts/download_models.py \
+          --models "${{ env.MODEL_1 }}" "${{ env.MODEL_2 }}"
 
     - name: Test Model Conversions
       id: test-conversions
