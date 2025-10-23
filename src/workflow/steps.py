@@ -209,11 +209,11 @@ def optimize_step(
                 "GURO_PAR_BARDENSETHRESH": 200,
             },
         }
-    network.optimize(snapshots=snapshots, **solver_config)
+    res = network.optimize(snapshots=snapshots, **solver_config)
     return {
         "optimize": {
-            "status": network.results.status,
-            "objective": network.objective,
+            "solve": res[0],
+            "status": res[1],
             "snapshots_count": len(snapshots),
             "year_filter": year,
         }
