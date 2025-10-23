@@ -932,10 +932,6 @@ MODEL_REGISTRY = {
                     "params": {"use_csv": True},
                 },
                 {
-                    "name": "scale_p_min_pu",
-                    "params": {"scaling_factor": 0.7},
-                },
-                {
                     "name": "load_vre_profiles",
                     "params": {
                         "csv_dir": None,  # Auto-injected from context
@@ -977,9 +973,17 @@ MODEL_REGISTRY = {
                         "explicit_property": "Units Out",
                         "include_forced": True,
                         "include_maintenance": True,
-                        "generator_filter": "exclude_vre",
+                        "generator_filter": "exclude_vre_and_low_ramp_limits",
                         "random_seed": 42,
                     },
+                },
+                {
+                    "name": "fix_outage_ramps",
+                    "params": {},
+                },
+                {
+                    "name": "add_slack",
+                    "params": {},
                 },
                 {
                     "name": "optimize",

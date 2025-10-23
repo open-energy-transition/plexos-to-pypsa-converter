@@ -667,6 +667,17 @@ def add_generators_csv(
                 if parsed_val is not None:
                     gen_attrs[attr] = parsed_val
 
+        # Max Ramp Up and Max Ramp Down are in MW/min, so to convert to ramp_limit_up and ramp_limit_down:
+        # multiply by 60 and divide by p_nom
+        if "ramp_limit_up" in gen_attrs and p_max is not None:
+            gen_attrs["ramp_limit_up"] = (
+                gen_attrs["ramp_limit_up"] * 60.0 / p_max
+            )  # per hour
+        if "ramp_limit_down" in gen_attrs and p_max is not None:
+            gen_attrs["ramp_limit_down"] = (
+                gen_attrs["ramp_limit_down"] * 60.0 / p_max
+            )  # per hour
+
         # Find associated bus/node
         bus = find_bus_for_object_csv(generator_df, gen)
         if bus is None:
@@ -1902,6 +1913,7 @@ def build_units_timeseries(
 def apply_generator_units_timeseries_csv(
     network: Network,
     csv_dir: str | Path,
+    generator_filter: Callable[[str], bool] | None = None,
 ) -> dict:
     """Apply time-varying Units to scale generator capacity and handle retirements.
 
@@ -1939,6 +1951,15 @@ def apply_generator_units_timeseries_csv(
     csv_dir : str | Path
         Directory containing COAD CSV exports
 
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators already added and VRE profiles loaded
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    generator_filter : callable, optional
+        Function taking generator name and returning True to process. If None, all generators are processed.
+
     Returns
     -------
     dict
@@ -1959,7 +1980,7 @@ def apply_generator_units_timeseries_csv(
     ...     network, csv_dir, apply_mode="set_both_min_max", ...
     ... )
     >>> # Then apply Units
-    >>> summary = apply_generator_units_timeseries_csv(network, csv_dir)
+    >>> summary = apply_generator_units_timeseries_csv(network, csv_dir, generator_filter=lambda gen: gen.startswith("Wind"))
     >>> print(f"Processed {summary['generators_with_units_data']} generators with Units data")
     >>> print(f"  - {summary['generators_with_retirements']} with retirements")
     >>> print(f"  - {summary['generators_with_new_builds']} with new builds")
@@ -2005,6 +2026,8 @@ def apply_generator_units_timeseries_csv(
 
     # Process each generator in network
     for gen in network.generators.index:
+        if generator_filter is not None and not generator_filter(gen):
+            continue
         # Get static Units value
         static_units_str = get_property_from_static_csv(generator_df, gen, "Units")
 
