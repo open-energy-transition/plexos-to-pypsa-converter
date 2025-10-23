@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from db.registry import MODEL_REGISTRY
 from utils.model_paths import get_model_directory
-from utils.recipe_executor import execute_recipe
+from utils.recipe_executor import RecipeExecutor
 
 
 def is_model_complete(model_id: str) -> bool:
@@ -126,8 +126,10 @@ def download_model(model_id: str) -> bool:
     model_dir = get_model_directory(model_id)
     model_dir.mkdir(parents=True, exist_ok=True)
 
+    executor = RecipeExecutor(model_id, model_dir, verbose=True)
+
     try:
-        execute_recipe(config["recipe"], model_dir)
+        executor.execute_recipe(config["recipe"])
     except Exception as e:
         print(f"  ✗ Download failed: {e}")
         traceback.print_exc()
