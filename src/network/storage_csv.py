@@ -18,7 +18,7 @@ from db.csv_readers import (
     parse_numeric_value,
 )
 from network.generators_csv import _discover_datafile_mappings
-from network.storage import create_inflow_from_timeslice_array, load_inflow_from_file
+from utils.paths import safe_join
 
 logger = logging.getLogger(__name__)
 
@@ -736,3 +736,115 @@ def add_storage_inflows_csv(
         )
 
     return stats
+
+
+def load_inflow_from_file(
+    filename: str, inflow_path: str, snapshots: pd.DatetimeIndex
+) -> pd.Series | None:
+    """Load inflow data from file and align with snapshots."""
+    try:
+        # Use cross-platform path joining
+        file_path = safe_join(inflow_path, filename)
+
+        if not Path(file_path).exists():
+            logger.warning(f"Inflow file not found: {file_path}")
+            return None
+
+        # Read the inflow file
+        df = pd.read_csv(file_path)
+
+        # Try different date column combinations
+        if "Year" in df.columns and "Month" in df.columns:
+            if "Day" in df.columns:
+                # Daily data
+                df["date"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+            else:
+                # Monthly data - assume first day of month
+                df["Day"] = 1
+                df["date"] = pd.to_datetime(df[["Year", "Month", "Day"]])
+        elif "Date" in df.columns:
+            df["date"] = pd.to_datetime(df["Date"])
+        else:
+            logger.warning(f"Cannot parse date columns in inflow file: {file_path}")
+            return None
+
+        # Find inflow column
+        inflow_col = None
+        for col in ["Inflows", "Inflow", "Natural Inflow", "Flow"]:
+            if col in df.columns:
+                inflow_col = col
+                break
+
+        if inflow_col is None:
+            logger.warning(f"Cannot find inflow data column in file: {file_path}")
+            return None
+
+        # Create time series
+        inflow_series = df.set_index("date")[inflow_col]
+
+        # Resample to match network snapshots
+        inflows_resampled = inflow_series.reindex(snapshots, method="ffill")
+
+        # If data is daily but snapshots are hourly, distribute evenly
+        if len(snapshots) > len(inflow_series):
+            time_instances_per_day = (
+                snapshots.to_series()
+                .groupby(snapshots.to_series().dt.date)
+                .size()
+                .iloc[0]
+            )
+            inflows_resampled = inflows_resampled / time_instances_per_day
+    except Exception:
+        logger.exception(f"Error loading inflow file {filename}")
+        return None
+    else:
+        return inflows_resampled
+
+
+def create_inflow_from_timeslice_array(
+    values: list, snapshots: pd.DatetimeIndex
+) -> pd.Series:
+    """Create inflow time series from timeslice array values."""
+    try:
+        # Convert to numeric values
+        numeric_values = [float(v) for v in values]
+
+        # Create repeating pattern across snapshots
+        # Assume values represent monthly or seasonal patterns
+        if len(numeric_values) == 12:
+            # Monthly pattern - repeat for each month
+            inflow_data = []
+            for snapshot in snapshots:
+                month_idx = snapshot.month - 1  # 0-indexed
+                inflow_data.append(numeric_values[month_idx])
+        elif len(numeric_values) == 4:
+            # Seasonal pattern - map to months
+            season_mapping = [
+                0,
+                0,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                3,
+                3,
+                3,
+                0,
+            ]  # Dec-Feb=0, Mar-May=1, etc.
+            inflow_data = []
+            for snapshot in snapshots:
+                season_idx = season_mapping[snapshot.month - 1]
+                inflow_data.append(numeric_values[season_idx])
+        else:
+            # Repeat values cyclically
+            inflow_data = [
+                numeric_values[i % len(numeric_values)] for i in range(len(snapshots))
+            ]
+
+        return pd.Series(inflow_data, index=snapshots)
+
+    except Exception:
+        logger.exception("Error creating inflow from timeslice array")
+        return pd.Series(0.0, index=snapshots)  # Return zero inflows as fallback
