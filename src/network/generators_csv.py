@@ -667,6 +667,17 @@ def add_generators_csv(
                 if parsed_val is not None:
                     gen_attrs[attr] = parsed_val
 
+        # Max Ramp Up and Max Ramp Down are in MW/min, so to convert to ramp_limit_up and ramp_limit_down:
+        # multiply by 60 and divide by p_nom
+        if "ramp_limit_up" in gen_attrs and p_max is not None:
+            gen_attrs["ramp_limit_up"] = (
+                gen_attrs["ramp_limit_up"] * 60.0 / p_max
+            )  # per hour
+        if "ramp_limit_down" in gen_attrs and p_max is not None:
+            gen_attrs["ramp_limit_down"] = (
+                gen_attrs["ramp_limit_down"] * 60.0 / p_max
+            )  # per hour
+
         # Find associated bus/node
         bus = find_bus_for_object_csv(generator_df, gen)
         if bus is None:
