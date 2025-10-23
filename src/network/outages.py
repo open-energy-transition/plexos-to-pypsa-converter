@@ -510,6 +510,7 @@ def parse_explicit_outages_from_properties(
     csv_dir: str | Path,
     network: Network,
     property_name: str = "Units Out",
+    generator_filter: Callable[[str], bool] | None = None,
 ) -> list[OutageEvent]:
     """Parse explicit scheduled outages from PLEXOS CSV properties.
 
@@ -587,6 +588,13 @@ def parse_explicit_outages_from_properties(
         # Check if generator exists in network
         if gen_name not in network.generators.index:
             logger.debug(f"Generator {gen_name} not in network, skipping outage")
+            continue
+
+        # Apply generator filter if provided
+        if generator_filter is not None and not generator_filter(gen_name):
+            logger.debug(
+                f"Generator {gen_name} filtered out by generator_filter, skipping outage"
+            )
             continue
 
         # Parse dates
