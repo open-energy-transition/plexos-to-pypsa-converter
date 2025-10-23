@@ -17,6 +17,7 @@ from network.outages import (
     generate_stochastic_outages_csv,
     parse_explicit_outages_from_properties,
 )
+from network.ramp import fix_outage_ramp_conflicts
 from network.slack import add_slack_generators
 from network.storage_csv import add_storage_inflows_csv
 from workflow.filters import resolve_filter_preset
@@ -156,14 +157,15 @@ def parse_outages_step(
         demand = None
         has_demand = False
     explicit_events = []
+    filter_fn = resolve_filter_preset(generator_filter, network)
     if include_explicit:
         explicit_events = parse_explicit_outages_from_properties(
             csv_dir=csv_dir,
             network=network,
             property_name=explicit_property,
+            generator_filter=filter_fn,
         )
         summary["explicit_outages"] = len(explicit_events)
-    filter_fn = resolve_filter_preset(generator_filter, network)
     stochastic_events = generate_stochastic_outages_csv(
         csv_dir=csv_dir,
         network=network,
@@ -227,6 +229,7 @@ STEP_REGISTRY: dict[str, Callable[..., Any]] = {
     "add_storage_inflows": add_storage_inflows_step,
     "apply_generator_units": apply_generator_units_step,
     "parse_outages": parse_outages_step,
+    "fix_outage_ramps": fix_outage_ramp_conflicts,
     "add_slack": add_slack_generators,
     "optimize": optimize_step,
 }
