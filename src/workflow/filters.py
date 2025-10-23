@@ -40,6 +40,12 @@ FILTER_PRESETS: dict[str, dict[str, Any]] = {
         True,
         lambda gen, network: network.generators.at[gen, "carrier"] != "",
     ),
+    "exclude_vre_and_low_ramp_limits": make_filter(
+        "Exclude VRE generators (empty carrier = VRE) and generators with ramp_limit_up < 0.4",
+        True,
+        lambda gen, network: network.generators.at[gen, "carrier"] != ""
+        and network.generators.at[gen, "ramp_limit_up"] >= 0.4,
+    ),
 }
 
 
