@@ -373,6 +373,44 @@ def _build_generator_p_max_pu_timeseries_csv(
         rating_ts = build_ts("Rating", prop_df_entries)
         rating_factor_ts = build_ts("Rating Factor", prop_df_entries)
 
+        # Load Min Stable Level for validation (data quality check)
+        # Need to ensure Rating >= Min Stable Level for physical feasibility
+        min_stable_level_ts = build_ts("Min Stable Level", prop_df_entries)
+
+        # If no time-varying Min Stable Level, check static CSV as fallback
+        if min_stable_level_ts.isnull().all():
+            static_min_level = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Level"
+            )
+            if static_min_level is not None:
+                parsed_val = parse_numeric_value(static_min_level, use_first=True)
+                if parsed_val is not None:
+                    min_stable_level_ts = pd.Series(parsed_val, index=snapshots)
+
+        # Validate Rating against Min Stable Level (data quality check)
+        # When Rating < Min Stable Level, generator cannot physically operate at that rating
+        # Treat this as data error and ignore Rating (fallback to Max Capacity instead)
+        if rating_ts.notnull().any() and min_stable_level_ts.notnull().any():
+            invalid_mask = (
+                rating_ts.notnull()
+                & min_stable_level_ts.notnull()
+                & (rating_ts < min_stable_level_ts)
+            )
+
+            if invalid_mask.any():
+                num_invalid = invalid_mask.sum()
+                min_rating = rating_ts[invalid_mask].min()
+                max_min_stable = min_stable_level_ts[invalid_mask].max()
+
+                logger.warning(
+                    f"Generator '{gen}': Rating < Min Stable Level for {num_invalid} timesteps "
+                    f"(Rating: {min_rating:.2f} MW < Min Stable: {max_min_stable:.2f} MW). "
+                    f"Ignoring Rating and using Max Capacity instead (data quality issue)."
+                )
+
+                # Clear invalid Rating values (will fallback to p_max_pu=1.0)
+                rating_ts[invalid_mask] = np.nan
+
         # Get p_nom for scaling Rating
         p_nom = None
         if gen in network.generators.index and "p_nom" in network.generators.columns:
@@ -669,11 +707,11 @@ def add_generators_csv(
 
         # Max Ramp Up and Max Ramp Down are in MW/min, so to convert to ramp_limit_up and ramp_limit_down:
         # multiply by 60 and divide by p_nom
-        if "ramp_limit_up" in gen_attrs and p_max is not None:
+        if "ramp_limit_up" in gen_attrs and p_max > 0:
             gen_attrs["ramp_limit_up"] = (
                 gen_attrs["ramp_limit_up"] * 60.0 / p_max
             )  # per hour
-        if "ramp_limit_down" in gen_attrs and p_max is not None:
+        if "ramp_limit_down" in gen_attrs and p_max > 0:
             gen_attrs["ramp_limit_down"] = (
                 gen_attrs["ramp_limit_down"] * 60.0 / p_max
             )  # per hour
