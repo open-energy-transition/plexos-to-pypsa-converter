@@ -965,6 +965,77 @@ def set_min_stable_levels_csv(
             logger.debug(f"Generator {gen} not found in min stable levels DataFrame.")
 
 
+def validate_and_fix_generator_constraints(
+    network: Network, verbose: bool = True
+) -> dict:
+    """Validate and fix generator constraints where p_min_pu > p_max_pu.
+
+    When available capacity (p_max_pu) is less than minimum stable level (p_min_pu),
+    the generator physically cannot operate. This typically happens when:
+    - Rating Factor reduces capacity below Min Stable Level
+    - Rating only exists in static CSV but not time-varying
+    - Max Capacity < Min Stable Level (data quality issue)
+
+    In these cases, we relax p_min_pu to 0, allowing the generator to be turned off
+    or operate at reduced capacity. This preserves feasibility while acknowledging
+    that the unit cannot meet its normal minimum operating constraints.
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators
+    verbose : bool, default True
+        Print summary of fixes
+
+    Returns
+    -------
+    dict
+        Summary with list of fixed generators
+
+    Examples
+    --------
+    >>> # After setting all generator properties
+    >>> validate_and_fix_generator_constraints(network)
+    Fixed 7 generators with p_min_pu > p_max_pu constraints
+      (Generators cannot meet min stable level at reduced capacity)
+    """
+    fixed_generators = []
+
+    for gen in network.generators.index:
+        if gen not in network.generators_t.p_max_pu.columns:
+            continue
+        if gen not in network.generators_t.p_min_pu.columns:
+            continue
+
+        p_max = network.generators_t.p_max_pu[gen]
+        p_min = network.generators_t.p_min_pu[gen]
+
+        # Check for infeasibility
+        infeasible_mask = p_min > p_max
+
+        if infeasible_mask.any():
+            num_infeasible = infeasible_mask.sum()
+            max_violation = (p_min - p_max)[infeasible_mask].max()
+
+            logger.warning(
+                f"Generator '{gen}': p_min_pu > p_max_pu for {num_infeasible} timesteps "
+                f"(max violation: {max_violation:.4f}). "
+                f"Setting p_min_pu = 0 for infeasible periods (unit cannot meet min stable level)."
+            )
+
+            # Fix: Set p_min_pu = 0 where infeasible
+            network.generators_t.p_min_pu.loc[infeasible_mask, gen] = 0.0
+            fixed_generators.append(gen)
+
+    if verbose and fixed_generators:
+        print(
+            f"Fixed {len(fixed_generators)} generators with p_min_pu > p_max_pu constraints"
+        )
+        print("  (Generators cannot meet min stable level at reduced capacity)")
+
+    return {"fixed_generators": fixed_generators}
+
+
 def set_generator_efficiencies_csv(
     network: Network, csv_dir: str | Path, use_incr: bool = True
 ):
@@ -2499,6 +2570,10 @@ def port_generators_csv(
     # Step 2b: Set minimum stable levels (p_min_pu)
     print("2b. Setting minimum stable levels (p_min_pu)...")
     set_min_stable_levels_csv(network, csv_dir, timeslice_csv=timeslice_csv)
+
+    # Step 2c: Validate and fix generator constraints
+    print("2c. Validating generator constraints...")
+    validate_and_fix_generator_constraints(network, verbose=True)
 
     # Step 3: Set generator efficiencies
     print("3. Setting generator efficiencies...")
