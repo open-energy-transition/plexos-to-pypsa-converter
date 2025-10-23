@@ -65,6 +65,70 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "all",
+                        "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
+                        "value_scaling": 1.0,
+                        "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,
+                        "inflow_path": None,
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,
+                        "include_explicit": False,
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2025},
+                },
+            ],
+        },
         "recipe": [
             # Download and extract main model ZIP (contains all 3 models)
             {
@@ -190,6 +254,70 @@ MODEL_REGISTRY = {
         "default_config": {
             "demand_assignment_strategy": "per_node",
         },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "all",
+                        "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
+                        "value_scaling": 1.0,
+                        "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,
+                        "inflow_path": None,
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,
+                        "include_explicit": False,
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2025},
+                },
+            ],
+        },
         "recipe": [
             # Download and extract main model ZIP (contains all 3 models)
             {
@@ -309,6 +437,70 @@ MODEL_REGISTRY = {
         "model_type": "electricity",
         "default_config": {
             "demand_assignment_strategy": "per_node",
+        },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "all",
+                        "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
+                        "value_scaling": 1.0,
+                        "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,
+                        "inflow_path": None,
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,
+                        "include_explicit": False,
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2025},
+                },
+            ],
         },
         "recipe": [
             {
@@ -434,6 +626,71 @@ MODEL_REGISTRY = {
                 "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
             },
         },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/WECC",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "all",
+                        "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
+                        "value_scaling": 1.0,
+                        "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,
+                        "inflow_path": None,
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,
+                        "include_explicit": True,
+                        "explicit_property": "Units Out",
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2025},
+                },
+            ],
+        },
         "recipe": [
             {
                 "step": "download",
@@ -499,6 +756,72 @@ MODEL_REGISTRY = {
         "model_type": "electricity",
         "default_config": {
             "demand_assignment_strategy": "per_node",
+            "demand_file": "Input files/DA/Load/LoadR1DA.csv",
+        },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/System",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "vre_only",
+                        "carrier_mapping": {"Wind": "Wind", "Solar": "Solar"},
+                        "value_scaling": 0.01,
+                        "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,
+                        "inflow_path": None,
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,
+                        "include_explicit": True,
+                        "explicit_property": "Units Out",
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2023},
+                },
+            ],
         },
         "recipe": [
             # Download main XML file
@@ -580,13 +903,93 @@ MODEL_REGISTRY = {
         "xml_filename": "PUBLIC Validation 2024-2032 Model 2025-03-14.xml",
         "model_type": "electricity",
         "default_config": {
-            "demand_assignment_strategy": "target_node",
-            "target_node": "SEM",
+            "demand_assignment_strategy": "per_node",
+            "demand_target_node": "SEM",  # Assign all demand to SEM node
             "model_name": "Opt A 24-32 (Avail, Uplift, Wheeling)--MIP 25/26",
-            "demand_file": "CSV Files (1 of 2)/AI Demand_2023-2033_5base years.csv",
+            "demand_file": "CSV Files/AI Demand_2023-2033_5base years.csv",
             "cross_model_dependencies": {
                 "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
             },
+        },
+        "processing_workflow": {
+            "csv_dir_pattern": "csvs_from_xml/SEM Forecast model",
+            "solver_config": {
+                "solver_name": "gurobi",
+                "solver_options": {
+                    "Threads": 6,
+                    "Method": 2,
+                    "Crossover": 0,
+                    "BarConvTol": 1.0e-5,
+                    "Seed": 123,
+                    "AggFill": 0,
+                    "PreDual": 0,
+                    "GURO_PAR_BARDENSETHRESH": 200,
+                },
+            },
+            "steps": [
+                {
+                    "name": "create_model",
+                    "params": {"use_csv": True},
+                },
+                {
+                    "name": "load_vre_profiles",
+                    "params": {
+                        "csv_dir": None,  # Auto-injected from context
+                        "profiles_path": None,  # Auto-injected from context
+                        "property_name": "Rating",
+                        "target_property": "p_max_pu",
+                        "target_type": "generators_t",
+                        "apply_mode": "replace",
+                        "scenario": 1,
+                        "generator_filter": "vre_only",
+                        "carrier_mapping": {"Wind": "Wind", "Solar": "Solar"},
+                        "value_scaling": 0.01,
+                        "manual_mappings": {
+                            "Wind NI -- All": "StochasticWindNI",
+                            "Wind ROI": "StochasticWindROI",
+                            "Wind Offshore": "StochasticWindOffshore",
+                            "Wind Offshore -- Arklow Phase 1": "StochasticWindROI",
+                            "Solar NI -- All": "StochasticSolarNI",
+                            "Solar ROI": "StochasticSolarROI",
+                        },
+                    },
+                },
+                {
+                    "name": "add_storage_inflows",
+                    "params": {
+                        "csv_dir": None,  # Auto-injected
+                        "inflow_path": None,  # Auto-injected
+                    },
+                },
+                {
+                    "name": "apply_generator_units",
+                    "params": {"csv_dir": None},  # Auto-injected
+                },
+                {
+                    "name": "parse_outages",
+                    "params": {
+                        "csv_dir": None,  # Auto-injected
+                        "include_explicit": True,
+                        "explicit_property": "Units Out",
+                        "include_forced": True,
+                        "include_maintenance": True,
+                        "generator_filter": "exclude_vre_and_low_ramp_limits",
+                        "random_seed": 42,
+                    },
+                },
+                {
+                    "name": "fix_outage_ramps",
+                    "params": {},
+                },
+                {
+                    "name": "add_slack",
+                    "params": {},
+                },
+                {
+                    "name": "optimize",
+                    "params": {"year": 2023},
+                },
+            ],
         },
         "recipe": [
             # Main model ZIP (contains XML file)
@@ -629,8 +1032,8 @@ MODEL_REGISTRY = {
             {
                 "step": "rename",
                 "source": "SEM PLEXOS Forecast Model 2024-2032 (CSV Files 1 of 2)/CSV Files (1 of 2)",
-                "target": "CSV Files (1 of 2)",
-                "description": "Moving CSV Files (1 of 2) to root",
+                "target": "CSV Files",
+                "description": "Moving CSV Files (1 of 2) to root as 'CSV Files'",
             },
             {
                 "step": "delete",
@@ -657,10 +1060,10 @@ MODEL_REGISTRY = {
                 "description": "Extracting CSV Files 2 of 2",
             },
             {
-                "step": "rename",
-                "source": "SEM PLEXOS Forecast Model 2024-2032 (CSV Files 2 of 2)/CSV Files (2 of 2)",
-                "target": "CSV Files (2 of 2)",
-                "description": "Moving CSV Files (2 of 2) to root",
+                "step": "move",
+                "source": "SEM PLEXOS Forecast Model 2024-2032 (CSV Files 2 of 2)/CSV Files (2 of 2)/*",
+                "target": "CSV Files",
+                "description": "Moving CSV Files (2 of 2) contents into 'CSV Files'",
             },
             {
                 "step": "delete",
@@ -711,7 +1114,7 @@ MODEL_REGISTRY = {
             },
             {
                 "step": "copy",
-                "source": "CSV Files (1 of 2)/AI Demand_2023-2033_5base years.csv",
+                "source": "CSV Files/AI Demand_2023-2033_5base years.csv",
                 "target": "demand/AI Demand_2023-2033_5base years.csv",
                 "description": "Copying AI Demand CSV to demand folder",
             },
@@ -720,8 +1123,7 @@ MODEL_REGISTRY = {
                 "step": "validate",
                 "checks": [
                     "xml_exists",
-                    "required_dir:CSV Files (1 of 2)",
-                    "required_dir:CSV Files (2 of 2)",
+                    "required_dir:CSV Files",
                     "required_dir:demand",
                 ],
                 "description": "Validating installation",
@@ -734,7 +1136,7 @@ MODEL_REGISTRY = {
         "xml_filename": "European Integrated Power & Gas Model.xml",
         "model_type": "multi_sector_gas_electric",
         "default_config": {
-            "use_csv_integration": False,
+            "use_csv": False,
             "infrastructure_scenario": "PCI",
             "pricing_scheme": "Production",
             "generators_as_links": False,
@@ -917,7 +1319,7 @@ MODEL_REGISTRY = {
         "model_type": "multi_sector_flow",
         "default_config": {
             "testing_mode": False,
-            "use_csv_integration": True,
+            "use_csv": True,
         },
         "recipe": [
             {

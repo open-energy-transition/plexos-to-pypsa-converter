@@ -13,7 +13,7 @@ def print_objects_alphabetically(
 
 
 def list_and_print_objects(
-    db: PlexosDB, class_enum: ClassEnum, object_type: str
+    db: PlexosDB, class_enum: ClassEnum, object_type: str | None = None
 ) -> list[str]:
     objects = db.list_objects_by_class(class_enum)
     if object_type is None:

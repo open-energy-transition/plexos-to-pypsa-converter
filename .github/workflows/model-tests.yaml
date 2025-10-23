@@ -20,7 +20,7 @@ env:
   SOLVE_SNAPSHOT_LIMIT: '50'
   # Specify which models to test (user will configure these)
   MODEL_1: 'sem-2024-2032'
-  MODEL_2: 'marei-eu'
+  MODEL_2: 'aemo-2024-isp-progressive-change'
 
 jobs:
   model-conversion:
@@ -83,6 +83,11 @@ jobs:
                 f.write(f'- Cache key: {cache_key}\\n')
         "
 
+    - name: Download models if incomplete
+      shell: bash
+      run: |
+        python scripts/download_models.py \
+          --models "${{ env.MODEL_1 }}" "${{ env.MODEL_2 }}"
 
     - name: Test Model Conversions
       id: test-conversions

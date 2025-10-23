@@ -1,0 +1,3 @@
+object,category,Load,Region,Load.Variable
+Bus1,-,500,Region1,0
+Bus2,-,300,Region1,0

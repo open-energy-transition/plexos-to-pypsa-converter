@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MasterDataSet xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- Minimal PLEXOS XML for testing purposes -->
+  <t_config>
+    <config_id>1</config_id>
+    <name>Test System</name>
+  </t_config>
+  <t_class_group>
+    <class_group_id>1</class_group_id>
+    <name>System</name>
+  </t_class_group>
+</MasterDataSet>

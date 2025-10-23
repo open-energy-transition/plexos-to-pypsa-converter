@@ -1,0 +1,2 @@
+object,category,Node From,Node To,Max Flow,Resistance,Rating,Units
+Line1,-,Bus1,Bus2,150,0.01,150,1
