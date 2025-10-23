@@ -15,7 +15,6 @@ def add_slack_generators(network: pypsa.Network) -> dict:
     buses = network.buses.index
 
     summary = {}
-    logger.info("Adding slack generators for: %d buses", len(buses))
 
     # Add load spillage generator and carrier
     network.add(
@@ -54,5 +53,6 @@ def add_slack_generators(network: pypsa.Network) -> dict:
     )
 
     summary["slack_generators_added"] = len(buses)
+    logger.info("Added slack generators for: %d buses", len(buses))
 
     return {"add_slack": summary}
