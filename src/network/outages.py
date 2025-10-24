@@ -581,6 +581,13 @@ def parse_explicit_outages_from_properties(
 
     # Parse into OutageEvent objects
     outage_events = []
+    skipped_counts = {
+        "not_in_network": 0,
+        "filtered": 0,
+        "invalid_dates": 0,
+        "invalid_range": 0,
+        "invalid_value": 0,
+    }
 
     for _, row in outage_props.iterrows():
         gen_name = row["object"]
@@ -588,6 +595,7 @@ def parse_explicit_outages_from_properties(
         # Check if generator exists in network
         if gen_name not in network.generators.index:
             logger.debug(f"Generator {gen_name} not in network, skipping outage")
+            skipped_counts["not_in_network"] += 1
             continue
 
         # Apply generator filter if provided
@@ -595,6 +603,7 @@ def parse_explicit_outages_from_properties(
             logger.debug(
                 f"Generator {gen_name} filtered out by generator_filter, skipping outage"
             )
+            skipped_counts["filtered"] += 1
             continue
 
         # Parse dates
@@ -603,10 +612,11 @@ def parse_explicit_outages_from_properties(
 
         # Validate dates
         if pd.isna(start) or pd.isna(end):
-            logger.warning(
-                f"Invalid dates for {gen_name} {property_name}: "
-                f"start={row['date_from']}, end={row['date_to']}"
+            logger.debug(
+                f"Skipping {gen_name} {property_name} with invalid/missing dates: "
+                f"date_from={row['date_from']}, date_to={row['date_to']}"
             )
+            skipped_counts["invalid_dates"] += 1
             continue
 
         if end <= start:
@@ -614,6 +624,7 @@ def parse_explicit_outages_from_properties(
                 f"Invalid date range for {gen_name} {property_name}: "
                 f"end ({end}) <= start ({start})"
             )
+            skipped_counts["invalid_range"] += 1
             continue
 
         # Parse value (number of units out)
@@ -623,6 +634,7 @@ def parse_explicit_outages_from_properties(
             logger.warning(
                 f"Invalid value for {gen_name} {property_name}: {row['value']}"
             )
+            skipped_counts["invalid_value"] += 1
             continue
 
         # Convert units_out to capacity factor
@@ -646,9 +658,202 @@ def parse_explicit_outages_from_properties(
             f"(units_out={units_out}, CF={capacity_factor})"
         )
 
+    # Log summary
     logger.info(f"Parsed {len(outage_events)} explicit outage events")
+    total_skipped = sum(skipped_counts.values())
+    if total_skipped > 0:
+        skip_details = ", ".join(f"{k}={v}" for k, v in skipped_counts.items() if v > 0)
+        logger.info(f"Skipped {total_skipped} entries ({skip_details})")
 
     return outage_events
+
+
+def load_outages_from_monthly_files(
+    units_out_dir: str | Path,
+    network: Network,
+    scenario: str | int | None = None,
+    generator_filter: Callable[[str], bool] | None = None,
+) -> pd.DataFrame:
+    """Load outage schedules from CAISO-style monthly Units Out files.
+
+    Reads monthly outage files organized in M01-M12 subdirectories, each containing
+    generator-specific outage schedules with stochastic scenarios.
+
+    File structure expected:
+    - units_out_dir/M01/{generator_name}_UnitsOut.csv
+    - units_out_dir/M02/{generator_name}_UnitsOut.csv
+    - ... (M01 through M12)
+
+    Each CSV file contains:
+    - Columns: Year, Month, Day, Period, 1, 2, 3, ..., N (scenario columns)
+    - Values: 0 = available, 1 = on outage
+    - Returns capacity factors where 1.0 = available, 0.0 = fully on outage
+
+    Parameters
+    ----------
+    units_out_dir : str | Path
+        Path to "Units Out" directory containing M01-M12 subdirectories
+    network : Network
+        PyPSA network with generators and snapshots
+    scenario : str | int, optional
+        Stochastic scenario to load (e.g., "iteration_1", 1, "iteration_100").
+        If None, uses first scenario.
+    generator_filter : Callable[[str], bool], optional
+        Function to filter which generators to load. If provided, only generators
+        where filter(gen_name) returns True will be loaded.
+
+    Returns
+    -------
+    pd.DataFrame
+        Outage schedule with:
+        - Index: network.snapshots (datetimes)
+        - Columns: generator names
+        - Values: capacity factors (0.0 = fully on outage, 1.0 = available)
+
+    Examples
+    --------
+    >>> # Load outages for all generators, first scenario
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network
+    ... )
+    >>> apply_outage_schedule(network, schedule)
+
+    >>> # Load specific scenario
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network,
+    ...     scenario=42  # Load scenario 42
+    ... )
+
+    >>> # Load filtered generators only
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network,
+    ...     generator_filter=lambda g: g.startswith("Coal")
+    ... )
+
+    Notes
+    -----
+    - This function is designed for CAISO IRP23-style monthly outage files
+    - Validates that units_out_dir contains "Units Out" to prevent file confusion
+    - Missing generator files are logged but don't cause errors
+    - Automatically handles Year/Month/Day/Period format and scenario selection
+    """
+    units_out_dir = Path(units_out_dir)
+
+    # Safety check: validate we're loading from Units Out directory
+    if "Units Out" not in str(units_out_dir):
+        msg = (
+            f"Safety check failed: units_out_dir does not contain 'Units Out'. "
+            f"Got: {units_out_dir}. This function should only load from Units Out directories."
+        )
+        raise ValueError(msg)
+
+    if not units_out_dir.exists():
+        msg = f"Units Out directory not found: {units_out_dir}"
+        raise FileNotFoundError(msg)
+
+    logger.info(
+        f"Loading monthly outage files from {units_out_dir} "
+        f"(scenario={scenario if scenario is not None else 'first'})"
+    )
+
+    # Standardize scenario format
+    if scenario is not None:
+        if isinstance(scenario, int):
+            scenario_col = str(scenario)
+        elif isinstance(scenario, str) and scenario.startswith("iteration_"):
+            scenario_col = scenario.replace("iteration_", "")
+        else:
+            scenario_col = str(scenario)
+    else:
+        scenario_col = None
+
+    # Get list of generators to process
+    generators = list(network.generators.index)
+    if generator_filter is not None:
+        generators = [g for g in generators if generator_filter(g)]
+
+    logger.info(f"Processing outages for {len(generators)} generators")
+
+    # Load outages for each generator
+    outage_data = {}
+    found_count = 0
+    missing_count = 0
+    error_count = 0
+
+    for gen_name in generators:
+        gen_outage_series = []
+
+        # Load data from all monthly directories (M01-M12)
+        for month_num in range(1, 13):
+            month_dir = units_out_dir / f"M{month_num:02d}"
+            outage_file = month_dir / f"{gen_name}_UnitsOut.csv"
+
+            if not outage_file.exists():
+                logger.debug(f"Outage file not found: {outage_file.name}")
+                continue
+
+            try:
+                month_data = read_plexos_input_csv(
+                    outage_file,
+                    scenario=scenario_col,
+                    snapshots=network.snapshots,
+                )
+
+                # Verify we got a single column (one scenario)
+                if isinstance(month_data, pd.DataFrame) and len(month_data.columns) > 1:
+                    # Take first column if scenario wasn't properly selected
+                    month_series = month_data.iloc[:, 0]
+                    logger.debug(
+                        f"Multiple columns in outage data for {gen_name}, using first"
+                    )
+                elif isinstance(month_data, pd.DataFrame):
+                    month_series = month_data.iloc[:, 0]
+                else:
+                    month_series = month_data
+
+                gen_outage_series.append(month_series)
+
+            except Exception as e:
+                logger.warning(f"Error loading outage file {outage_file.name}: {e}")
+                error_count += 1
+                continue
+
+        if gen_outage_series:
+            # Concatenate all months
+            full_outage = pd.concat(gen_outage_series).sort_index()
+
+            # Convert from Units Out format (0=available, 1=outage)
+            # to capacity factor format (1.0=available, 0.0=outage)
+            capacity_factor = 1.0 - full_outage
+
+            # Align with network snapshots
+            aligned = capacity_factor.reindex(network.snapshots, fill_value=1.0)
+
+            outage_data[gen_name] = aligned
+            found_count += 1
+            logger.debug(
+                f"Loaded outage schedule for {gen_name}: {len(aligned)} timesteps"
+            )
+        else:
+            missing_count += 1
+
+    # Create DataFrame
+    if outage_data:
+        schedule_df = pd.DataFrame(outage_data, index=network.snapshots)
+        logger.info(
+            f"Loaded outage schedules for {found_count} generators "
+            f"(missing={missing_count}, errors={error_count})"
+        )
+        return schedule_df
+    else:
+        logger.warning(
+            f"No outage data loaded for any generators "
+            f"(missing={missing_count}, errors={error_count})"
+        )
+        return pd.DataFrame(index=network.snapshots)
 
 
 def apply_expected_outage_derating(

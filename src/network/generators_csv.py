@@ -671,17 +671,82 @@ def add_generators_csv(
     skipped_generators = []
     generators = list_objects_by_class_csv(generator_df)
 
-    for gen in generators:
-        # Extract Max Capacity (p_nom)
-        p_max_raw = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+    # Load time-varying properties to check for capacity expansions
+    try:
+        time_varying_props = load_time_varying_properties(csv_dir)
+    except Exception:
+        time_varying_props = pd.DataFrame()
 
-        if p_max_raw is None:
-            print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
-            p_max = None
-        else:
-            # Handle cases where Max Capacity might be a list (e.g., "['55.197', '62.606']")
-            # For capacity, we sum multiple values if present (e.g., multiple units)
-            p_max = parse_numeric_value(p_max_raw, use_first=False)
+    # Get model start date from network snapshots (if available)
+    model_start_date = (
+        network.snapshots.min()
+        if hasattr(network, "snapshots") and len(network.snapshots) > 0
+        else None
+    )
+
+    for gen in generators:
+        # Check for time-varying Max Capacity with dates (capacity expansions)
+        p_max = None
+        has_expansion = False
+
+        if not time_varying_props.empty:
+            max_cap_entries = time_varying_props[
+                (time_varying_props["class"] == "Generator")
+                & (time_varying_props["object"] == gen)
+                & (time_varying_props["property"] == "Max Capacity")
+            ].copy()
+
+            # Filter entries with dates
+            if not max_cap_entries.empty:
+                max_cap_entries["date_from"] = pd.to_datetime(
+                    max_cap_entries["date_from"], errors="coerce"
+                )
+                dated_entries = max_cap_entries[max_cap_entries["date_from"].notna()]
+
+                if not dated_entries.empty:
+                    has_expansion = (
+                        len(dated_entries) > 1
+                    )  # Multiple dated entries = expansion
+                    dated_entries = dated_entries.sort_values("date_from")
+
+                    # Use capacity at model start date
+                    if model_start_date is not None:
+                        # Find the entry that applies at model start
+                        applicable = dated_entries[
+                            dated_entries["date_from"] <= model_start_date
+                        ]
+                        if not applicable.empty:
+                            p_max = float(applicable.iloc[-1]["value"])
+                        else:
+                            # All dates are in the future - use first entry
+                            p_max = float(dated_entries.iloc[0]["value"])
+                    else:
+                        # No snapshots yet - use first dated entry
+                        p_max = float(dated_entries.iloc[0]["value"])
+
+                    if has_expansion:
+                        future_caps = dated_entries[
+                            dated_entries["date_from"]
+                            > (model_start_date or pd.Timestamp.min)
+                        ]
+                        if not future_caps.empty:
+                            print(
+                                f"Note: {gen} has capacity expansion schedule "
+                                f"({len(dated_entries)} stages, currently using {p_max:.2f} MW). "
+                                f"Full expansion modeling not yet implemented."
+                            )
+
+        # Fallback to static Max Capacity if no time-varying found
+        if p_max is None:
+            p_max_raw = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+
+            if p_max_raw is None:
+                print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
+                p_max = None
+            else:
+                # Handle cases where Max Capacity might be a list (e.g., "['55.197', '62.606']")
+                # For capacity, we sum multiple values if present (e.g., multiple units)
+                p_max = parse_numeric_value(p_max_raw, use_first=False)
 
         # Extract generator properties
         prop_map = {
@@ -1628,7 +1693,12 @@ def load_data_file_profiles_csv(
 
         # Load profile using existing reader
         try:
-            profile_df = read_plexos_input_csv(csv_path, scenario=scenario)
+            profile_df = read_plexos_input_csv(
+                csv_path,
+                scenario=scenario,
+                snapshots=network.snapshots,  # Enable tiling for annual profiles
+                interpolation_method="linear",  # Linear interpolation for sparse data
+            )
 
             # Extract values (handle both single column and multi-column formats)
             if "value" in profile_df.columns:

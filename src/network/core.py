@@ -1248,16 +1248,19 @@ def get_demand_format_info(source_path):
     return info
 
 
-def _normalize_scenario_name(user_input: str, available_columns: list) -> str | None:
+def _normalize_scenario_name(
+    user_input: str | int, available_columns: list
+) -> str | None:
     """Normalize user scenario input to match actual DataFrame column names.
 
-    Accepts either "1" or "iteration_1" and returns the actual column name.
+    Accepts either 1, "1", or "iteration_1" and returns the actual column name.
+    Handles columns with filename prefixes (e.g., "Load_2024 0308_iteration_1").
     Returns None if scenario not found.
 
     Parameters
     ----------
-    user_input : str
-        User-provided scenario name (e.g., "1" or "iteration_1")
+    user_input : str | int
+        User-provided scenario name (e.g., 1, "1", or "iteration_1")
     available_columns : list
         List of available column names in the DataFrame
 
@@ -1266,14 +1269,30 @@ def _normalize_scenario_name(user_input: str, available_columns: list) -> str | 
     str or None
         Normalized column name if found, None otherwise
 
+    Raises
+    ------
+    ValueError
+        If multiple columns match (ambiguous scenario)
+
     Examples
     --------
+    >>> # Simple case (no prefix)
     >>> cols = ["iteration_1", "iteration_2", "iteration_3"]
-    >>> _normalize_scenario_name("1", cols)
+    >>> _normalize_scenario_name(1, cols)
     'iteration_1'
     >>> _normalize_scenario_name("iteration_2", cols)
     'iteration_2'
+
+    >>> # With filename prefix (CAISO LoadProfile case)
+    >>> cols = ["Load_2024 0308_iteration_1", "Load_2024 0308_iteration_2"]
+    >>> _normalize_scenario_name(1, cols)
+    'Load_2024 0308_iteration_1'
+    >>> _normalize_scenario_name("iteration_1", cols)
+    'Load_2024 0308_iteration_1'
     """
+    # Convert integer input to string
+    user_input = str(user_input)
+
     # If exact match, return as-is
     if user_input in available_columns:
         return user_input
@@ -1288,6 +1307,25 @@ def _normalize_scenario_name(user_input: str, available_columns: list) -> str | 
         unprefixed = user_input.replace("iteration_", "", 1)
         if unprefixed in available_columns:
             return unprefixed
+
+    # Try suffix matching (handles filename-prefixed columns like "Load_2024 0308_iteration_1")
+    # This allows scenario=1 to match columns with arbitrary prefixes
+    for suffix in [f"_{prefixed}", f"_{user_input}"]:
+        matches = [col for col in available_columns if col.endswith(suffix)]
+        if len(matches) == 1:
+            return matches[0]  # Unambiguous match
+        elif len(matches) > 1:
+            # Show first 5 matches for debugging
+            match_preview = matches[:5]
+            if len(matches) > 5:
+                match_preview_str = f"{match_preview} (showing 5 of {len(matches)})"
+            else:
+                match_preview_str = str(matches)
+            msg = (
+                f"Ambiguous scenario '{user_input}': found {len(matches)} matching columns: {match_preview_str}. "
+                f"Please specify the full column name to disambiguate."
+            )
+            raise ValueError(msg)
 
     # Not found
     return None

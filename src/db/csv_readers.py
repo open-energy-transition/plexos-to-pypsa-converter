@@ -812,11 +812,14 @@ def read_plexos_input_csv(
     object_name: str | None = None,
     scenario: str | int | None = None,
     resolution: str = "hourly",
+    snapshots: pd.DatetimeIndex | None = None,
+    interpolation_method: str = "linear",
 ) -> pd.DataFrame:
     """Read and parse PLEXOS input CSV files in various formats.
 
     This is a generalized function that handles all PLEXOS input CSV formats:
     - Periods in Columns (most common): Year/Month/Day/Period + value columns
+    - Periods in Columns (annual): Month/Day/Period + value columns (no Year)
     - Bands in Columns: Datetime + band columns
     - Names in Columns: Datetime/Pattern + object name columns
     - Stochastic scenarios: Multiple scenario columns (1, 2, 3, 4, 5)
@@ -862,6 +865,14 @@ def read_plexos_input_csv(
         If None, uses first scenario or averages all scenarios.
     resolution : str, default "hourly"
         Time resolution: "hourly" (60min), "half_hourly" (30min), "5min", etc.
+    snapshots : pd.DatetimeIndex, optional
+        Network snapshots for tiling annual profiles. When provided with Month/Day/Period
+        format (no Year), the annual pattern is tiled across all years in snapshots
+        and interpolated to match snapshot resolution.
+    interpolation_method : str, default "linear"
+        Interpolation method for sparse data when tiling annual profiles.
+        Options: "linear", "ffill", "nearest". Only used when snapshots is provided
+        and data is detected as annual profile (Year=1900).
 
     Returns
     -------
@@ -904,7 +915,15 @@ def read_plexos_input_csv(
     format_type = _detect_plexos_csv_format(df)
 
     if format_type == "periods_in_columns_ymd":
-        return _parse_periods_in_columns_ymd(df, scenario)
+        result = _parse_periods_in_columns_ymd(df, scenario)
+
+        # If snapshots provided and data is annual profile (Year=1900), tile it across years
+        if snapshots is not None and result.index.year.min() == 1900:
+            result = _tile_annual_profile_across_years(
+                result, snapshots, interpolation_method
+            )
+
+        return result
     elif format_type == "periods_in_columns_ymd_numeric":
         return _parse_periods_in_columns_ymd_numeric(df, scenario)
     elif format_type == "periods_in_columns_datetime":
@@ -932,6 +951,14 @@ def _detect_plexos_csv_format(df: pd.DataFrame) -> str:
     # Check for Year/Month/Day/Period format (SEM-style)
     if all(col in columns_lower for col in ["year", "month", "day", "period"]):
         return "periods_in_columns_ymd"
+
+    # Check for Month/Day/Period format WITHOUT Year (annual repeating profile)
+    # Used by CAISO hydro dispatch and other annual patterns
+    if (
+        all(col in columns_lower for col in ["month", "day", "period"])
+        and "year" not in columns_lower
+    ):
+        return "periods_in_columns_ymd"  # Same format type - parser will inject default year
 
     # Check for Year/Month/Day + numeric period columns (AEMO-style without Period column)
     if all(col in columns_lower for col in ["year", "month", "day"]):
@@ -969,24 +996,54 @@ def _detect_plexos_csv_format(df: pd.DataFrame) -> str:
 
 
 def _parse_periods_in_columns_ymd(
-    df: pd.DataFrame, scenario: str | int | None = None
+    df: pd.DataFrame, scenario: str | int | None = None, default_year: int = 1900
 ) -> pd.DataFrame:
     """Parse Periods in Columns format with Year/Month/Day/Period.
 
     Used by SEM and other models with stochastic scenarios.
+    Also handles Month/Day/Period format (no Year) for annual repeating profiles.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with Year/Month/Day/Period or Month/Day/Period columns
+    scenario : str | int, optional
+        Scenario number to extract for stochastic models
+    default_year : int, default 1900
+        Year to use when Year column is missing (for annual repeating profiles).
+        Using 1900 as marker for annual profiles that need tiling.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with datetime index and value column(s)
     """
+    # Handle missing Year column (annual repeating profile)
+    if "Year" not in df.columns:
+        df = df.copy()  # Don't modify original
+        df["Year"] = default_year
+
     # Create datetime from Year, Month, Day, Period
     df["datetime"] = pd.to_datetime(df[["Year", "Month", "Day"]]) + pd.to_timedelta(
         (df["Period"] - 1), unit="h"
     )
 
-    # Find value columns (numeric columns that aren't date components)
+    # Find value columns (numeric scenario columns OR named value columns like "Value")
+    # First try to find numeric scenario columns (1, 2, 3, 4, 5)
     value_cols = [
         col
         for col in df.columns
         if col not in ["Year", "Month", "Day", "Period", "datetime"]
         and str(col).replace(".", "").isdigit()
     ]
+
+    # If no numeric columns, look for other value columns (e.g., "Value", "value")
+    if not value_cols:
+        value_cols = [
+            col
+            for col in df.columns
+            if col not in ["Year", "Month", "Day", "Period", "datetime"]
+        ]
 
     if not value_cols:
         msg = "No value columns found in Periods in Columns format"
@@ -1056,6 +1113,66 @@ def _parse_periods_in_columns_ymd_numeric(
     # Select and rename columns
     result = df_long[["datetime", "value"]].copy()
     result.set_index("datetime", inplace=True)
+
+    return result
+
+
+def _tile_annual_profile_across_years(
+    df: pd.DataFrame,
+    snapshots: pd.DatetimeIndex,
+    interpolation_method: str = "linear",
+) -> pd.DataFrame:
+    """Tile annual profile (Year=1900) across all years in snapshots.
+
+    For Month/Day/Period formats without Year, the data represents an annual
+    repeating pattern. This function tiles that pattern across all modeled years
+    and interpolates to match snapshot resolution.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with datetime index (Year=1900) and value column(s)
+    snapshots : pd.DatetimeIndex
+        Network snapshots to align with
+    interpolation_method : str, default "linear"
+        Interpolation method: "linear", "ffill", or "nearest"
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame reindexed to snapshots with tiled and interpolated data
+
+    Examples
+    --------
+    >>> # Monthly sparse data for one year
+    >>> df = pd.DataFrame({
+    ...     'value': [100, 120, 150, 180, 200, 180, 150, 140, 130, 120, 110, 100]
+    ... }, index=pd.date_range('1900-01-01', periods=12, freq='M'))
+    >>> snapshots = pd.date_range('2024-01-01', '2026-12-31', freq='H')
+    >>> tiled = _tile_annual_profile_across_years(df, snapshots)
+    """
+    # Extract year range from snapshots
+    min_year = snapshots.year.min()
+    max_year = snapshots.year.max()
+
+    # Tile pattern across years
+    tiled_dfs = []
+    for year in range(min_year, max_year + 1):
+        year_df = df.copy()
+        # Shift datetime from 1900 to actual year
+        year_offset = year - 1900
+        year_df.index = year_df.index + pd.DateOffset(years=year_offset)
+        tiled_dfs.append(year_df)
+
+    combined = pd.concat(tiled_dfs)
+
+    # Interpolate to match snapshots resolution
+    if interpolation_method == "linear":
+        result = combined.reindex(snapshots).interpolate(method="linear")
+    elif interpolation_method == "ffill":
+        result = combined.reindex(snapshots, method="ffill")
+    else:  # nearest
+        result = combined.reindex(snapshots, method="nearest")
 
     return result
 
