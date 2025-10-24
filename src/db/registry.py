@@ -619,8 +619,7 @@ MODEL_REGISTRY = {
         "xml_filename": "CAISOIRP23Stochastic 20240517.xml",
         "model_type": "electricity",
         "default_config": {
-            "demand_assignment_strategy": "aggregate_node",
-            "aggregate_node_name": "CAISO_Load_Aggregate",
+            "demand_assignment_strategy": "participation_factors",
             "model_name": "M01Y2024 PSP23_25MMT",
             "cross_model_dependencies": {
                 "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
