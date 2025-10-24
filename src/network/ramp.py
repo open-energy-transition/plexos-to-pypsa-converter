@@ -1,63 +1,72 @@
-"""Functions to fix ramp rate conflicts after outage scheduling in a PyPSA network."""
+"""Functions to fix ramp rate conflicts after outage scheduling in a PyPSA network.
 
-import numpy as np
-import pandas as pd
+DEPRECATED: This module is deprecated. Ramp conflicts are now handled automatically
+by apply_outage_schedule() with ramp_aware=True (enabled by default).
+
+See migration guide below for how to update your code.
+"""
+
+import warnings
+
 import pypsa
 
 
 def fix_outage_ramp_conflicts(network: pypsa.Network) -> dict:
-    summary = {}
-    for gen in network.generators.index:
-        p_max = network.generators_t.p_max_pu[gen]
-        p_min = network.generators_t.p_min_pu[gen]
-        ramp_rate = network.generators.at[gen, "ramp_limit_up"]
-        static_p_max = network.generators.p_max_pu[gen]
+    """Fix ramp rate conflicts after outage scheduling.
 
-        # Find where outage ends (recovery: p_max goes from 0 to >0)
-        outage_ends = (p_max.shift(1) == 0) & (p_max > 0)
-        # Find where outage starts (p_max goes from >0 to 0)
-        outage_starts = (p_max.shift(1) > 0) & (p_max == 0)
+    DEPRECATED: This function is no longer needed.
 
-        # If ramp_rate is NaN, make it 1E+30 (PLEXOS default)
-        if pd.isna(ramp_rate):
-            ramp_rate = 1e30
+    Ramp conflicts are now handled automatically by apply_outage_schedule()
+    with ramp_aware=True (enabled by default). The new implementation:
+    - Creates gradual startup/shutdown zones for generators with binding ramp constraints
+    - Prevents p_min > p_max violations automatically
+    - Works for ALL generators (no need to filter by ramp rate)
+    - Eliminates the need for post-processing
 
-        # Handle ramp up after outage ends
-        for recovery_start in outage_ends[outage_ends].index:
-            target_p_min = p_min.loc[recovery_start]
-            if target_p_min > 0:
-                recovery_hours = int(np.ceil(target_p_min / ramp_rate))
-                for h in range(recovery_hours):
-                    timestamp = recovery_start + pd.Timedelta(hours=h)
-                    # Only adjust if not in actual outage (p_max == 0)
-                    if timestamp in p_min.index and p_max.loc[timestamp] > 0:
-                        p_min.loc[timestamp] = min(h * ramp_rate, target_p_min)
-                        p_max.loc[timestamp] = static_p_max
+    Migration
+    ---------
+    **Old code (with workarounds):**
+    ```python
+    # Had to filter out low-ramp generators
+    events = parse_outages(
+        csv_dir,
+        network,
+        generator_filter=lambda g: network.generators.at[g, 'ramp_limit_up'] >= 0.05
+    )
+    schedule = build_outage_schedule(events, network.snapshots)
+    apply_outage_schedule(network, schedule)
+    fix_outage_ramp_conflicts(network)  # Post-processing needed
+    ```
 
-        # Handle ramp down before outage starts
-        for outage_start in outage_starts[outage_starts].index:
-            initial_p_min = p_min.loc[outage_start - pd.Timedelta(hours=1)]
-            if initial_p_min > 0:
-                ramp_down_hours = int(np.ceil(initial_p_min / ramp_rate))
-                for h in range(ramp_down_hours):
-                    timestamp = outage_start - pd.Timedelta(hours=h)
-                    # Only adjust if not in actual outage (p_max == 0)
-                    if timestamp in p_min.index and p_max.loc[timestamp] > 0:
-                        p_min.loc[timestamp] = max(initial_p_min - h * ramp_rate, 0)
-                        p_max.loc[timestamp] = static_p_max
+    **New code (no workarounds needed):**
+    ```python
+    # Works for ALL generators automatically
+    events = parse_outages(csv_dir, network)
+    schedule = build_outage_schedule(events, network.snapshots)
+    apply_outage_schedule(network, schedule, ramp_aware=True)  # That's it!
+    ```
 
-        # Resolve any remaining conflicts where p_min_pu > p_max_pu
-        merged_p = p_min.reset_index().merge(
-            p_max.reset_index(),
-            on="snapshot",
-            suffixes=("_min", "_max"),
-        )
-        conflicts = merged_p[merged_p[f"{gen}_min"] > merged_p[f"{gen}_max"]]
+    Returns:
+    -------
+    dict
+        Empty summary indicating deprecated status
 
-        for idx in conflicts.index:
-            timestamp = merged_p.loc[idx, "snapshot"]
-            p_max.loc[timestamp] = p_min.loc[timestamp]
+    Warnings:
+    --------
+    This function will be removed in a future version. Please migrate to using
+    apply_outage_schedule(ramp_aware=True) as shown above.
 
-    summary["message"] = "Ramp rate conflicts adjusted."
+    See Also:
+    --------
+    network.outages.apply_outage_schedule : New ramp-aware outage application
+    """
+    warnings.warn(
+        "fix_outage_ramp_conflicts() is deprecated and will be removed in a future version. "
+        "Ramp conflicts are now handled automatically by apply_outage_schedule(ramp_aware=True). "
+        "See the function docstring for migration instructions.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
-    return {"fix_outage_ramps": summary}
+    # Return empty summary - no action taken
+    return {"fix_outage_ramps": {"message": "Deprecated - no action taken"}}

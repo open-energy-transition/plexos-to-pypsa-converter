@@ -241,18 +241,150 @@ def build_outage_schedule(
     return schedule
 
 
+def _calculate_ramp_time(
+    p_delta: float, ramp_rate: float, timestep_hours: float = 1.0
+) -> int:
+    """Calculate timesteps needed to ramp through p_delta at given ramp_rate.
+
+    Parameters
+    ----------
+    p_delta : float
+        Change in power (p.u.) - e.g., from 0 to p_min_pu
+    ramp_rate : float
+        Ramp rate in p.u. per hour (e.g., 0.05 = 5%/hour)
+    timestep_hours : float, default 1.0
+        Duration of each timestep in hours
+
+    Returns
+    -------
+    int
+        Number of timesteps needed (minimum 1)
+
+    Examples
+    --------
+    >>> # Need to go from 0 to 0.3 p.u. at 0.1 p.u./hr
+    >>> _calculate_ramp_time(0.3, 0.1)
+    3  # Takes 3 hours
+
+    >>> # Instant if no ramp limit
+    >>> _calculate_ramp_time(0.3, 1e10)
+    1
+    """
+    if pd.isna(ramp_rate) or ramp_rate >= 1e10:
+        return 1  # Instant if no ramp constraint
+
+    if p_delta <= 0:
+        return 1  # No ramp time needed
+
+    if ramp_rate <= 0:
+        return 1  # Avoid division by zero
+
+    ramp_hours = p_delta / ramp_rate  # Time = distance / rate
+    timesteps = int(np.ceil(ramp_hours / timestep_hours))
+
+    return max(1, timesteps)  # At least 1 timestep
+
+
+def _create_ramp_trajectory(
+    start_value: float, end_value: float, num_steps: int, ramp_rate: float
+) -> np.ndarray:
+    """Create linear ramp trajectory from start to end over num_steps.
+
+    Parameters
+    ----------
+    start_value : float
+        Starting value (p.u.)
+    end_value : float
+        Ending value (p.u.)
+    num_steps : int
+        Number of timesteps
+    ramp_rate : float
+        Maximum ramp rate (p.u./hour) - enforces constraint
+
+    Returns
+    -------
+    np.ndarray
+        Array of ramped values, length num_steps
+
+    Examples
+    --------
+    >>> # Ramp from 0 to 0.3 over 3 steps at 0.1/hr
+    >>> _create_ramp_trajectory(0, 0.3, 3, 0.1)
+    array([0.1, 0.2, 0.3])
+
+    >>> # Ramp down from 0.3 to 0 over 3 steps
+    >>> _create_ramp_trajectory(0.3, 0, 3, 0.1)
+    array([0.2, 0.1, 0.0])
+    """
+    if num_steps <= 1:
+        return np.array([end_value])
+
+    trajectory = []
+    delta = end_value - start_value
+
+    for step in range(1, num_steps + 1):
+        # Linear interpolation
+        progress = step / num_steps
+        value = start_value + delta * progress
+
+        # Enforce ramp rate constraint
+        max_change = step * ramp_rate
+        if delta > 0:  # Ramping up
+            value = min(value, start_value + max_change)
+        else:  # Ramping down
+            value = max(value, start_value - max_change)
+
+        # Clamp to [start_value, end_value] range
+        if delta > 0:
+            value = min(value, end_value)
+        else:
+            value = max(value, end_value)
+
+        trajectory.append(value)
+
+    return np.array(trajectory)
+
+
+def _infer_timestep_hours(snapshots: pd.DatetimeIndex) -> float:
+    """Infer timestep duration in hours from snapshots.
+
+    Parameters
+    ----------
+    snapshots : pd.DatetimeIndex
+        Network snapshots
+
+    Returns
+    -------
+    float
+        Timestep duration in hours
+    """
+    if len(snapshots) < 2:
+        return 1.0  # Default to hourly
+
+    # Get most common time difference
+    time_diffs = snapshots[1:] - snapshots[:-1]
+    most_common_diff = time_diffs.value_counts().index[0]
+
+    return most_common_diff.total_seconds() / 3600.0
+
+
 def apply_outage_schedule(
     network: Network,
     outage_schedule: pd.DataFrame,
     apply_to_p_max: bool = True,
     apply_to_p_min: bool = True,
+    ramp_aware: bool = True,
 ) -> dict:
-    """Apply outage schedule to network generators.
+    """Apply outage schedule to network generators with ramp-aware startup/shutdown.
 
     This function applies outage schedules to PyPSA networks by:
     1. Scaling p_max_pu by the outage schedule (reduces available capacity)
     2. Scaling p_min_pu by the outage schedule (maintains constraint consistency)
-    3. Preventing p_min_pu > p_max_pu violations
+    3. Creating ramped startup/shutdown zones for generators with binding ramp constraints
+    4. Preventing p_min_pu > p_max_pu violations
+
+    The ramp-aware feature (enabled by default) eliminates the need for post-processing
+    with fix_outage_ramp_conflicts() by handling ramp constraints during outage application.
 
     Note: This assumes time series p_min_pu has already been properly initialized
     from PLEXOS database properties (Min Stable Level, Min Stable Factor, etc.)
@@ -270,6 +402,12 @@ def apply_outage_schedule(
     apply_to_p_min : bool, default True
         Apply schedule to p_min_pu (multiply existing values by schedule)
         Maintains operational flexibility while scaling constraints
+    ramp_aware : bool, default True
+        Enable ramp-aware startup/shutdown zones. When True, generators with
+        binding ramp constraints get gradual p_min_pu trajectories during
+        startup (after outage ends) and shutdown (before outage starts).
+        This prevents ramp rate violations and eliminates the need for
+        fix_outage_ramp_conflicts() post-processing.
 
     Returns
     -------
@@ -278,6 +416,10 @@ def apply_outage_schedule(
             "affected_generators": int,
             "applied_to_p_max": int,
             "applied_to_p_min": int,
+            "ramped_generators": int (if ramp_aware=True),
+            "avg_startup_steps": float (if ramp_aware=True),
+            "avg_shutdown_steps": float (if ramp_aware=True),
+            "violations_fixed": int (if ramp_aware=True),
         }
 
     Examples
@@ -328,6 +470,185 @@ def apply_outage_schedule(
         )
         applied_to_p_min_count = len(gens_in_p_min)
 
+    # Step 3: Handle ramp conflicts with startup/shutdown zones (if ramp_aware=True)
+    ramped_generators = 0
+    total_startup_hours = 0
+    total_shutdown_hours = 0
+    violations_fixed = 0
+
+    if ramp_aware and apply_to_p_min and gens_in_p_min:
+        logger.info("Applying ramp-aware startup/shutdown zones...")
+
+        # Infer timestep duration
+        timestep_hours = _infer_timestep_hours(network.snapshots)
+
+        for gen in gens_in_p_min:
+            # Get generator ramp properties
+            ramp_up = network.generators.at[gen, "ramp_limit_up"]
+            ramp_down = network.generators.at[gen, "ramp_limit_down"]
+
+            # If no ramp_down, use ramp_up for both directions
+            if pd.isna(ramp_down):
+                ramp_down = ramp_up
+
+            # Skip if no ramp constraints (instant startup/shutdown)
+            if pd.isna(ramp_up) or ramp_up >= 1e10:
+                continue
+
+            # Get time series
+            p_min = network.generators_t.p_min_pu[gen].copy()
+            p_max = network.generators_t.p_max_pu[gen].copy()
+
+            # Detect state transitions
+            # Outage ends: p_max goes from 0 to >0 (generator coming online)
+            outage_ends = (p_max.shift(1).fillna(0) == 0) & (p_max > 0)
+            # Outage starts: p_max goes from >0 to 0 (generator going offline)
+            outage_starts = (p_max.shift(1).fillna(0) > 0) & (p_max == 0)
+
+            # === STARTUP ZONES (after outage ends) ===
+            for recovery_idx in outage_ends[outage_ends].index:
+                # Target p_min at end of startup
+                target_p_min = p_min.loc[recovery_idx]
+
+                if target_p_min <= 0:
+                    continue  # No startup ramp needed if no min level
+
+                # Calculate startup time
+                startup_steps = _calculate_ramp_time(
+                    p_delta=target_p_min,
+                    ramp_rate=ramp_up,
+                    timestep_hours=timestep_hours,
+                )
+
+                # Create ramped trajectory
+                trajectory = _create_ramp_trajectory(
+                    start_value=0.0,
+                    end_value=target_p_min,
+                    num_steps=startup_steps,
+                    ramp_rate=ramp_up,
+                )
+
+                # Apply trajectory to p_min_pu
+                for step, ramped_value in enumerate(trajectory):
+                    try:
+                        timestamp = recovery_idx + pd.Timedelta(
+                            hours=step * timestep_hours
+                        )
+                    except Exception:
+                        break  # Beyond snapshot range
+
+                    if timestamp not in p_min.index:
+                        break
+
+                    # Only apply if generator is online (p_max > 0)
+                    if p_max.loc[timestamp] <= 0:
+                        break
+
+                    # Set ramped p_min value
+                    p_min.loc[timestamp] = ramped_value
+
+                    # CRITICAL: Ensure p_min <= p_max
+                    # Raise p_max to accommodate p_min
+                    p_max.loc[timestamp] = max(
+                        p_max.loc[timestamp], p_min.loc[timestamp]
+                    )
+
+                total_startup_hours += startup_steps
+
+            # === SHUTDOWN ZONES (before outage starts) ===
+            for outage_idx in outage_starts[outage_starts].index:
+                # Get p_min before shutdown starts
+                try:
+                    prev_idx = outage_idx - pd.Timedelta(hours=timestep_hours)
+                except Exception:
+                    logger.exception(f"Error during scheduling maintenance for {gen}")
+                    continue
+
+                if prev_idx not in p_min.index:
+                    continue
+
+                initial_p_min = p_min.loc[prev_idx]
+
+                if initial_p_min <= 0:
+                    continue  # No shutdown ramp needed if already at 0
+
+                # Calculate shutdown time
+                shutdown_steps = _calculate_ramp_time(
+                    p_delta=initial_p_min,
+                    ramp_rate=ramp_down,
+                    timestep_hours=timestep_hours,
+                )
+
+                # Create ramped trajectory (going down to 0)
+                trajectory = _create_ramp_trajectory(
+                    start_value=initial_p_min,
+                    end_value=0.0,
+                    num_steps=shutdown_steps,
+                    ramp_rate=ramp_down,
+                )
+
+                # Apply trajectory backwards from outage start
+                for step, ramped_value in enumerate(trajectory):
+                    try:
+                        timestamp = outage_idx - pd.Timedelta(
+                            hours=(step + 1) * timestep_hours
+                        )
+                    except Exception:
+                        break
+
+                    if timestamp not in p_min.index:
+                        break
+
+                    # Only apply if generator is online (p_max > 0)
+                    if p_max.loc[timestamp] <= 0:
+                        break
+
+                    # Set ramped p_min value
+                    p_min.loc[timestamp] = ramped_value
+
+                    # CRITICAL: Ensure p_min <= p_max
+                    p_max.loc[timestamp] = max(
+                        p_max.loc[timestamp], p_min.loc[timestamp]
+                    )
+
+                total_shutdown_hours += shutdown_steps
+
+            # Update network with modified time series
+            network.generators_t.p_min_pu[gen] = p_min
+            network.generators_t.p_max_pu[gen] = p_max
+
+            ramped_generators += 1
+
+        if ramped_generators > 0:
+            logger.info(
+                f"  Ramped startup/shutdown for {ramped_generators} generators "
+                f"(avg startup: {total_startup_hours / ramped_generators:.1f} steps, "
+                f"avg shutdown: {total_shutdown_hours / ramped_generators:.1f} steps)"
+            )
+
+    # Step 4: Final validation - ensure p_min <= p_max everywhere
+    if ramp_aware and gens_in_p_min:
+        for gen in gens_in_p_min:
+            p_min = network.generators_t.p_min_pu[gen]
+            p_max = network.generators_t.p_max_pu[gen]
+
+            violations = p_min > p_max
+            if violations.any():
+                # Fix by raising p_max to match p_min
+                network.generators_t.p_max_pu.loc[violations, gen] = p_min.loc[
+                    violations
+                ]
+                violations_fixed += violations.sum()
+                logger.warning(
+                    f"Generator {gen}: Fixed {violations.sum()} p_min > p_max violations "
+                    f"by raising p_max"
+                )
+
+        if violations_fixed > 0:
+            logger.warning(
+                f"Total violations fixed: {violations_fixed} timesteps across all generators"
+            )
+
     # Log summary
     logger.info(f"Applied outage schedule to {len(affected_generators)} generators")
     if apply_to_p_max:
@@ -335,11 +656,23 @@ def apply_outage_schedule(
     if apply_to_p_min:
         logger.info(f"  p_min_pu: {applied_to_p_min_count} generators")
 
-    return {
+    summary = {
         "affected_generators": len(affected_generators),
         "applied_to_p_max": applied_to_p_max_count,
         "applied_to_p_min": applied_to_p_min_count,
     }
+
+    if ramp_aware:
+        summary["ramped_generators"] = ramped_generators
+        summary["avg_startup_steps"] = (
+            total_startup_hours / ramped_generators if ramped_generators > 0 else 0.0
+        )
+        summary["avg_shutdown_steps"] = (
+            total_shutdown_hours / ramped_generators if ramped_generators > 0 else 0.0
+        )
+        summary["violations_fixed"] = violations_fixed
+
+    return summary
 
 
 def load_precomputed_outage_schedules(
