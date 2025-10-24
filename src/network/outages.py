@@ -1173,6 +1173,17 @@ def load_outages_from_monthly_files(
         else:
             missing_count += 1
 
+    # Add generators with no outage files (assume fully available)
+    # This ensures ALL generators are in the outage schedule, so ramp-aware logic
+    # in apply_outage_schedule() processes them correctly
+    for gen_name in generators:
+        if gen_name not in outage_data:
+            # No outage files found - assume fully available (capacity_factor=1.0)
+            outage_data[gen_name] = pd.Series(1.0, index=network.snapshots)
+            logger.debug(
+                f"No outage files for {gen_name}, assuming fully available (capacity_factor=1.0)"
+            )
+
     # Create DataFrame
     if outage_data:
         schedule_df = pd.DataFrame(outage_data, index=network.snapshots)
