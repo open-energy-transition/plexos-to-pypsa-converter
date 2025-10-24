@@ -374,6 +374,7 @@ def apply_outage_schedule(
     apply_to_p_max: bool = True,
     apply_to_p_min: bool = True,
     ramp_aware: bool = True,
+    debug_generators: list[str] | None = None,
 ) -> dict:
     """Apply outage schedule to network generators with ramp-aware startup/shutdown.
 
@@ -408,6 +409,11 @@ def apply_outage_schedule(
         startup (after outage ends) and shutdown (before outage starts).
         This prevents ramp rate violations and eliminates the need for
         fix_outage_ramp_conflicts() post-processing.
+    debug_generators : list[str], optional
+        List of generator names to enable detailed DEBUG logging for.
+        If None (default), logs INFO level summaries for all generators.
+        Use this to troubleshoot specific generators without overwhelming
+        log output. Example: ["RichmondCgn1", "DiabloCanyon1"]
 
     Returns
     -------
@@ -477,12 +483,23 @@ def apply_outage_schedule(
     violations_fixed = 0
 
     if ramp_aware and apply_to_p_min and gens_in_p_min:
-        logger.info("Applying ramp-aware startup/shutdown zones...")
+        logger.info(
+            f"Applying ramp-aware startup/shutdown zones to {len(gens_in_p_min)} generators..."
+        )
+
+        # Helper to check if debug logging is enabled for a generator
+        def should_debug(gen_name: str) -> bool:
+            return debug_generators is None or gen_name in debug_generators
 
         # Infer timestep duration
         timestep_hours = _infer_timestep_hours(network.snapshots)
+        if debug_generators is None:
+            logger.debug(f"Inferred timestep: {timestep_hours} hours")
 
         for gen in gens_in_p_min:
+            if should_debug(gen):
+                logger.debug(f"Processing ramp-aware logic for {gen}")
+
             # Get generator ramp properties
             ramp_up = network.generators.at[gen, "ramp_limit_up"]
             ramp_down = network.generators.at[gen, "ramp_limit_down"]
@@ -491,8 +508,15 @@ def apply_outage_schedule(
             if pd.isna(ramp_down):
                 ramp_down = ramp_up
 
+            if should_debug(gen):
+                logger.debug(
+                    f"{gen}: ramp_limit_up={ramp_up:.4f}, ramp_limit_down={ramp_down:.4f}"
+                )
+
             # Skip if no ramp constraints (instant startup/shutdown)
             if pd.isna(ramp_up) or ramp_up >= 1e10:
+                if should_debug(gen):
+                    logger.debug(f"{gen}: Skipping - no ramp constraints")
                 continue
 
             # Get time series
@@ -504,6 +528,14 @@ def apply_outage_schedule(
             outage_ends = (p_max.shift(1).fillna(0) == 0) & (p_max > 0)
             # Outage starts: p_max goes from >0 to 0 (generator going offline)
             outage_starts = (p_max.shift(1).fillna(0) > 0) & (p_max == 0)
+
+            num_startup_transitions = outage_ends.sum()
+            num_shutdown_transitions = outage_starts.sum()
+            if should_debug(gen):
+                logger.debug(
+                    f"{gen}: Detected {num_startup_transitions} startup and "
+                    f"{num_shutdown_transitions} shutdown transition(s)"
+                )
 
             # === STARTUP ZONES (after outage ends) ===
             for recovery_idx in outage_ends[outage_ends].index:
@@ -565,11 +597,22 @@ def apply_outage_schedule(
                     continue
 
                 if prev_idx not in p_min.index:
+                    if should_debug(gen):
+                        logger.debug(
+                            f"{gen}: Skipping shutdown at {outage_idx} - prev_idx not in index"
+                        )
                     continue
 
                 initial_p_min = p_min.loc[prev_idx]
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown transition at {outage_idx}, "
+                        f"initial_p_min at {prev_idx} = {initial_p_min:.4f}"
+                    )
 
                 if initial_p_min <= 0:
+                    if should_debug(gen):
+                        logger.debug(f"{gen}: Skipping shutdown - initial_p_min <= 0")
                     continue  # No shutdown ramp needed if already at 0
 
                 # Calculate shutdown time
@@ -579,6 +622,12 @@ def apply_outage_schedule(
                     timestep_hours=timestep_hours,
                 )
 
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown needs {shutdown_steps} steps "
+                        f"(p_delta={initial_p_min:.4f}, ramp_rate={ramp_down:.4f})"
+                    )
+
                 # Create ramped trajectory (going down to 0)
                 trajectory = _create_ramp_trajectory(
                     start_value=initial_p_min,
@@ -587,30 +636,63 @@ def apply_outage_schedule(
                     ramp_rate=ramp_down,
                 )
 
+                # Reverse trajectory for shutdown (apply smallest values closest to outage)
+                # This ensures p_min decreases as we approach the outage
+                trajectory = trajectory[::-1]
+
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown trajectory (reversed) = {trajectory}"
+                    )
+
                 # Apply trajectory backwards from outage start
+                applied_count = 0
                 for step, ramped_value in enumerate(trajectory):
                     try:
                         timestamp = outage_idx - pd.Timedelta(
                             hours=(step + 1) * timestep_hours
                         )
                     except Exception:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: Exception calculating timestamp at step {step}"
+                            )
                         break
 
                     if timestamp not in p_min.index:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: Timestamp {timestamp} not in index, stopping"
+                            )
                         break
 
                     # Only apply if generator is online (p_max > 0)
                     if p_max.loc[timestamp] <= 0:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: p_max at {timestamp} <= 0, stopping shutdown ramp"
+                            )
                         break
 
                     # Set ramped p_min value
+                    old_p_min = p_min.loc[timestamp]
                     p_min.loc[timestamp] = ramped_value
+                    applied_count += 1
+
+                    if should_debug(gen):
+                        logger.debug(
+                            f"{gen}: Set p_min[{timestamp}] = {ramped_value:.4f} (was {old_p_min:.4f})"
+                        )
 
                     # CRITICAL: Ensure p_min <= p_max
                     p_max.loc[timestamp] = max(
                         p_max.loc[timestamp], p_min.loc[timestamp]
                     )
 
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Applied shutdown ramp to {applied_count} timesteps"
+                    )
                 total_shutdown_hours += shutdown_steps
 
             # Update network with modified time series
