@@ -655,10 +655,21 @@ MODEL_REGISTRY = {
                         "target_type": "generators_t",
                         "apply_mode": "replace",
                         "scenario": 1,
-                        "generator_filter": "all",
+                        "generator_filter": "vre_only",
                         "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
                         "value_scaling": 1.0,
                         "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "load_hydro_dispatch",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "scenario": "Value",
+                        "generator_filter": "hydro_only",
+                        "load_rating": True,
+                        "load_min_stable": True,
                     },
                 },
                 {
