@@ -33,12 +33,20 @@ def run_model_workflow(
     model_dir = get_model_directory(model_id)
     csv_dir_pattern = workflow.get("csv_dir_pattern", "csvs_from_xml")
     csv_dir = model_dir / csv_dir_pattern
+
+    # Build units_out_dir if pattern is specified
+    units_out_dir_pattern = workflow.get("units_out_dir_pattern")
+    units_out_dir = (
+        model_dir / units_out_dir_pattern if units_out_dir_pattern else model_dir
+    )
+
     context = {
         "model_id": model_id,
         "model_dir": str(model_dir),
         "csv_dir": str(csv_dir),
         "profiles_path": str(model_dir),
         "inflow_path": str(model_dir),
+        "units_out_dir": str(units_out_dir),
     }
 
     def parse_step_overrides(step_overrides: dict) -> dict[str, dict]:
@@ -106,7 +114,7 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
 
     Args:
         params: Step parameters dict from registry
-        context: Context variables dict (model_id, csv_dir, profiles_path, inflow_path)
+        context: Context variables dict (model_id, csv_dir, profiles_path, inflow_path, units_out_dir)
         step_fn: The step function to call (used to inspect signature)
 
     Returns:
@@ -124,7 +132,13 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
     )
 
     # Standard context variables that might be injected
-    context_vars = ["model_id", "csv_dir", "profiles_path", "inflow_path"]
+    context_vars = [
+        "model_id",
+        "csv_dir",
+        "profiles_path",
+        "inflow_path",
+        "units_out_dir",
+    ]
 
     for key in context_vars:
         if (
