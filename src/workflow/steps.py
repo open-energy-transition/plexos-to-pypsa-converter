@@ -115,6 +115,81 @@ def load_vre_profiles_step(
     return {"load_vre_profiles": summary}
 
 
+def load_hydro_dispatch_step(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    profiles_path: str | Path,
+    scenario: str | int = "Value",
+    generator_filter: str = "hydro_only",
+    load_rating: bool = True,
+    load_min_stable: bool = True,
+) -> dict:
+    """Step: Load hydro dispatch profiles (Rating and Min Stable Level).
+
+    This step loads time-varying dispatch schedules for run-of-river and dispatchable
+    hydro generators. Unlike VRE profiles (which are capacity factors for intermittent
+    generation), hydro dispatch profiles represent operational constraints and schedules.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    profiles_path : str | Path
+        Base directory containing hydro dispatch profile CSV files
+    scenario : str | int, default "Value"
+        Which scenario column to use. Hydro dispatch is typically deterministic,
+        so default is "Value". For stochastic hydro, pass scenario number (1, 2, etc.)
+    generator_filter : str, default "hydro_only"
+        Filter preset name (e.g., "hydro_only", "all")
+    load_rating : bool, default True
+        Load Rating profiles as p_max_pu
+    load_min_stable : bool, default True
+        Load Min Stable Level profiles as p_min_pu
+
+    Returns
+    -------
+    dict
+        Summary with processed/skipped/failed generator counts for each property
+    """
+    summary = {}
+    filter_fn = resolve_filter_preset(generator_filter, network)
+
+    # Load Rating profiles (p_max_pu) for hydro dispatch schedules
+    if load_rating:
+        rating_summary = load_data_file_profiles_csv(
+            network=network,
+            csv_dir=csv_dir,
+            profiles_path=profiles_path,
+            property_name="Rating",
+            target_property="p_max_pu",
+            target_type="generators_t",
+            apply_mode="replace",
+            scenario=scenario,
+            generator_filter=filter_fn,
+            carrier_mapping={"Hydro": "hydro", "ROR": "hydro"},
+        )
+        summary["rating"] = rating_summary
+
+    # Load Min Stable Level profiles (p_min_pu) for must-run constraints
+    if load_min_stable:
+        min_summary = load_data_file_profiles_csv(
+            network=network,
+            csv_dir=csv_dir,
+            profiles_path=profiles_path,
+            property_name="Min Stable Level",
+            target_property="p_min_pu",
+            target_type="generators_t",
+            apply_mode="replace",
+            scenario=scenario,
+            generator_filter=filter_fn,
+        )
+        summary["min_stable"] = min_summary
+
+    return {"load_hydro_dispatch": summary}
+
+
 def add_storage_inflows_step(
     network: pypsa.Network,
     csv_dir: str | Path,
@@ -226,6 +301,7 @@ STEP_REGISTRY: dict[str, Callable[..., Any]] = {
     "scale_p_min_pu": scale_p_min_pu_step,
     "add_curtailment_link": add_curtailment_link_step,
     "load_vre_profiles": load_vre_profiles_step,
+    "load_hydro_dispatch": load_hydro_dispatch_step,
     "add_storage_inflows": add_storage_inflows_step,
     "apply_generator_units": apply_generator_units_step,
     "parse_outages": parse_outages_step,
