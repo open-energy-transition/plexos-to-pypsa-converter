@@ -107,20 +107,20 @@ def download_model(model_id: str) -> bool:
     print(f"\nChecking model: {model_id}")
 
     if model_id not in MODEL_REGISTRY:
-        print(f"  ✗ Unknown model: {model_id}")
+        print(f"    Unknown model: {model_id}")
         return False
 
     # Check if model is complete
     if is_model_complete(model_id):
-        print("  ✓ Model complete, skipping download")
+        print("Model complete, skipping download")
         return True
 
     # Model incomplete or missing - download using recipe
-    print("  ⚠ Model incomplete, downloading using recipe...")
+    print("    Model incomplete, downloading using recipe...")
 
     config = MODEL_REGISTRY[model_id]
     if "recipe" not in config:
-        print(f"  ✗ No recipe available for {model_id}")
+        print(f"No recipe available for {model_id}")
         return False
 
     model_dir = get_model_directory(model_id)
@@ -131,11 +131,11 @@ def download_model(model_id: str) -> bool:
     try:
         executor.execute_recipe(config["recipe"])
     except Exception as e:
-        print(f"  ✗ Download failed: {e}")
+        print(f"Download failed: {e}")
         traceback.print_exc()
         return False
     else:
-        print("  ✓ Download complete")
+        print("Download complete")
         return True
 
 
@@ -165,9 +165,9 @@ Examples:
 
     print("\n" + "=" * 60)
     if all(results):
-        print("✅ All models ready")
+        print("All models ready")
         return 0
-    print("❌ Some models failed")
+    print("Some models failed")
     return 1
 
 

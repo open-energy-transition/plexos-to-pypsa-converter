@@ -74,12 +74,12 @@ def test_sem_conversion(args):
         )
 
         # Show workflow steps that were completed
-        print("\n✓ Workflow steps completed (optimize excluded):")
+        print("\nWorkflow steps completed (optimize excluded):")
         for step_name in summary.keys():
             print(f"  - {step_name}")
 
         # Validate network structure
-        print("\n✓ Network structure validated:")
+        print("\nNetwork structure validated:")
         print(f"  - Buses: {len(network.buses)}")
         print(f"  - Generators: {len(network.generators)}")
         print(f"  - Links: {len(network.links)}")
@@ -95,7 +95,7 @@ def test_sem_conversion(args):
 
         # Optional consistency check
         if not args.no_consistency_check:
-            print("\n✓ Running consistency check...")
+            print("\nRunning consistency check...")
             network.consistency_check()
             print("  - Consistency check passed")
 
@@ -107,17 +107,17 @@ def test_sem_conversion(args):
                 f.write(f"links={len(network.links)}\n")
                 f.write(f"storage_units={len(network.storage_units)}\n")
                 f.write(f"snapshots={len(network.snapshots)}\n")
-            print(f"\n✓ Stats written to {args.output_file}")
+            print(f"\nStats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
-        print("✅ SEM conversion test PASSED")
+        print("SEM conversion test PASSED")
         print(f"{'=' * 60}\n")
 
         return True
 
     except Exception as e:
         print(f"\n{'=' * 60}")
-        print("❌ SEM conversion test FAILED")
+        print("SEM conversion test FAILED")
         print(f"{'=' * 60}")
         print(f"Error: {e}")
         import traceback
@@ -175,12 +175,12 @@ def test_aemo_conversion(args):
         )
 
         # Show workflow steps that were completed
-        print("\n✓ Workflow steps completed (optimize excluded):")
+        print("\nWorkflow steps completed (optimize excluded):")
         for step_name in summary.keys():
             print(f"  - {step_name}")
 
         # Validate network structure
-        print("\n✓ Network structure validated:")
+        print("\nNetwork structure validated:")
         print(f"  - Buses: {len(network.buses)}")
         print(f"  - Generators: {len(network.generators)}")
         print(f"  - Links: {len(network.links)}")
@@ -196,7 +196,7 @@ def test_aemo_conversion(args):
 
         # Optional consistency check
         if not args.no_consistency_check:
-            print("\n✓ Running consistency check...")
+            print("\nRunning consistency check...")
             network.consistency_check()
             print("  - Consistency check passed")
 
@@ -208,17 +208,17 @@ def test_aemo_conversion(args):
                 f.write(f"links={len(network.links)}\n")
                 f.write(f"storage_units={len(network.storage_units)}\n")
                 f.write(f"snapshots={len(network.snapshots)}\n")
-            print(f"\n Stats written to {args.output_file}")
+            print(f"\nStats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
-        print("✅ AEMO conversion test PASSED")
+        print("AEMO conversion test PASSED")
         print(f"{'=' * 60}\n")
 
         return True
 
     except Exception as e:
         print(f"\n{'=' * 60}")
-        print("❌ AEMO conversion test FAILED")
+        print("AEMO conversion test FAILED")
         print(f"{'=' * 60}")
         print(f"Error: {e}")
         import traceback
@@ -264,7 +264,7 @@ Examples:
     elif args.model_id == "aemo-2024-isp-progressive-change":
         success = test_aemo_conversion(args)
     else:
-        print(f"❌ Unknown model: {args.model_id}")
+        print(f"Unknown model: {args.model_id}")
         sys.exit(1)
 
     # Exit with appropriate code
