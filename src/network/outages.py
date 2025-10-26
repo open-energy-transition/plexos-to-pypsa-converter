@@ -241,18 +241,151 @@ def build_outage_schedule(
     return schedule
 
 
+def _calculate_ramp_time(
+    p_delta: float, ramp_rate: float, timestep_hours: float = 1.0
+) -> int:
+    """Calculate timesteps needed to ramp through p_delta at given ramp_rate.
+
+    Parameters
+    ----------
+    p_delta : float
+        Change in power (p.u.) - e.g., from 0 to p_min_pu
+    ramp_rate : float
+        Ramp rate in p.u. per hour (e.g., 0.05 = 5%/hour)
+    timestep_hours : float, default 1.0
+        Duration of each timestep in hours
+
+    Returns
+    -------
+    int
+        Number of timesteps needed (minimum 1)
+
+    Examples
+    --------
+    >>> # Need to go from 0 to 0.3 p.u. at 0.1 p.u./hr
+    >>> _calculate_ramp_time(0.3, 0.1)
+    3  # Takes 3 hours
+
+    >>> # Instant if no ramp limit
+    >>> _calculate_ramp_time(0.3, 1e10)
+    1
+    """
+    if pd.isna(ramp_rate) or ramp_rate >= 1e10:
+        return 1  # Instant if no ramp constraint
+
+    if p_delta <= 0:
+        return 1  # No ramp time needed
+
+    if ramp_rate <= 0:
+        return 1  # Avoid division by zero
+
+    ramp_hours = p_delta / ramp_rate  # Time = distance / rate
+    timesteps = int(np.ceil(ramp_hours / timestep_hours))
+
+    return max(1, timesteps)  # At least 1 timestep
+
+
+def _create_ramp_trajectory(
+    start_value: float, end_value: float, num_steps: int, ramp_rate: float
+) -> np.ndarray:
+    """Create linear ramp trajectory from start to end over num_steps.
+
+    Parameters
+    ----------
+    start_value : float
+        Starting value (p.u.)
+    end_value : float
+        Ending value (p.u.)
+    num_steps : int
+        Number of timesteps
+    ramp_rate : float
+        Maximum ramp rate (p.u./hour) - enforces constraint
+
+    Returns
+    -------
+    np.ndarray
+        Array of ramped values, length num_steps
+
+    Examples
+    --------
+    >>> # Ramp from 0 to 0.3 over 3 steps at 0.1/hr
+    >>> _create_ramp_trajectory(0, 0.3, 3, 0.1)
+    array([0.1, 0.2, 0.3])
+
+    >>> # Ramp down from 0.3 to 0 over 3 steps
+    >>> _create_ramp_trajectory(0.3, 0, 3, 0.1)
+    array([0.2, 0.1, 0.0])
+    """
+    if num_steps <= 1:
+        return np.array([end_value])
+
+    trajectory = []
+    delta = end_value - start_value
+
+    for step in range(1, num_steps + 1):
+        # Linear interpolation
+        progress = step / num_steps
+        value = start_value + delta * progress
+
+        # Enforce ramp rate constraint
+        max_change = step * ramp_rate
+        if delta > 0:  # Ramping up
+            value = min(value, start_value + max_change)
+        else:  # Ramping down
+            value = max(value, start_value - max_change)
+
+        # Clamp to [start_value, end_value] range
+        if delta > 0:
+            value = min(value, end_value)
+        else:
+            value = max(value, end_value)
+
+        trajectory.append(value)
+
+    return np.array(trajectory)
+
+
+def _infer_timestep_hours(snapshots: pd.DatetimeIndex) -> float:
+    """Infer timestep duration in hours from snapshots.
+
+    Parameters
+    ----------
+    snapshots : pd.DatetimeIndex
+        Network snapshots
+
+    Returns
+    -------
+    float
+        Timestep duration in hours
+    """
+    if len(snapshots) < 2:
+        return 1.0  # Default to hourly
+
+    # Get most common time difference
+    time_diffs = snapshots[1:] - snapshots[:-1]
+    most_common_diff = time_diffs.value_counts().index[0]
+
+    return most_common_diff.total_seconds() / 3600.0
+
+
 def apply_outage_schedule(
     network: Network,
     outage_schedule: pd.DataFrame,
     apply_to_p_max: bool = True,
     apply_to_p_min: bool = True,
+    ramp_aware: bool = True,
+    debug_generators: list[str] | None = None,
 ) -> dict:
-    """Apply outage schedule to network generators.
+    """Apply outage schedule to network generators with ramp-aware startup/shutdown.
 
     This function applies outage schedules to PyPSA networks by:
     1. Scaling p_max_pu by the outage schedule (reduces available capacity)
     2. Scaling p_min_pu by the outage schedule (maintains constraint consistency)
-    3. Preventing p_min_pu > p_max_pu violations
+    3. Creating ramped startup/shutdown zones for generators with binding ramp constraints
+    4. Preventing p_min_pu > p_max_pu violations
+
+    The ramp-aware feature (enabled by default) eliminates the need for post-processing
+    with fix_outage_ramp_conflicts() by handling ramp constraints during outage application.
 
     Note: This assumes time series p_min_pu has already been properly initialized
     from PLEXOS database properties (Min Stable Level, Min Stable Factor, etc.)
@@ -270,6 +403,17 @@ def apply_outage_schedule(
     apply_to_p_min : bool, default True
         Apply schedule to p_min_pu (multiply existing values by schedule)
         Maintains operational flexibility while scaling constraints
+    ramp_aware : bool, default True
+        Enable ramp-aware startup/shutdown zones. When True, generators with
+        binding ramp constraints get gradual p_min_pu trajectories during
+        startup (after outage ends) and shutdown (before outage starts).
+        This prevents ramp rate violations and eliminates the need for
+        fix_outage_ramp_conflicts() post-processing.
+    debug_generators : list[str], optional
+        List of generator names to enable detailed DEBUG logging for.
+        If None (default), logs INFO level summaries for all generators.
+        Use this to troubleshoot specific generators without overwhelming
+        log output. Example: ["RichmondCgn1", "DiabloCanyon1"]
 
     Returns
     -------
@@ -278,6 +422,10 @@ def apply_outage_schedule(
             "affected_generators": int,
             "applied_to_p_max": int,
             "applied_to_p_min": int,
+            "ramped_generators": int (if ramp_aware=True),
+            "avg_startup_steps": float (if ramp_aware=True),
+            "avg_shutdown_steps": float (if ramp_aware=True),
+            "violations_fixed": int (if ramp_aware=True),
         }
 
     Examples
@@ -328,6 +476,261 @@ def apply_outage_schedule(
         )
         applied_to_p_min_count = len(gens_in_p_min)
 
+    # Step 3: Handle ramp conflicts with startup/shutdown zones (if ramp_aware=True)
+    ramped_generators = 0
+    total_startup_hours = 0
+    total_shutdown_hours = 0
+    violations_fixed = 0
+
+    if ramp_aware and apply_to_p_min and gens_in_p_min:
+        logger.info(
+            f"Applying ramp-aware startup/shutdown zones to {len(gens_in_p_min)} generators..."
+        )
+
+        # Helper to check if debug logging is enabled for a generator
+        def should_debug(gen_name: str) -> bool:
+            return debug_generators is None or gen_name in debug_generators
+
+        # Infer timestep duration
+        timestep_hours = _infer_timestep_hours(network.snapshots)
+        if debug_generators is None:
+            logger.debug(f"Inferred timestep: {timestep_hours} hours")
+
+        for gen in gens_in_p_min:
+            if should_debug(gen):
+                logger.debug(f"Processing ramp-aware logic for {gen}")
+
+            # Get generator ramp properties
+            ramp_up = network.generators.at[gen, "ramp_limit_up"]
+            ramp_down = network.generators.at[gen, "ramp_limit_down"]
+
+            # If no ramp_down, use ramp_up for both directions
+            if pd.isna(ramp_down):
+                ramp_down = ramp_up
+
+            if should_debug(gen):
+                logger.debug(
+                    f"{gen}: ramp_limit_up={ramp_up:.4f}, ramp_limit_down={ramp_down:.4f}"
+                )
+
+            # Skip if no ramp constraints (instant startup/shutdown)
+            if pd.isna(ramp_up) or ramp_up >= 1e10:
+                if should_debug(gen):
+                    logger.debug(f"{gen}: Skipping - no ramp constraints")
+                continue
+
+            # Get time series
+            p_min = network.generators_t.p_min_pu[gen].copy()
+            p_max = network.generators_t.p_max_pu[gen].copy()
+
+            # Detect state transitions
+            # Outage ends: p_max goes from 0 to >0 (generator coming online)
+            outage_ends = (p_max.shift(1).fillna(0) == 0) & (p_max > 0)
+            # Outage starts: p_max goes from >0 to 0 (generator going offline)
+            outage_starts = (p_max.shift(1).fillna(0) > 0) & (p_max == 0)
+
+            num_startup_transitions = outage_ends.sum()
+            num_shutdown_transitions = outage_starts.sum()
+            if should_debug(gen):
+                logger.debug(
+                    f"{gen}: Detected {num_startup_transitions} startup and "
+                    f"{num_shutdown_transitions} shutdown transition(s)"
+                )
+
+            # === STARTUP ZONES (after outage ends) ===
+            for recovery_idx in outage_ends[outage_ends].index:
+                # Target p_min at end of startup
+                target_p_min = p_min.loc[recovery_idx]
+
+                if target_p_min <= 0:
+                    continue  # No startup ramp needed if no min level
+
+                # Calculate startup time
+                startup_steps = _calculate_ramp_time(
+                    p_delta=target_p_min,
+                    ramp_rate=ramp_up,
+                    timestep_hours=timestep_hours,
+                )
+
+                # Create ramped trajectory
+                trajectory = _create_ramp_trajectory(
+                    start_value=0.0,
+                    end_value=target_p_min,
+                    num_steps=startup_steps,
+                    ramp_rate=ramp_up,
+                )
+
+                # Apply trajectory to p_min_pu
+                for step, ramped_value in enumerate(trajectory):
+                    try:
+                        timestamp = recovery_idx + pd.Timedelta(
+                            hours=step * timestep_hours
+                        )
+                    except Exception:
+                        break  # Beyond snapshot range
+
+                    if timestamp not in p_min.index:
+                        break
+
+                    # Only apply if generator is online (p_max > 0)
+                    if p_max.loc[timestamp] <= 0:
+                        break
+
+                    # Set ramped p_min value
+                    p_min.loc[timestamp] = ramped_value
+
+                    # CRITICAL: Ensure p_min <= p_max
+                    # Raise p_max to accommodate p_min
+                    p_max.loc[timestamp] = max(
+                        p_max.loc[timestamp], p_min.loc[timestamp]
+                    )
+
+                total_startup_hours += startup_steps
+
+            # === SHUTDOWN ZONES (before outage starts) ===
+            for outage_idx in outage_starts[outage_starts].index:
+                # Get p_min before shutdown starts
+                try:
+                    prev_idx = outage_idx - pd.Timedelta(hours=timestep_hours)
+                except Exception:
+                    logger.exception(f"Error during scheduling maintenance for {gen}")
+                    continue
+
+                if prev_idx not in p_min.index:
+                    if should_debug(gen):
+                        logger.debug(
+                            f"{gen}: Skipping shutdown at {outage_idx} - prev_idx not in index"
+                        )
+                    continue
+
+                initial_p_min = p_min.loc[prev_idx]
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown transition at {outage_idx}, "
+                        f"initial_p_min at {prev_idx} = {initial_p_min:.4f}"
+                    )
+
+                if initial_p_min <= 0:
+                    if should_debug(gen):
+                        logger.debug(f"{gen}: Skipping shutdown - initial_p_min <= 0")
+                    continue  # No shutdown ramp needed if already at 0
+
+                # Calculate shutdown time
+                shutdown_steps = _calculate_ramp_time(
+                    p_delta=initial_p_min,
+                    ramp_rate=ramp_down,
+                    timestep_hours=timestep_hours,
+                )
+
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown needs {shutdown_steps} steps "
+                        f"(p_delta={initial_p_min:.4f}, ramp_rate={ramp_down:.4f})"
+                    )
+
+                # Create ramped trajectory (going down to 0)
+                trajectory = _create_ramp_trajectory(
+                    start_value=initial_p_min,
+                    end_value=0.0,
+                    num_steps=shutdown_steps,
+                    ramp_rate=ramp_down,
+                )
+
+                # Reverse trajectory for shutdown (apply smallest values closest to outage)
+                # This ensures p_min decreases as we approach the outage
+                trajectory = trajectory[::-1]
+
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Shutdown trajectory (reversed) = {trajectory}"
+                    )
+
+                # Apply trajectory backwards from outage start
+                applied_count = 0
+                for step, ramped_value in enumerate(trajectory):
+                    try:
+                        timestamp = outage_idx - pd.Timedelta(
+                            hours=(step + 1) * timestep_hours
+                        )
+                    except Exception:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: Exception calculating timestamp at step {step}"
+                            )
+                        break
+
+                    if timestamp not in p_min.index:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: Timestamp {timestamp} not in index, stopping"
+                            )
+                        break
+
+                    # Only apply if generator is online (p_max > 0)
+                    if p_max.loc[timestamp] <= 0:
+                        if should_debug(gen):
+                            logger.debug(
+                                f"{gen}: p_max at {timestamp} <= 0, stopping shutdown ramp"
+                            )
+                        break
+
+                    # Set ramped p_min value
+                    old_p_min = p_min.loc[timestamp]
+                    p_min.loc[timestamp] = ramped_value
+                    applied_count += 1
+
+                    if should_debug(gen):
+                        logger.debug(
+                            f"{gen}: Set p_min[{timestamp}] = {ramped_value:.4f} (was {old_p_min:.4f})"
+                        )
+
+                    # CRITICAL: Ensure p_min <= p_max
+                    p_max.loc[timestamp] = max(
+                        p_max.loc[timestamp], p_min.loc[timestamp]
+                    )
+
+                if should_debug(gen):
+                    logger.debug(
+                        f"{gen}: Applied shutdown ramp to {applied_count} timesteps"
+                    )
+                total_shutdown_hours += shutdown_steps
+
+            # Update network with modified time series
+            network.generators_t.p_min_pu[gen] = p_min
+            network.generators_t.p_max_pu[gen] = p_max
+
+            ramped_generators += 1
+
+        if ramped_generators > 0:
+            logger.info(
+                f"  Ramped startup/shutdown for {ramped_generators} generators "
+                f"(avg startup: {total_startup_hours / ramped_generators:.1f} steps, "
+                f"avg shutdown: {total_shutdown_hours / ramped_generators:.1f} steps)"
+            )
+
+    # Step 4: Final validation - ensure p_min <= p_max everywhere
+    if ramp_aware and gens_in_p_min:
+        for gen in gens_in_p_min:
+            p_min = network.generators_t.p_min_pu[gen]
+            p_max = network.generators_t.p_max_pu[gen]
+
+            violations = p_min > p_max
+            if violations.any():
+                # Fix by raising p_max to match p_min
+                network.generators_t.p_max_pu.loc[violations, gen] = p_min.loc[
+                    violations
+                ]
+                violations_fixed += violations.sum()
+                logger.warning(
+                    f"Generator {gen}: Fixed {violations.sum()} p_min > p_max violations "
+                    f"by raising p_max"
+                )
+
+        if violations_fixed > 0:
+            logger.warning(
+                f"Total violations fixed: {violations_fixed} timesteps across all generators"
+            )
+
     # Log summary
     logger.info(f"Applied outage schedule to {len(affected_generators)} generators")
     if apply_to_p_max:
@@ -335,11 +738,23 @@ def apply_outage_schedule(
     if apply_to_p_min:
         logger.info(f"  p_min_pu: {applied_to_p_min_count} generators")
 
-    return {
+    summary = {
         "affected_generators": len(affected_generators),
         "applied_to_p_max": applied_to_p_max_count,
         "applied_to_p_min": applied_to_p_min_count,
     }
+
+    if ramp_aware:
+        summary["ramped_generators"] = ramped_generators
+        summary["avg_startup_steps"] = (
+            total_startup_hours / ramped_generators if ramped_generators > 0 else 0.0
+        )
+        summary["avg_shutdown_steps"] = (
+            total_shutdown_hours / ramped_generators if ramped_generators > 0 else 0.0
+        )
+        summary["violations_fixed"] = violations_fixed
+
+    return summary
 
 
 def load_precomputed_outage_schedules(
@@ -581,6 +996,13 @@ def parse_explicit_outages_from_properties(
 
     # Parse into OutageEvent objects
     outage_events = []
+    skipped_counts = {
+        "not_in_network": 0,
+        "filtered": 0,
+        "invalid_dates": 0,
+        "invalid_range": 0,
+        "invalid_value": 0,
+    }
 
     for _, row in outage_props.iterrows():
         gen_name = row["object"]
@@ -588,6 +1010,7 @@ def parse_explicit_outages_from_properties(
         # Check if generator exists in network
         if gen_name not in network.generators.index:
             logger.debug(f"Generator {gen_name} not in network, skipping outage")
+            skipped_counts["not_in_network"] += 1
             continue
 
         # Apply generator filter if provided
@@ -595,6 +1018,7 @@ def parse_explicit_outages_from_properties(
             logger.debug(
                 f"Generator {gen_name} filtered out by generator_filter, skipping outage"
             )
+            skipped_counts["filtered"] += 1
             continue
 
         # Parse dates
@@ -603,10 +1027,11 @@ def parse_explicit_outages_from_properties(
 
         # Validate dates
         if pd.isna(start) or pd.isna(end):
-            logger.warning(
-                f"Invalid dates for {gen_name} {property_name}: "
-                f"start={row['date_from']}, end={row['date_to']}"
+            logger.debug(
+                f"Skipping {gen_name} {property_name} with invalid/missing dates: "
+                f"date_from={row['date_from']}, date_to={row['date_to']}"
             )
+            skipped_counts["invalid_dates"] += 1
             continue
 
         if end <= start:
@@ -614,6 +1039,7 @@ def parse_explicit_outages_from_properties(
                 f"Invalid date range for {gen_name} {property_name}: "
                 f"end ({end}) <= start ({start})"
             )
+            skipped_counts["invalid_range"] += 1
             continue
 
         # Parse value (number of units out)
@@ -623,6 +1049,7 @@ def parse_explicit_outages_from_properties(
             logger.warning(
                 f"Invalid value for {gen_name} {property_name}: {row['value']}"
             )
+            skipped_counts["invalid_value"] += 1
             continue
 
         # Convert units_out to capacity factor
@@ -646,9 +1073,213 @@ def parse_explicit_outages_from_properties(
             f"(units_out={units_out}, CF={capacity_factor})"
         )
 
+    # Log summary
     logger.info(f"Parsed {len(outage_events)} explicit outage events")
+    total_skipped = sum(skipped_counts.values())
+    if total_skipped > 0:
+        skip_details = ", ".join(f"{k}={v}" for k, v in skipped_counts.items() if v > 0)
+        logger.info(f"Skipped {total_skipped} entries ({skip_details})")
 
     return outage_events
+
+
+def load_outages_from_monthly_files(
+    units_out_dir: str | Path,
+    network: Network,
+    scenario: str | int | None = None,
+    generator_filter: Callable[[str], bool] | None = None,
+) -> pd.DataFrame:
+    """Load outage schedules from CAISO-style monthly Units Out files.
+
+    Reads monthly outage files organized in M01-M12 subdirectories, each containing
+    generator-specific outage schedules with stochastic scenarios.
+
+    File structure expected:
+    - units_out_dir/M01/{generator_name}_UnitsOut.csv
+    - units_out_dir/M02/{generator_name}_UnitsOut.csv
+    - ... (M01 through M12)
+
+    Each CSV file contains:
+    - Columns: Year, Month, Day, Period, 1, 2, 3, ..., N (scenario columns)
+    - Values: 0 = available, 1 = on outage
+    - Returns capacity factors where 1.0 = available, 0.0 = fully on outage
+
+    Parameters
+    ----------
+    units_out_dir : str | Path
+        Path to "Units Out" directory containing M01-M12 subdirectories
+    network : Network
+        PyPSA network with generators and snapshots
+    scenario : str | int, optional
+        Stochastic scenario to load (e.g., "iteration_1", 1, "iteration_100").
+        If None, uses first scenario.
+    generator_filter : Callable[[str], bool], optional
+        Function to filter which generators to load. If provided, only generators
+        where filter(gen_name) returns True will be loaded.
+
+    Returns
+    -------
+    pd.DataFrame
+        Outage schedule with:
+        - Index: network.snapshots (datetimes)
+        - Columns: generator names
+        - Values: capacity factors (0.0 = fully on outage, 1.0 = available)
+
+    Examples
+    --------
+    >>> # Load outages for all generators, first scenario
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network
+    ... )
+    >>> apply_outage_schedule(network, schedule)
+
+    >>> # Load specific scenario
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network,
+    ...     scenario=42  # Load scenario 42
+    ... )
+
+    >>> # Load filtered generators only
+    >>> schedule = load_outages_from_monthly_files(
+    ...     units_out_dir="data/caiso-irp23/Units Out",
+    ...     network=network,
+    ...     generator_filter=lambda g: g.startswith("Coal")
+    ... )
+
+    Notes
+    -----
+    - This function is designed for CAISO IRP23-style monthly outage files
+    - Validates that units_out_dir contains "Units Out" to prevent file confusion
+    - Missing generator files are logged but don't cause errors
+    - Automatically handles Year/Month/Day/Period format and scenario selection
+    """
+    units_out_dir = Path(units_out_dir)
+
+    # Safety check: validate we're loading from Units Out directory
+    if "Units Out" not in str(units_out_dir):
+        msg = (
+            f"Safety check failed: units_out_dir does not contain 'Units Out'. "
+            f"Got: {units_out_dir}. This function should only load from Units Out directories."
+        )
+        raise ValueError(msg)
+
+    if not units_out_dir.exists():
+        msg = f"Units Out directory not found: {units_out_dir}"
+        raise FileNotFoundError(msg)
+
+    logger.info(
+        f"Loading monthly outage files from {units_out_dir} "
+        f"(scenario={scenario if scenario is not None else 'first'})"
+    )
+
+    # Standardize scenario format
+    if scenario is not None:
+        if isinstance(scenario, int):
+            scenario_col = str(scenario)
+        elif isinstance(scenario, str) and scenario.startswith("iteration_"):
+            scenario_col = scenario.replace("iteration_", "")
+        else:
+            scenario_col = str(scenario)
+    else:
+        scenario_col = None
+
+    # Get list of generators to process
+    generators = list(network.generators.index)
+    if generator_filter is not None:
+        generators = [g for g in generators if generator_filter(g)]
+
+    logger.info(f"Processing outages for {len(generators)} generators")
+
+    # Load outages for each generator
+    outage_data = {}
+    found_count = 0
+    missing_count = 0
+    error_count = 0
+
+    for gen_name in generators:
+        gen_outage_series = []
+
+        # Load data from all monthly directories (M01-M12)
+        for month_num in range(1, 13):
+            month_dir = units_out_dir / f"M{month_num:02d}"
+            outage_file = month_dir / f"{gen_name}_UnitsOut.csv"
+
+            if not outage_file.exists():
+                logger.debug(f"Outage file not found: {outage_file.name}")
+                continue
+
+            try:
+                month_data = read_plexos_input_csv(
+                    outage_file,
+                    scenario=scenario_col,
+                    snapshots=network.snapshots,
+                )
+
+                # Verify we got a single column (one scenario)
+                if isinstance(month_data, pd.DataFrame) and len(month_data.columns) > 1:
+                    # Take first column if scenario wasn't properly selected
+                    month_series = month_data.iloc[:, 0]
+                    logger.debug(
+                        f"Multiple columns in outage data for {gen_name}, using first"
+                    )
+                elif isinstance(month_data, pd.DataFrame):
+                    month_series = month_data.iloc[:, 0]
+                else:
+                    month_series = month_data
+
+                gen_outage_series.append(month_series)
+
+            except Exception as e:
+                logger.warning(f"Error loading outage file {outage_file.name}: {e}")
+                error_count += 1
+                continue
+
+        if gen_outage_series:
+            # Concatenate all months
+            full_outage = pd.concat(gen_outage_series).sort_index()
+
+            # Convert from Units Out format (0=available, 1=outage)
+            # to capacity factor format (1.0=available, 0.0=outage)
+            capacity_factor = 1.0 - full_outage
+
+            # Align with network snapshots
+            aligned = capacity_factor.reindex(network.snapshots, fill_value=1.0)
+
+            outage_data[gen_name] = aligned
+            found_count += 1
+            logger.debug(
+                f"Loaded outage schedule for {gen_name}: {len(aligned)} timesteps"
+            )
+        else:
+            missing_count += 1
+
+    # Add generators with no outage files (assume fully available)
+    # This ensures ALL generators are in the outage schedule, so ramp-aware logic
+    # in apply_outage_schedule() processes them correctly
+    for gen_name in generators:
+        if gen_name not in outage_data:
+            # No outage files found - assume fully available (capacity_factor=1.0)
+            outage_data[gen_name] = pd.Series(1.0, index=network.snapshots)
+            logger.debug(
+                f"No outage files for {gen_name}, assuming fully available (capacity_factor=1.0)"
+            )
+
+    # Create DataFrame
+    if outage_data:
+        schedule_df = pd.DataFrame(outage_data, index=network.snapshots)
+        logger.info(
+            f"Loaded outage schedules for {found_count} generators "
+            f"(missing={missing_count}, errors={error_count})"
+        )
+        return schedule_df
+    else:
+        logger.warning(
+            f"No outage data loaded for any generators "
+            f"(missing={missing_count}, errors={error_count})"
+        )
+        return pd.DataFrame(index=network.snapshots)
 
 
 def apply_expected_outage_derating(

@@ -619,8 +619,7 @@ MODEL_REGISTRY = {
         "xml_filename": "CAISOIRP23Stochastic 20240517.xml",
         "model_type": "electricity",
         "default_config": {
-            "demand_assignment_strategy": "aggregate_node",
-            "aggregate_node_name": "CAISO_Load_Aggregate",
+            "demand_assignment_strategy": "participation_factors",
             "model_name": "M01Y2024 PSP23_25MMT",
             "cross_model_dependencies": {
                 "vre_profiles_model_id": "aemo-2024-isp-progressive-change",
@@ -628,6 +627,7 @@ MODEL_REGISTRY = {
         },
         "processing_workflow": {
             "csv_dir_pattern": "csvs_from_xml/WECC",
+            "units_out_dir_pattern": "Units Out",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
@@ -656,10 +656,21 @@ MODEL_REGISTRY = {
                         "target_type": "generators_t",
                         "apply_mode": "replace",
                         "scenario": 1,
-                        "generator_filter": "all",
+                        "generator_filter": "vre_only",
                         "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
                         "value_scaling": 1.0,
                         "manual_mappings": {},
+                    },
+                },
+                {
+                    "name": "load_hydro_dispatch",
+                    "params": {
+                        "csv_dir": None,
+                        "profiles_path": None,
+                        "scenario": "Value",
+                        "generator_filter": "hydro_only",
+                        "load_rating": True,
+                        "load_min_stable": True,
                     },
                 },
                 {
@@ -674,20 +685,22 @@ MODEL_REGISTRY = {
                     "params": {"csv_dir": None},
                 },
                 {
-                    "name": "parse_outages",
+                    "name": "load_monthly_outages",
                     "params": {
                         "csv_dir": None,
-                        "include_explicit": True,
-                        "explicit_property": "Units Out",
-                        "include_forced": True,
-                        "include_maintenance": True,
-                        "generator_filter": "exclude_vre",
-                        "random_seed": 42,
+                        "units_out_dir": None,
+                        "scenario": None,
+                        "generator_filter": None,
+                        "ramp_aware": True,
                     },
                 },
                 {
+                    "name": "add_slack",
+                    "params": {},
+                },
+                {
                     "name": "optimize",
-                    "params": {"year": 2025},
+                    "params": {"year": None},
                 },
             ],
         },
@@ -976,10 +989,6 @@ MODEL_REGISTRY = {
                         "generator_filter": "exclude_vre_and_low_ramp_limits",
                         "random_seed": 42,
                     },
-                },
-                {
-                    "name": "fix_outage_ramps",
-                    "params": {},
                 },
                 {
                     "name": "add_slack",

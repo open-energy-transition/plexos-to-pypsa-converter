@@ -373,6 +373,44 @@ def _build_generator_p_max_pu_timeseries_csv(
         rating_ts = build_ts("Rating", prop_df_entries)
         rating_factor_ts = build_ts("Rating Factor", prop_df_entries)
 
+        # Load Min Stable Level for validation (data quality check)
+        # Need to ensure Rating >= Min Stable Level for physical feasibility
+        min_stable_level_ts = build_ts("Min Stable Level", prop_df_entries)
+
+        # If no time-varying Min Stable Level, check static CSV as fallback
+        if min_stable_level_ts.isnull().all():
+            static_min_level = get_property_from_static_csv(
+                generator_df, gen, "Min Stable Level"
+            )
+            if static_min_level is not None:
+                parsed_val = parse_numeric_value(static_min_level, use_first=True)
+                if parsed_val is not None:
+                    min_stable_level_ts = pd.Series(parsed_val, index=snapshots)
+
+        # Validate Rating against Min Stable Level (data quality check)
+        # When Rating < Min Stable Level, generator cannot physically operate at that rating
+        # Treat this as data error and ignore Rating (fallback to Max Capacity instead)
+        if rating_ts.notnull().any() and min_stable_level_ts.notnull().any():
+            invalid_mask = (
+                rating_ts.notnull()
+                & min_stable_level_ts.notnull()
+                & (rating_ts < min_stable_level_ts)
+            )
+
+            if invalid_mask.any():
+                num_invalid = invalid_mask.sum()
+                min_rating = rating_ts[invalid_mask].min()
+                max_min_stable = min_stable_level_ts[invalid_mask].max()
+
+                logger.warning(
+                    f"Generator '{gen}': Rating < Min Stable Level for {num_invalid} timesteps "
+                    f"(Rating: {min_rating:.2f} MW < Min Stable: {max_min_stable:.2f} MW). "
+                    f"Ignoring Rating and using Max Capacity instead (data quality issue)."
+                )
+
+                # Clear invalid Rating values (will fallback to p_max_pu=1.0)
+                rating_ts[invalid_mask] = np.nan
+
         # Get p_nom for scaling Rating
         p_nom = None
         if gen in network.generators.index and "p_nom" in network.generators.columns:
@@ -633,17 +671,82 @@ def add_generators_csv(
     skipped_generators = []
     generators = list_objects_by_class_csv(generator_df)
 
-    for gen in generators:
-        # Extract Max Capacity (p_nom)
-        p_max_raw = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+    # Load time-varying properties to check for capacity expansions
+    try:
+        time_varying_props = load_time_varying_properties(csv_dir)
+    except Exception:
+        time_varying_props = pd.DataFrame()
 
-        if p_max_raw is None:
-            print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
-            p_max = None
-        else:
-            # Handle cases where Max Capacity might be a list (e.g., "['55.197', '62.606']")
-            # For capacity, we sum multiple values if present (e.g., multiple units)
-            p_max = parse_numeric_value(p_max_raw, use_first=False)
+    # Get model start date from network snapshots (if available)
+    model_start_date = (
+        network.snapshots.min()
+        if hasattr(network, "snapshots") and len(network.snapshots) > 0
+        else None
+    )
+
+    for gen in generators:
+        # Check for time-varying Max Capacity with dates (capacity expansions)
+        p_max = None
+        has_expansion = False
+
+        if not time_varying_props.empty:
+            max_cap_entries = time_varying_props[
+                (time_varying_props["class"] == "Generator")
+                & (time_varying_props["object"] == gen)
+                & (time_varying_props["property"] == "Max Capacity")
+            ].copy()
+
+            # Filter entries with dates
+            if not max_cap_entries.empty:
+                max_cap_entries["date_from"] = pd.to_datetime(
+                    max_cap_entries["date_from"], errors="coerce"
+                )
+                dated_entries = max_cap_entries[max_cap_entries["date_from"].notna()]
+
+                if not dated_entries.empty:
+                    has_expansion = (
+                        len(dated_entries) > 1
+                    )  # Multiple dated entries = expansion
+                    dated_entries = dated_entries.sort_values("date_from")
+
+                    # Use capacity at model start date
+                    if model_start_date is not None:
+                        # Find the entry that applies at model start
+                        applicable = dated_entries[
+                            dated_entries["date_from"] <= model_start_date
+                        ]
+                        if not applicable.empty:
+                            p_max = float(applicable.iloc[-1]["value"])
+                        else:
+                            # All dates are in the future - use first entry
+                            p_max = float(dated_entries.iloc[0]["value"])
+                    else:
+                        # No snapshots yet - use first dated entry
+                        p_max = float(dated_entries.iloc[0]["value"])
+
+                    if has_expansion:
+                        future_caps = dated_entries[
+                            dated_entries["date_from"]
+                            > (model_start_date or pd.Timestamp.min)
+                        ]
+                        if not future_caps.empty:
+                            print(
+                                f"Note: {gen} has capacity expansion schedule "
+                                f"({len(dated_entries)} stages, currently using {p_max:.2f} MW). "
+                                f"Full expansion modeling not yet implemented."
+                            )
+
+        # Fallback to static Max Capacity if no time-varying found
+        if p_max is None:
+            p_max_raw = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+
+            if p_max_raw is None:
+                print(f"Warning: 'Max Capacity' not found for {gen}. No p_nom set.")
+                p_max = None
+            else:
+                # Handle cases where Max Capacity might be a list (e.g., "['55.197', '62.606']")
+                # For capacity, we sum multiple values if present (e.g., multiple units)
+                p_max = parse_numeric_value(p_max_raw, use_first=False)
 
         # Extract generator properties
         prop_map = {
@@ -669,11 +772,11 @@ def add_generators_csv(
 
         # Max Ramp Up and Max Ramp Down are in MW/min, so to convert to ramp_limit_up and ramp_limit_down:
         # multiply by 60 and divide by p_nom
-        if "ramp_limit_up" in gen_attrs and p_max is not None:
+        if "ramp_limit_up" in gen_attrs and p_max > 0:
             gen_attrs["ramp_limit_up"] = (
                 gen_attrs["ramp_limit_up"] * 60.0 / p_max
             )  # per hour
-        if "ramp_limit_down" in gen_attrs and p_max is not None:
+        if "ramp_limit_down" in gen_attrs and p_max > 0:
             gen_attrs["ramp_limit_down"] = (
                 gen_attrs["ramp_limit_down"] * 60.0 / p_max
             )  # per hour
@@ -925,6 +1028,77 @@ def set_min_stable_levels_csv(
     if missing_gens and len(missing_gens) < 10:
         for gen in missing_gens:
             logger.debug(f"Generator {gen} not found in min stable levels DataFrame.")
+
+
+def validate_and_fix_generator_constraints(
+    network: Network, verbose: bool = True
+) -> dict:
+    """Validate and fix generator constraints where p_min_pu > p_max_pu.
+
+    When available capacity (p_max_pu) is less than minimum stable level (p_min_pu),
+    the generator physically cannot operate. This typically happens when:
+    - Rating Factor reduces capacity below Min Stable Level
+    - Rating only exists in static CSV but not time-varying
+    - Max Capacity < Min Stable Level (data quality issue)
+
+    In these cases, we relax p_min_pu to 0, allowing the generator to be turned off
+    or operate at reduced capacity. This preserves feasibility while acknowledging
+    that the unit cannot meet its normal minimum operating constraints.
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network with generators
+    verbose : bool, default True
+        Print summary of fixes
+
+    Returns
+    -------
+    dict
+        Summary with list of fixed generators
+
+    Examples
+    --------
+    >>> # After setting all generator properties
+    >>> validate_and_fix_generator_constraints(network)
+    Fixed 7 generators with p_min_pu > p_max_pu constraints
+      (Generators cannot meet min stable level at reduced capacity)
+    """
+    fixed_generators = []
+
+    for gen in network.generators.index:
+        if gen not in network.generators_t.p_max_pu.columns:
+            continue
+        if gen not in network.generators_t.p_min_pu.columns:
+            continue
+
+        p_max = network.generators_t.p_max_pu[gen]
+        p_min = network.generators_t.p_min_pu[gen]
+
+        # Check for infeasibility
+        infeasible_mask = p_min > p_max
+
+        if infeasible_mask.any():
+            num_infeasible = infeasible_mask.sum()
+            max_violation = (p_min - p_max)[infeasible_mask].max()
+
+            logger.warning(
+                f"Generator '{gen}': p_min_pu > p_max_pu for {num_infeasible} timesteps "
+                f"(max violation: {max_violation:.4f}). "
+                f"Setting p_min_pu = 0 for infeasible periods (unit cannot meet min stable level)."
+            )
+
+            # Fix: Set p_min_pu = 0 where infeasible
+            network.generators_t.p_min_pu.loc[infeasible_mask, gen] = 0.0
+            fixed_generators.append(gen)
+
+    if verbose and fixed_generators:
+        print(
+            f"Fixed {len(fixed_generators)} generators with p_min_pu > p_max_pu constraints"
+        )
+        print("  (Generators cannot meet min stable level at reduced capacity)")
+
+    return {"fixed_generators": fixed_generators}
 
 
 def set_generator_efficiencies_csv(
@@ -1519,7 +1693,12 @@ def load_data_file_profiles_csv(
 
         # Load profile using existing reader
         try:
-            profile_df = read_plexos_input_csv(csv_path, scenario=scenario)
+            profile_df = read_plexos_input_csv(
+                csv_path,
+                scenario=scenario,
+                snapshots=network.snapshots,  # Enable tiling for annual profiles
+                interpolation_method="linear",  # Linear interpolation for sparse data
+            )
 
             # Extract values (handle both single column and multi-column formats)
             if "value" in profile_df.columns:
@@ -2461,6 +2640,10 @@ def port_generators_csv(
     # Step 2b: Set minimum stable levels (p_min_pu)
     print("2b. Setting minimum stable levels (p_min_pu)...")
     set_min_stable_levels_csv(network, csv_dir, timeslice_csv=timeslice_csv)
+
+    # Step 2c: Validate and fix generator constraints
+    print("2c. Validating generator constraints...")
+    validate_and_fix_generator_constraints(network, verbose=True)
 
     # Step 3: Set generator efficiencies
     print("3. Setting generator efficiencies...")

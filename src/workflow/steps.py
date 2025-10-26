@@ -15,6 +15,7 @@ from network.outages import (
     apply_outage_schedule,
     build_outage_schedule,
     generate_stochastic_outages_csv,
+    load_outages_from_monthly_files,
     parse_explicit_outages_from_properties,
 )
 from network.ramp import fix_outage_ramp_conflicts
@@ -115,6 +116,81 @@ def load_vre_profiles_step(
     return {"load_vre_profiles": summary}
 
 
+def load_hydro_dispatch_step(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    profiles_path: str | Path,
+    scenario: str | int = "Value",
+    generator_filter: str = "hydro_only",
+    load_rating: bool = True,
+    load_min_stable: bool = True,
+) -> dict:
+    """Step: Load hydro dispatch profiles (Rating and Min Stable Level).
+
+    This step loads time-varying dispatch schedules for run-of-river and dispatchable
+    hydro generators. Unlike VRE profiles (which are capacity factors for intermittent
+    generation), hydro dispatch profiles represent operational constraints and schedules.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports
+    profiles_path : str | Path
+        Base directory containing hydro dispatch profile CSV files
+    scenario : str | int, default "Value"
+        Which scenario column to use. Hydro dispatch is typically deterministic,
+        so default is "Value". For stochastic hydro, pass scenario number (1, 2, etc.)
+    generator_filter : str, default "hydro_only"
+        Filter preset name (e.g., "hydro_only", "all")
+    load_rating : bool, default True
+        Load Rating profiles as p_max_pu
+    load_min_stable : bool, default True
+        Load Min Stable Level profiles as p_min_pu
+
+    Returns
+    -------
+    dict
+        Summary with processed/skipped/failed generator counts for each property
+    """
+    summary = {}
+    filter_fn = resolve_filter_preset(generator_filter, network)
+
+    # Load Rating profiles (p_max_pu) for hydro dispatch schedules
+    if load_rating:
+        rating_summary = load_data_file_profiles_csv(
+            network=network,
+            csv_dir=csv_dir,
+            profiles_path=profiles_path,
+            property_name="Rating",
+            target_property="p_max_pu",
+            target_type="generators_t",
+            apply_mode="replace",
+            scenario=scenario,
+            generator_filter=filter_fn,
+            carrier_mapping={"Hydro": "hydro", "ROR": "hydro"},
+        )
+        summary["rating"] = rating_summary
+
+    # Load Min Stable Level profiles (p_min_pu) for must-run constraints
+    if load_min_stable:
+        min_summary = load_data_file_profiles_csv(
+            network=network,
+            csv_dir=csv_dir,
+            profiles_path=profiles_path,
+            property_name="Min Stable Level",
+            target_property="p_min_pu",
+            target_type="generators_t",
+            apply_mode="replace",
+            scenario=scenario,
+            generator_filter=filter_fn,
+        )
+        summary["min_stable"] = min_summary
+
+    return {"load_hydro_dispatch": summary}
+
+
 def add_storage_inflows_step(
     network: pypsa.Network,
     csv_dir: str | Path,
@@ -184,6 +260,68 @@ def parse_outages_step(
     return {"parse_outages": summary}
 
 
+def load_monthly_outages_step(
+    network: pypsa.Network,
+    csv_dir: str | Path,
+    units_out_dir: str | Path,
+    scenario: str | int | None = None,
+    generator_filter: str | None = None,
+    ramp_aware: bool = True,
+) -> dict:
+    """Step: Load pre-computed monthly outage schedules and apply to network.
+
+    This step is designed for models like CAISO IRP23 that provide pre-computed
+    monthly outage files (e.g., UnitsOut data) instead of requiring stochastic
+    outage generation.
+
+    Parameters
+    ----------
+    network : pypsa.Network
+        PyPSA network with generators already added
+    csv_dir : str | Path
+        Directory containing COAD CSV exports (for generator metadata)
+    units_out_dir : str | Path
+        Directory containing monthly outage files organized in M01-M12 subdirectories
+    scenario : str | int | None, default None
+        Which scenario column to use from monthly files (e.g., 1, 2, "Value")
+    generator_filter : str | None, default None
+        Filter preset name (e.g., "exclude_vre", "all")
+    ramp_aware : bool, default True
+        Enable ramp-aware outage application with gradual startup/shutdown zones
+
+    Returns
+    -------
+    dict
+        Summary with outage loading statistics and application results
+    """
+    filter_fn = resolve_filter_preset(generator_filter, network)
+
+    # Load outage schedules from monthly files
+    outage_schedule = load_outages_from_monthly_files(
+        units_out_dir=units_out_dir,
+        network=network,
+        scenario=scenario,
+        generator_filter=filter_fn,
+    )
+
+    # Apply outage schedule to network with ramp-aware startup/shutdown
+    outage_summary = apply_outage_schedule(
+        network,
+        outage_schedule,
+        ramp_aware=ramp_aware,
+    )
+
+    return {
+        "load_monthly_outages": {
+            "generators_with_outages": len(outage_schedule.columns),
+            "snapshots": len(outage_schedule),
+            "scenario": scenario,
+            "ramp_aware": ramp_aware,
+            **outage_summary,
+        }
+    }
+
+
 def optimize_step(
     network: pypsa.Network,
     year: int | None = None,
@@ -191,10 +329,25 @@ def optimize_step(
 ) -> dict:
     """Step: Run PyPSA network optimization."""
     network.consistency_check()
+
+    # Debug: Print network state
+    print("\n=== Network State Before Optimization ===")
+    print(f"Buses: {len(network.buses)}")
+    print(f"Generators: {len(network.generators)}")
+    print(f"Loads: {len(network.loads)}")
+    print(f"Links: {len(network.links)}")
+    print(f"Storage Units: {len(network.storage_units)}")
+    print(f"Snapshots: {len(network.snapshots)}")
+    print("=========================================\n")
+
     if year is not None:
         snapshots = network.snapshots[network.snapshots.year == year]
     else:
         snapshots = network.snapshots
+
+    print(f"Snapshots for optimization: {len(snapshots)}")
+    print(f"Year filter: {year}")
+
     if solver_config is None:
         solver_config = {
             "solver_name": "gurobi",
@@ -209,6 +362,10 @@ def optimize_step(
                 "GURO_PAR_BARDENSETHRESH": 200,
             },
         }
+
+    print(f"Solver config: {solver_config}")
+    print(f"Calling network.optimize with {len(snapshots)} snapshots...\n")
+
     res = network.optimize(snapshots=snapshots, **solver_config)
     return {
         "optimize": {
@@ -226,9 +383,11 @@ STEP_REGISTRY: dict[str, Callable[..., Any]] = {
     "scale_p_min_pu": scale_p_min_pu_step,
     "add_curtailment_link": add_curtailment_link_step,
     "load_vre_profiles": load_vre_profiles_step,
+    "load_hydro_dispatch": load_hydro_dispatch_step,
     "add_storage_inflows": add_storage_inflows_step,
     "apply_generator_units": apply_generator_units_step,
     "parse_outages": parse_outages_step,
+    "load_monthly_outages": load_monthly_outages_step,
     "fix_outage_ramps": fix_outage_ramp_conflicts,
     "add_slack": add_slack_generators,
     "optimize": optimize_step,

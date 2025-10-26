@@ -9,7 +9,12 @@ from pypsa import Network
 
 from db.csv_readers import load_static_properties
 from network.carriers_csv import parse_fuel_prices_csv
-from network.core import add_loads_flexible, add_snapshots
+from network.core import (
+    _add_loads_with_participation_factors,
+    add_loads_flexible,
+    add_snapshots,
+    parse_demand_data,
+)
 from network.costs_csv import (
     set_battery_capital_costs_csv,
     set_battery_marginal_costs_csv,
@@ -193,27 +198,41 @@ def setup_network_csv(
         logger.info("Adding demand from database...")
         # Use add_loads_flexible which handles different demand formats
         if demand_source:
-            # Determine which node to assign demand to
-            # Priority: demand_target_node > strategy-based target_node/aggregate_node_name
-            demand_node = None
-            demand_aggregate = None
+            # Handle participation_factors strategy separately
+            if demand_assignment_strategy == "participation_factors":
+                logger.info("  Using participation factors strategy")
+                # Parse demand data first
+                demand_df = parse_demand_data(demand_source)
+                # Call participation factors function directly
+                _add_loads_with_participation_factors(
+                    network=network,
+                    demand_df=demand_df,
+                    csv_dir=csv_dir,
+                    load_scenario=load_scenario,
+                )
+            else:
+                # Use standard add_loads_flexible for other strategies
+                # Determine which node to assign demand to
+                # Priority: demand_target_node > strategy-based target_node/aggregate_node_name
+                demand_node = None
+                demand_aggregate = None
 
-            if demand_target_node:
-                # Explicit demand target node - overrides strategy
-                demand_node = demand_target_node
-                logger.info(f"  Assigning all demand to node: {demand_target_node}")
-            elif demand_assignment_strategy == "target_node":
-                demand_node = target_node
-            elif demand_assignment_strategy == "aggregate_node":
-                demand_aggregate = aggregate_node_name
+                if demand_target_node:
+                    # Explicit demand target node - overrides strategy
+                    demand_node = demand_target_node
+                    logger.info(f"  Assigning all demand to node: {demand_target_node}")
+                elif demand_assignment_strategy == "target_node":
+                    demand_node = target_node
+                elif demand_assignment_strategy == "aggregate_node":
+                    demand_aggregate = aggregate_node_name
 
-            add_loads_flexible(
-                network=network,
-                demand_source=demand_source,
-                target_node=demand_node,
-                aggregate_node_name=demand_aggregate,
-                load_scenario=load_scenario,
-            )
+                add_loads_flexible(
+                    network=network,
+                    demand_source=demand_source,
+                    target_node=demand_node,
+                    aggregate_node_name=demand_aggregate,
+                    load_scenario=load_scenario,
+                )
     else:
         logger.warning(
             "No database provided, skipping snapshots/demand setup. "
