@@ -71,7 +71,7 @@ def run_model_workflow(
         condition = step_def.get("condition")
         if condition and not _evaluate_condition(condition, context):
             print(
-                f"⏭️  Step {step_idx}/{len(steps)}: {step_name} (skipped - condition not met)"
+                f"Step {step_idx}/{len(steps)}: {step_name} (skipped - condition not met)"
             )
             continue
         if step_name not in STEP_REGISTRY:
@@ -81,7 +81,7 @@ def run_model_workflow(
             step_params.update(parsed_overrides[step_name])
         step_fn = STEP_REGISTRY[step_name]
         step_params = _inject_context(step_params, context, step_fn)
-        print(f"▶️  Step {step_idx}/{len(steps)}: {step_name}")
+        print(f"Step {step_idx}/{len(steps)}: {step_name}")
         try:
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
@@ -97,11 +97,11 @@ def run_model_workflow(
                     raise RuntimeError(msg)  # noqa: TRY301
                 step_summary = step_fn(network=network, **step_params)
                 aggregated_summary.update(step_summary)
-            print(f"   ✓ {step_name} completed\n")
+            print(f"{step_name} completed\n")
         except Exception as e:
-            print(f"   ✗ {step_name} failed: {e}\n")
+            print(f"{step_name} failed: {e}\n")
             raise
-    print(f"✅ Workflow complete for model: {model_id}\n")
+    print(f"Workflow complete for model: {model_id}\n")
     return network, aggregated_summary
 
 
