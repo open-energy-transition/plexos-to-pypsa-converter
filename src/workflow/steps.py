@@ -1,6 +1,7 @@
 """Pre-defined workflow step implementations for workflow system."""
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,13 @@ from network.conversion import create_model
 from network.generators_csv import (
     apply_generator_units_timeseries_csv,
     load_data_file_profiles_csv,
+)
+from network.investment import (
+    InvestmentPeriod,
+    build_day_type_classifier,
+    compute_period_statistics,
+    load_directory_timeseries,
+    write_profile_csv,
 )
 from network.outages import (
     apply_outage_schedule,
@@ -32,6 +40,108 @@ def create_model_step(
     """Step: Initialize PyPSA network from PLEXOS model."""
     network, summary = create_model(model_id, use_csv=use_csv, **create_model_kwargs)
     return network, {"create_model": summary}
+
+
+def prepare_investment_periods_step(
+    model_dir: str,
+    timeslice_csv: str,
+    trace_groups: Mapping[str, str],
+    periods: Sequence[Mapping[str, int]],
+    network: pypsa.Network | None = None,
+    enabled: bool = True,
+    group_patterns: Mapping[str, Sequence[str]] | None = None,
+    default_group: str = "base",
+    output_subdir: str = "investment_periods",
+    csv_pattern: str = "*.csv",
+    file_limit: int | None = None,
+    metadata_filename: str = "investment_periods.json",
+) -> dict:
+    """Step: Aggregate traces into representative-day investment period datasets."""
+    if not enabled:
+        return {
+            "prepare_investment_periods": {
+                "enabled": False,
+            }
+        }
+
+    base_dir = Path(model_dir)
+    timeslice_path = Path(timeslice_csv)
+    if not timeslice_path.is_absolute():
+        timeslice_path = base_dir / timeslice_csv
+
+    if group_patterns is None or not group_patterns:
+        group_patterns = {"base": []}
+
+    classifier = build_day_type_classifier(
+        timeslice_path,
+        group_patterns,
+        default_group=default_group,
+    )
+
+    investment_periods = []
+    for period in periods:
+        label = period.get("label")
+        if label is None:
+            msg = "Each investment period requires a 'label' key."
+            raise ValueError(msg)
+        start_year = period.get("start_year", period.get("start"))
+        end_year = period.get("end_year", period.get("end"))
+        if start_year is None or end_year is None:
+            msg = f"Investment period '{label}' missing start_year/end_year definition."
+            raise ValueError(msg)
+        investment_periods.append(
+            InvestmentPeriod(
+                label=str(label),
+                start_year=int(start_year),
+                end_year=int(end_year),
+            )
+        )
+
+    output_dir = base_dir / output_subdir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata: dict[str, dict[str, list[dict[str, float | str]]]] = {}
+    summary_totals: dict[str, dict[str, float]] = {}
+
+    for group_label, trace_path in trace_groups.items():
+        target_path = Path(trace_path)
+        if not target_path.is_absolute():
+            target_path = base_dir / trace_path
+        data = load_directory_timeseries(
+            target_path,
+            pattern=csv_pattern,
+            limit=file_limit,
+        )
+        stats = compute_period_statistics(data, investment_periods, classifier)
+        metadata[group_label] = {}
+        summary_totals[group_label] = {}
+
+        for period_label, profiles in stats.items():
+            metadata[group_label][period_label] = []
+            total_weight = 0.0
+            for profile in profiles:
+                filename = f"{group_label}__{period_label}__{profile.name.replace(' ', '_')}.csv"
+                write_profile_csv(profile, output_dir / filename)
+                metadata[group_label][period_label].append(
+                    {
+                        "name": profile.name,
+                        "weight_years": profile.weight_years,
+                        "csv": filename,
+                    }
+                )
+                total_weight += profile.weight_years
+            summary_totals[group_label][period_label] = total_weight
+
+    metadata_path = output_dir / metadata_filename
+    metadata_path.write_text(json.dumps(metadata, indent=2))
+
+    return {
+        "prepare_investment_periods": {
+            "output_dir": str(output_dir),
+            "metadata_file": str(metadata_path),
+            "group_totals": summary_totals,
+        }
+    }
 
 
 def scale_p_min_pu_step(
@@ -403,6 +513,7 @@ def save_network_step(
 
 # Registry of all available step functions
 STEP_REGISTRY: dict[str, Callable[..., Any]] = {
+    "prepare_investment_periods": prepare_investment_periods_step,
     "create_model": create_model_step,
     "scale_p_min_pu": scale_p_min_pu_step,
     "add_curtailment_link": add_curtailment_link_step,
