@@ -190,6 +190,9 @@ doc/visualization/html/
 # example data
 src/examples/data/
 
+# solved networks
+src/examples/results/
+
 # claude
 CLAUDE.mdsrc/
 
