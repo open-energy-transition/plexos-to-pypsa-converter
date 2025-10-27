@@ -40,45 +40,31 @@ def test_sem_solve_limited_snapshots(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Run workflow - note that the workflow already includes optimization
-        # For testing purposes, we run the full workflow which optimizes a subset
-        print("Running full workflow (includes optimization)...")
-        network, summary = run_model_workflow("sem-2024-2032")
+        # Get workflow from registry and filter out optimize step
+        from db.registry import MODEL_REGISTRY
 
-        # Check if optimization ran
-        if "optimize" not in summary:
-            print("⚠️  Warning: Workflow did not include optimization step")
-            print("   Running separate optimization with snapshot limit...")
+        model_config = MODEL_REGISTRY["sem-2024-2032"]
+        workflow = model_config["processing_workflow"]
+        workflow_no_optimize = workflow.copy()
+        workflow_no_optimize["steps"] = [
+            step for step in workflow["steps"] if step["name"] != "optimize"
+        ]
 
-            # Limit snapshots for fast testing
-            snapshots = network.snapshots[: args.snapshot_limit]
-            print(f"  - Original snapshots: {len(network.snapshots)}")
-            print(f"  - Limited snapshots: {len(snapshots)}")
+        print("Running workflow (optimize step excluded for solve test)...")
+        network, summary = run_model_workflow(
+            "sem-2024-2032", workflow_overrides=workflow_no_optimize
+        )
 
-            # Run optimization with limited snapshots
-            result = network.optimize(
-                snapshots=snapshots,
-                solver_name="gurobi",
-                solver_options={
-                    "Threads": 2,  # Limit threads for CI
-                    "Method": 2,  # Barrier method
-                    "Crossover": 0,
-                    "BarConvTol": 1.0e-5,
-                },
-            )
+        # Limit snapshots for fast testing
+        snapshots = network.snapshots[: args.snapshot_limit]
+        print(f"  - Original snapshots: {len(network.snapshots)}")
+        print(f"  - Limited snapshots: {len(snapshots)}")
 
-            objective = result[0]
-            status = result[1]
-        else:
-            # Optimization was part of workflow
-            objective = summary["optimize"].get("solve", "N/A")
-            status = summary["optimize"].get("status", "unknown")
-            snapshots_solved = summary["optimize"].get(
-                "snapshots_count", len(network.snapshots)
-            )
+        # Run optimization with limited snapshots using default solver
+        result = network.optimize(snapshots=snapshots, solver_name="highs")
 
-            print("✓ Optimization completed via workflow")
-            print(f"  - Snapshots solved: {snapshots_solved}")
+        objective = result[0]
+        status = result[1]
 
         # Validate solve results
         print("\n✓ Solve results:")
@@ -98,17 +84,17 @@ def test_sem_solve_limited_snapshots(args):
                 f.write(
                     f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
                 )
-            print(f"\n Solve stats written to {args.output_file}")
+            print(f"\nSolve stats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
-        print("✅ SEM solve test PASSED")
+        print("SEM solve test PASSED")
         print(f"{'=' * 60}\n")
 
         return True
 
     except Exception as e:
         print(f"\n{'=' * 60}")
-        print("❌ SEM solve test FAILED")
+        print("SEM solve test FAILED")
         print(f"{'=' * 60}")
         print(f"Error: {e}")
         import traceback
@@ -132,47 +118,34 @@ def test_aemo_solve_limited_snapshots(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Run workflow
-        print("Running full workflow (includes optimization)...")
-        network, summary = run_model_workflow("aemo-2024-isp-progressive-change")
+        # Get workflow from registry and filter out optimize step
+        from db.registry import MODEL_REGISTRY
 
-        # Check if optimization ran
-        if "optimize" not in summary:
-            print("⚠️  Warning: Workflow did not include optimization step")
-            print("   Running separate optimization with snapshot limit...")
+        model_config = MODEL_REGISTRY["aemo-2024-isp-progressive-change"]
+        workflow = model_config["processing_workflow"]
+        workflow_no_optimize = workflow.copy()
+        workflow_no_optimize["steps"] = [
+            step for step in workflow["steps"] if step["name"] != "optimize"
+        ]
 
-            # Limit snapshots for fast testing
-            snapshots = network.snapshots[: args.snapshot_limit]
-            print(f"  - Original snapshots: {len(network.snapshots)}")
-            print(f"  - Limited snapshots: {len(snapshots)}")
+        print("Running workflow (optimize step excluded for solve test)...")
+        network, summary = run_model_workflow(
+            "aemo-2024-isp-progressive-change", workflow_overrides=workflow_no_optimize
+        )
 
-            # Run optimization with limited snapshots
-            result = network.optimize(
-                snapshots=snapshots,
-                solver_name="gurobi",
-                solver_options={
-                    "Threads": 2,  # Limit threads for CI
-                    "Method": 2,  # Barrier method
-                    "Crossover": 0,
-                    "BarConvTol": 1.0e-5,
-                },
-            )
+        # Limit snapshots for fast testing
+        snapshots = network.snapshots[: args.snapshot_limit]
+        print(f"  - Original snapshots: {len(network.snapshots)}")
+        print(f"  - Limited snapshots: {len(snapshots)}")
 
-            objective = result[0]
-            status = result[1]
-        else:
-            # Optimization was part of workflow
-            objective = summary["optimize"].get("solve", "N/A")
-            status = summary["optimize"].get("status", "unknown")
-            snapshots_solved = summary["optimize"].get(
-                "snapshots_count", len(network.snapshots)
-            )
+        # Run optimization with limited snapshots using default solver
+        result = network.optimize(snapshots=snapshots, solver_name="highs")
 
-            print("✓ Optimization completed via workflow")
-            print(f"  - Snapshots solved: {snapshots_solved}")
+        objective = result[0]
+        status = result[1]
 
         # Validate solve results
-        print("\n✓ Solve results:")
+        print("\nSolve results:")
         print(f"  - Status: {status}")
         print(f"  - Objective: {objective}")
 
@@ -189,17 +162,95 @@ def test_aemo_solve_limited_snapshots(args):
                 f.write(
                     f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
                 )
-            print(f"\n Solve stats written to {args.output_file}")
+            print(f"\nSolve stats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
-        print("✅ AEMO solve test PASSED")
+        print("AEMO solve test PASSED")
         print(f"{'=' * 60}\n")
 
         return True
 
     except Exception as e:
         print(f"\n{'=' * 60}")
-        print("❌ AEMO solve test FAILED")
+        print("AEMO solve test FAILED")
+        print(f"{'=' * 60}")
+        print(f"Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def test_caiso_solve_limited_snapshots(args):
+    """Test CAISO IRP23 model solves successfully with limited snapshots.
+
+    Args:
+        args: Command-line arguments
+
+    Returns:
+        bool: True if solve succeeds
+    """
+    print(f"\n{'=' * 60}")
+    print("Testing solve: caiso-irp23")
+    print(f"Snapshot limit: {args.snapshot_limit}")
+    print(f"{'=' * 60}\n")
+
+    try:
+        # Get workflow from registry and filter out optimize step
+        from db.registry import MODEL_REGISTRY
+
+        model_config = MODEL_REGISTRY["caiso-irp23"]
+        workflow = model_config["processing_workflow"]
+        workflow_no_optimize = workflow.copy()
+        workflow_no_optimize["steps"] = [
+            step for step in workflow["steps"] if step["name"] != "optimize"
+        ]
+
+        print("Running workflow (optimize step excluded for solve test)...")
+        network, summary = run_model_workflow(
+            "caiso-irp23", workflow_overrides=workflow_no_optimize
+        )
+
+        # Limit snapshots for fast testing
+        snapshots = network.snapshots[: args.snapshot_limit]
+        print(f"  - Original snapshots: {len(network.snapshots)}")
+        print(f"  - Limited snapshots: {len(snapshots)}")
+
+        # Run optimization with limited snapshots using default solver
+        result = network.optimize(snapshots=snapshots, solver_name="highs")
+
+        objective = result[0]
+        status = result[1]
+
+        # Validate solve results
+        print("\nSolve results:")
+        print(f"  - Status: {status}")
+        print(f"  - Objective: {objective}")
+
+        assert status == "ok", f"Solve failed with status: {status}"
+        assert objective is not None, "No objective value returned"
+
+        # Write stats to output file
+        if args.output_file:
+            from pathlib import Path
+
+            with Path(args.output_file).open("w") as f:
+                f.write(f"status={status}\n")
+                f.write(f"objective={objective}\n")
+                f.write(
+                    f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
+                )
+            print(f"\n Solve stats written to {args.output_file}")
+
+        print(f"\n{'=' * 60}")
+        print("CAISO IRP23 solve test PASSED")
+        print(f"{'=' * 60}\n")
+
+        return True
+
+    except Exception as e:
+        print(f"\n{'=' * 60}")
+        print("CAISO IRP23 solve test FAILED")
         print(f"{'=' * 60}")
         print(f"Error: {e}")
         import traceback
@@ -220,12 +271,15 @@ Examples:
 
     # Test AEMO solve with 100 snapshots
     python tests/integration/test_model_solve.py --model-id aemo-2024-isp-progressive-change --snapshot-limit 100 --output-file aemo_solve.txt
-        """,
+
+    # Test CAISO solve with default snapshot limit
+    python tests/integration/test_model_solve.py --model-id caiso-irp23 --output-file caiso_solve.txt
+    """,
     )
     parser.add_argument(
         "--model-id",
         required=True,
-        choices=["sem-2024-2032", "aemo-2024-isp-progressive-change"],
+        choices=["sem-2024-2032", "aemo-2024-isp-progressive-change", "caiso-irp23"],
         help="Model ID to test",
     )
     parser.add_argument(
@@ -245,8 +299,10 @@ Examples:
         success = test_sem_solve_limited_snapshots(args)
     elif args.model_id == "aemo-2024-isp-progressive-change":
         success = test_aemo_solve_limited_snapshots(args)
+    elif args.model_id == "caiso-irp23":
+        success = test_caiso_solve_limited_snapshots(args)
     else:
-        print(f"❌ Unknown model: {args.model_id}")
+        print(f"Unknown model: {args.model_id}")
         sys.exit(1)
 
     # Exit with appropriate code
