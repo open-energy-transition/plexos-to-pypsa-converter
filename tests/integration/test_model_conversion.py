@@ -60,7 +60,11 @@ def test_sem_conversion(args):
         workflow_no_optimize = {
             "csv_dir_pattern": workflow.get("csv_dir_pattern"),
             "solver_config": workflow.get("solver_config"),
-            "steps": [step for step in workflow["steps"] if step["name"] != "optimize"],
+            "steps": [
+                step
+                for step in workflow["steps"]
+                if step["name"] not in ["optimize", "save_network"]
+            ],
         }
 
         print("Running workflow (optimize step excluded for faster testing)...")
@@ -161,7 +165,11 @@ def test_aemo_conversion(args):
         workflow_no_optimize = {
             "csv_dir_pattern": workflow.get("csv_dir_pattern"),
             "solver_config": workflow.get("solver_config"),
-            "steps": [step for step in workflow["steps"] if step["name"] != "optimize"],
+            "steps": [
+                step
+                for step in workflow["steps"]
+                if step["name"] not in ["optimize", "save_network"]
+            ],
         }
 
         print("Running workflow (optimize step excluded for faster testing)...")
@@ -261,7 +269,9 @@ def test_caiso_conversion(args):
         workflow = model_config["processing_workflow"]
         workflow_no_optimize = workflow.copy()
         workflow_no_optimize["steps"] = [
-            step for step in workflow["steps"] if step["name"] != "optimize"
+            step
+            for step in workflow["steps"]
+            if step["name"] not in ["optimize", "save_network"]
         ]
 
         print("Running workflow (optimize step excluded for faster testing)...")
