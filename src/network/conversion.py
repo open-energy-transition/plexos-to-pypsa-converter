@@ -453,8 +453,10 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     print(f"Model directory: {model_dir}")
 
     # Load PLEXOS database
-    print("\nLoading PLEXOS database...")
-    db = PlexosDB.from_xml(str(xml_file))
+    db = None
+    if not use_csv:
+        print("\nLoading PLEXOS database...")
+        db = PlexosDB.from_xml(str(xml_file))
 
     # Route to appropriate creation function based on model type
     if model_type == "electricity":
