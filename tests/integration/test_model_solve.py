@@ -63,16 +63,16 @@ def test_sem_solve_limited_snapshots(args):
         # Run optimization with limited snapshots using default solver
         result = network.optimize(snapshots=snapshots, solver_name="highs")
 
-        objective = result[0]
+        solve = result[0]
         status = result[1]
 
         # Validate solve results
         print("\n✓ Solve results:")
+        print(f"  - Objective: {solve}")
         print(f"  - Status: {status}")
-        print(f"  - Objective: {objective}")
 
-        assert status == "ok", f"Solve failed with status: {status}"
-        assert objective is not None, "No objective value returned"
+        assert status == "optimal", f"Solve failed with status: {status}"
+        assert solve is not None, "No objective value returned"
 
         # Write stats to output file
         if args.output_file:
@@ -80,7 +80,7 @@ def test_sem_solve_limited_snapshots(args):
 
             with Path(args.output_file).open("w") as f:
                 f.write(f"status={status}\n")
-                f.write(f"objective={objective}\n")
+                f.write(f"objective={solve}\n")
                 f.write(
                     f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
                 )
@@ -141,16 +141,16 @@ def test_aemo_solve_limited_snapshots(args):
         # Run optimization with limited snapshots using default solver
         result = network.optimize(snapshots=snapshots, solver_name="highs")
 
-        objective = result[0]
+        solve = result[0]
         status = result[1]
 
         # Validate solve results
-        print("\nSolve results:")
+        print("\n✓ Solve results:")
+        print(f"  - Objective: {solve}")
         print(f"  - Status: {status}")
-        print(f"  - Objective: {objective}")
 
-        assert status == "ok", f"Solve failed with status: {status}"
-        assert objective is not None, "No objective value returned"
+        assert status == "optimal", f"Solve failed with status: {status}"
+        assert solve is not None, "No objective value returned"
 
         # Write stats to output file
         if args.output_file:
@@ -158,7 +158,7 @@ def test_aemo_solve_limited_snapshots(args):
 
             with Path(args.output_file).open("w") as f:
                 f.write(f"status={status}\n")
-                f.write(f"objective={objective}\n")
+                f.write(f"objective={solve}\n")
                 f.write(
                     f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
                 )
@@ -219,16 +219,16 @@ def test_caiso_solve_limited_snapshots(args):
         # Run optimization with limited snapshots using default solver
         result = network.optimize(snapshots=snapshots, solver_name="highs")
 
-        objective = result[0]
+        solve = result[0]
         status = result[1]
 
         # Validate solve results
-        print("\nSolve results:")
+        print("\n✓ Solve results:")
+        print(f"  - Objective: {solve}")
         print(f"  - Status: {status}")
-        print(f"  - Objective: {objective}")
 
-        assert status == "ok", f"Solve failed with status: {status}"
-        assert objective is not None, "No objective value returned"
+        assert status == "optimal", f"Solve failed with status: {status}"
+        assert solve is not None, "No objective value returned"
 
         # Write stats to output file
         if args.output_file:
@@ -236,11 +236,11 @@ def test_caiso_solve_limited_snapshots(args):
 
             with Path(args.output_file).open("w") as f:
                 f.write(f"status={status}\n")
-                f.write(f"objective={objective}\n")
+                f.write(f"objective={solve}\n")
                 f.write(
                     f"snapshots={args.snapshot_limit if 'optimize' not in summary else summary['optimize'].get('snapshots_count')}\n"
                 )
-            print(f"\n Solve stats written to {args.output_file}")
+            print(f"\nSolve stats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
         print("CAISO IRP23 solve test PASSED")
