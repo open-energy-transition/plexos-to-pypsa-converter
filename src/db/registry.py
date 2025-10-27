@@ -127,6 +127,10 @@ MODEL_REGISTRY = {
                     "name": "optimize",
                     "params": {"year": 2025},
                 },
+                {
+                    "name": "save_network",
+                    "params": {},
+                },
             ],
         },
         "recipe": [
@@ -316,6 +320,10 @@ MODEL_REGISTRY = {
                     "name": "optimize",
                     "params": {"year": 2025},
                 },
+                {
+                    "name": "save_network",
+                    "params": {},
+                },
             ],
         },
         "recipe": [
@@ -499,6 +507,10 @@ MODEL_REGISTRY = {
                 {
                     "name": "optimize",
                     "params": {"year": 2025},
+                },
+                {
+                    "name": "save_network",
+                    "params": {},
                 },
             ],
         },
@@ -702,6 +714,10 @@ MODEL_REGISTRY = {
                     "name": "optimize",
                     "params": {"year": None},
                 },
+                {
+                    "name": "save_network",
+                    "params": {},
+                },
             ],
         },
         "recipe": [
@@ -833,6 +849,10 @@ MODEL_REGISTRY = {
                 {
                     "name": "optimize",
                     "params": {"year": 2023},
+                },
+                {
+                    "name": "save_network",
+                    "params": {},
                 },
             ],
         },
@@ -997,6 +1017,10 @@ MODEL_REGISTRY = {
                 {
                     "name": "optimize",
                     "params": {"year": 2023},
+                },
+                {
+                    "name": "save_network",
+                    "params": {},
                 },
             ],
         },

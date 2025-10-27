@@ -377,6 +377,30 @@ def optimize_step(
     }
 
 
+def save_network_step(
+    network: pypsa.Network,
+    model_id: str,
+    output_dir: str | Path = "src/examples/results",
+) -> dict:
+    """Step: Save solved network to NetCDF file.
+
+    Saves the network to {output_dir}/{model_id}/network.nc,
+    creating directories if they don't exist.
+    """
+    output_path = Path(output_dir) / model_id
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    netcdf_file = output_path / "solved_network.nc"
+    network.export_to_netcdf(str(netcdf_file))
+
+    return {
+        "save_network": {
+            "path": str(netcdf_file),
+            "size_mb": netcdf_file.stat().st_size / (1024 * 1024),
+        }
+    }
+
+
 # Registry of all available step functions
 STEP_REGISTRY: dict[str, Callable[..., Any]] = {
     "create_model": create_model_step,
@@ -391,4 +415,5 @@ STEP_REGISTRY: dict[str, Callable[..., Any]] = {
     "fix_outage_ramps": fix_outage_ramp_conflicts,
     "add_slack": add_slack_generators,
     "optimize": optimize_step,
+    "save_network": save_network_step,
 }
