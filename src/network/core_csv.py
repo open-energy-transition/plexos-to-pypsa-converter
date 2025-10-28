@@ -300,78 +300,77 @@ def setup_network_csv(
                     aggregate_node_name=demand_aggregate,
                     load_scenario=load_scenario,
                 )
-    if not use_investment_periods:
-        # 4. Add generators
-        logger.info("Adding generators from CSV...")
-        port_generators_csv(
-            network=network,
-            csv_dir=csv_dir,
-            timeslice_csv=timeslice_csv,
-            vre_profiles_path=vre_profiles_path,
-            target_node=target_node,
+    # 4. Add generators
+    logger.info("Adding generators from CSV...")
+    port_generators_csv(
+        network=network,
+        csv_dir=csv_dir,
+        timeslice_csv=timeslice_csv,
+        vre_profiles_path=vre_profiles_path,
+        target_node=target_node,
+    )
+
+    # NOTE: Generator Units time series (retirements, new builds) are NOT applied here.
+    # Units MUST be applied AFTER VRE profiles are loaded, otherwise they get overwritten.
+    # Call apply_generator_units_timeseries_csv() manually after loading VRE profiles.
+
+    # 5. Add storage
+    logger.info("Adding storage from CSV...")
+    port_storage_csv(
+        network=network,
+        csv_dir=csv_dir,
+        timeslice_csv=timeslice_csv,
+    )
+
+    # 5b. Set battery costs
+    if len(network.storage_units) > 0:
+        logger.info("Setting battery costs...")
+
+        set_battery_capital_costs_csv(network, csv_dir)
+        set_battery_marginal_costs_csv(network, csv_dir)
+
+    # 6. Add transmission links
+    logger.info("Adding transmission links from CSV...")
+    if transmission_as_lines:
+        logger.warning(
+            "transmission_as_lines=True not yet supported in CSV mode. "
+            "Using Links instead."
         )
+    port_links_csv(
+        network=network,
+        csv_dir=csv_dir,
+        timeslice_csv=timeslice_csv,
+        target_node=target_node,
+        bidirectional_links=bidirectional_links,
+    )
 
-        # NOTE: Generator Units time series (retirements, new builds) are NOT applied here.
-        # Units MUST be applied AFTER VRE profiles are loaded, otherwise they get overwritten.
-        # Call apply_generator_units_timeseries_csv() manually after loading VRE profiles.
+    # 7. Set fuel prices
+    logger.info("Setting fuel prices from CSV...")
+    fuel_prices = parse_fuel_prices_csv(
+        csv_dir=csv_dir,
+        network=network,
+        timeslice_csv=timeslice_csv,
+    )
 
-        # 5. Add storage
-        logger.info("Adding storage from CSV...")
-        port_storage_csv(
-            network=network,
-            csv_dir=csv_dir,
-            timeslice_csv=timeslice_csv,
-        )
+    # Apply fuel prices to carriers (if carriers_t exists)
+    if not fuel_prices.empty and len(network.snapshots) > 0:
+        # Initialize carriers_t if it doesn't exist
+        if not hasattr(network, "carriers_t") or network.carriers_t is None:
+            network.carriers_t = {}
 
-        # 5b. Set battery costs
-        if len(network.storage_units) > 0:
-            logger.info("Setting battery costs...")
-
-            set_battery_capital_costs_csv(network, csv_dir)
-            set_battery_marginal_costs_csv(network, csv_dir)
-
-        # 6. Add transmission links
-        logger.info("Adding transmission links from CSV...")
-        if transmission_as_lines:
-            logger.warning(
-                "transmission_as_lines=True not yet supported in CSV mode. "
-                "Using Links instead."
+        # Initialize marginal_cost DataFrame if it doesn't exist
+        if "marginal_cost" not in network.carriers_t:
+            network.carriers_t["marginal_cost"] = pd.DataFrame(
+                index=network.snapshots,
+                columns=network.carriers.index,
             )
-        port_links_csv(
-            network=network,
-            csv_dir=csv_dir,
-            timeslice_csv=timeslice_csv,
-            target_node=target_node,
-            bidirectional_links=bidirectional_links,
-        )
 
-        # 7. Set fuel prices
-        logger.info("Setting fuel prices from CSV...")
-        fuel_prices = parse_fuel_prices_csv(
-            csv_dir=csv_dir,
-            network=network,
-            timeslice_csv=timeslice_csv,
-        )
+        for carrier in fuel_prices.columns:
+            if carrier in network.carriers.index:
+                network.carriers_t["marginal_cost"][carrier] = fuel_prices[carrier]
 
-        # Apply fuel prices to carriers (if carriers_t exists)
-        if not fuel_prices.empty and len(network.snapshots) > 0:
-            # Initialize carriers_t if it doesn't exist
-            if not hasattr(network, "carriers_t") or network.carriers_t is None:
-                network.carriers_t = {}
-
-            # Initialize marginal_cost DataFrame if it doesn't exist
-            if "marginal_cost" not in network.carriers_t:
-                network.carriers_t["marginal_cost"] = pd.DataFrame(
-                    index=network.snapshots,
-                    columns=network.carriers.index,
-                )
-
-            for carrier in fuel_prices.columns:
-                if carrier in network.carriers.index:
-                    network.carriers_t["marginal_cost"][carrier] = fuel_prices[carrier]
-
-        # 8. Demand aggregation is handled by add_loads_flexible above
-        # No additional processing needed here
+    # 8. Demand aggregation is handled by add_loads_flexible above
+    # No additional processing needed here
 
     summary = {
         "method": "csv",
@@ -394,17 +393,9 @@ def setup_network_csv(
     if investment_info:
         summary["investment"] = investment_info
 
-    if use_investment_periods:
-        summary["snapshots_mode"] = "investment_periods"
-        logger.info(
-            "Investment-period setup complete (skipping generator/storage/link import in this mode)."
-        )
-        logger.info(f"  Buses: {num_buses}")
-        logger.info(f"  Loads: {len(network.loads)}")
-        logger.info(f"  Snapshots: {len(network.snapshots)}")
-        return summary
-    else:
-        summary.setdefault("snapshots_mode", "chronological")
+    summary["snapshots_mode"] = (
+        "investment_periods" if use_investment_periods else "chronological"
+    )
 
     logger.info("CSV-based network setup complete")
     logger.info(f"  Buses: {num_buses}")

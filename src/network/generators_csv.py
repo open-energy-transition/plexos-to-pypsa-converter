@@ -1462,6 +1462,9 @@ def load_data_file_profiles_csv(
     carrier_mapping: dict[str, str] | None = None,
     value_scaling: float = 1.0,
     manual_mappings: dict[str, str] | None = None,
+    use_investment_periods: bool = False,
+    investment_manifest: str | Path | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Load time series profiles from Data File.csv mappings and apply to network.
 
@@ -1577,6 +1580,7 @@ def load_data_file_profiles_csv(
     """
     csv_dir = Path(csv_dir)
     profiles_path = Path(profiles_path)
+    summary_mode = "investment_periods" if use_investment_periods else apply_mode
 
     # Step 1: Discover data file mappings
     datafile_to_csv = _discover_datafile_mappings(csv_dir)
@@ -1588,7 +1592,7 @@ def load_data_file_profiles_csv(
             "skipped_generators": [],
             "failed_generators": [],
             "applied_to": f"{target_type}.{target_property}",
-            "mode": apply_mode,
+            "mode": summary_mode,
         }
 
     # Step 2: Find generators with data file references
@@ -1601,7 +1605,7 @@ def load_data_file_profiles_csv(
             "skipped_generators": [],
             "failed_generators": [],
             "applied_to": f"{target_type}.{target_property}",
-            "mode": apply_mode,
+            "mode": summary_mode,
         }
 
     gen_to_datafile = _find_generators_with_datafile(generator_df, property_name)
@@ -1624,7 +1628,7 @@ def load_data_file_profiles_csv(
                 "skipped_generators": [],
                 "failed_generators": [],
                 "applied_to": f"{target_type}.{target_property}",
-                "mode": apply_mode,
+                "mode": summary_mode,
             }
 
     # Step 3: Ensure carriers exist in network (if carrier_mapping provided)
@@ -1637,6 +1641,36 @@ def load_data_file_profiles_csv(
             if carrier not in network.carriers.index:
                 network.add("Carrier", carrier)
                 logger.info(f"Created carrier: {carrier}")
+
+    investment_profiles = None
+    investment_base_dir: Path | None = None
+    if use_investment_periods:
+        if load_manifest is None or load_group_profiles is None:
+            msg = (
+                "Investment-period helpers unavailable; cannot load profiles in "
+                "investment-period mode."
+            )
+            raise RuntimeError(msg)
+        if not investment_manifest:
+            msg = "investment_manifest path must be provided for investment-period mode"
+            raise ValueError(msg)
+        if not investment_group:
+            msg = "investment_group must be specified for investment-period mode"
+            raise ValueError(msg)
+        manifest_data = load_manifest(investment_manifest)
+        if investment_group not in manifest_data:
+            logger.warning(
+                "Investment manifest missing group '%s'; falling back to chronological profiles.",
+                investment_group,
+            )
+        else:
+            investment_base_dir = Path(investment_manifest).parent
+            investment_profiles = load_group_profiles(
+                manifest_data,
+                investment_base_dir,
+                investment_group,
+            )
+            investment_profiles = investment_profiles.reindex(network.snapshots)
 
     # Step 4: Load and apply profiles
     profile_dict = {}
@@ -1672,6 +1706,31 @@ def load_data_file_profiles_csv(
             )
             skipped_generators.append(gen_name)
             continue
+
+        if use_investment_periods:
+            column_key = Path(csv_filename).stem
+            if (
+                investment_profiles is None
+                or column_key not in investment_profiles.columns
+            ):
+                logger.warning(
+                    "Investment-period profile column '%s' not found for generator %s",
+                    column_key,
+                    gen_name,
+                )
+                skipped_generators.append(gen_name)
+                continue
+            profile_series = investment_profiles[column_key]
+            if value_scaling != 1.0:
+                profile_series = profile_series * value_scaling
+            profile_dict[gen_name] = profile_series
+            logger.info(
+                "Loaded investment-period profile for %s using column %s",
+                gen_name,
+                column_key,
+            )
+            continue
+
         csv_path = profiles_path / csv_filename
 
         if not csv_path.exists():
@@ -1731,7 +1790,7 @@ def load_data_file_profiles_csv(
             "skipped_generators": skipped_generators,
             "failed_generators": failed_generators,
             "applied_to": f"{target_type}.{target_property}",
-            "mode": apply_mode,
+            "mode": summary_mode,
         }
 
     if target_type == "generators_t":
@@ -1820,7 +1879,7 @@ def load_data_file_profiles_csv(
         "skipped_generators": skipped_generators,
         "failed_generators": failed_generators,
         "applied_to": f"{target_type}.{target_property}",
-        "mode": apply_mode,
+        "mode": summary_mode,
     }
 
 
@@ -1903,6 +1962,9 @@ def load_hydro_dispatch_csv(
     profiles_path: str | Path,
     scenario: str | int = "1",
     generator_filter: Callable | None = None,
+    use_investment_periods: bool = False,
+    investment_manifest: str | Path | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Load hydro fixed dispatch schedules using Data File.csv mappings.
 
@@ -1951,6 +2013,9 @@ def load_hydro_dispatch_csv(
         generator_filter=generator_filter,
         carrier_mapping={"Hydro": "Hydro", "Water": "Hydro"},
         value_scaling=1.0,
+        use_investment_periods=use_investment_periods,
+        investment_manifest=investment_manifest,
+        investment_group=investment_group,
     )
 
 

@@ -9,6 +9,7 @@ them across different PLEXOS exports.
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 TimeClassifier = Callable[[pd.Timestamp], str]
 
@@ -75,8 +78,14 @@ def load_timeseries_matrix(csv_path: str | Path) -> pd.DataFrame:
             and not str(col).startswith("Unnamed")
         ]
         data = df[value_cols].copy()
+        if data.shape[1] == 1:
+            data.columns = [csv_path.stem]
+        else:
+            prefixed = {
+                col: f"{csv_path.stem}__{str(col).strip()}" for col in data.columns
+            }
+            data = data.rename(columns=prefixed)
     else:
-        # Columns typically named "01"..."48" or integers
         value_cols = [
             col
             for col in df.columns
@@ -86,20 +95,36 @@ def load_timeseries_matrix(csv_path: str | Path) -> pd.DataFrame:
         if not value_cols:
             msg = f"No numeric value columns found in {csv_path}"
             raise ValueError(msg)
-        melt_df = df.melt(
-            id_vars=["Year", "Month", "Day"],
-            value_vars=value_cols,
-            var_name="_period",
-            value_name="_value",
-        )
-        melt_df["_period"] = melt_df["_period"].astype(int)
-        period_series = melt_df["_period"]
-        resolution = _resolution_from_period(period_series)
-        offsets = pd.to_timedelta((period_series - 1) * resolution, unit="m")
-        timestamps = pd.to_datetime(melt_df[["Year", "Month", "Day"]]) + offsets
-        data = melt_df[["_value"]].copy()
-        data.columns = [csv_path.stem]
-        return data.set_index(timestamps).sort_index()
+
+        numeric_headers = all(str(col).strip().isdigit() for col in value_cols)
+
+        if numeric_headers:
+            melt_df = df.melt(
+                id_vars=["Year", "Month", "Day"],
+                value_vars=value_cols,
+                var_name="_period",
+                value_name="_value",
+            )
+            melt_df["_period"] = melt_df["_period"].astype(int)
+            period_series = melt_df["_period"]
+            resolution = _resolution_from_period(period_series)
+            offsets = pd.to_timedelta((period_series - 1) * resolution, unit="m")
+            timestamps = pd.to_datetime(melt_df[["Year", "Month", "Day"]]) + offsets
+            data = melt_df[["_value"]].copy()
+            data.columns = [csv_path.stem]
+            return data.set_index(timestamps).sort_index()
+
+        # Fallback: treat as daily profile(s) without explicit period columns.
+        data = df[value_cols].copy()
+        timestamps = dt_index
+
+        if data.shape[1] == 1:
+            data.columns = [csv_path.stem]
+        else:
+            prefixed = {
+                col: f"{csv_path.stem}__{str(col).strip()}" for col in data.columns
+            }
+            data = data.rename(columns=prefixed)
 
     data = data.set_index(timestamps)
     data.index.name = "timestamp"
@@ -121,13 +146,16 @@ def load_directory_timeseries(
     for idx, csv_path in enumerate(sorted(directory.glob(pattern))):
         if limit is not None and idx >= limit:
             break
-        frame = load_timeseries_matrix(csv_path)
-        if frame.columns.size == 1:
-            frames.append(frame)
-        else:
-            # Prefix column names with file stem for uniqueness
-            renamed = frame.add_prefix(f"{csv_path.stem}__")
-            frames.append(renamed)
+        try:
+            frame = load_timeseries_matrix(csv_path)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "Skipping %s during investment-period aggregation: %s",
+                csv_path,
+                exc,
+            )
+            continue
+        frames.append(frame)
 
     if not frames:
         msg = f"No CSV files matched pattern '{pattern}' in {directory}"

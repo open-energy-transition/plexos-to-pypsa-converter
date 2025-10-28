@@ -20,6 +20,12 @@ from db.csv_readers import (
 from network.generators_csv import _discover_datafile_mappings
 from utils.paths import safe_join
 
+try:
+    from network.investment import load_group_profiles, load_manifest
+except ImportError:  # pragma: no cover - optional dependency path
+    load_manifest = None
+    load_group_profiles = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -527,6 +533,9 @@ def add_storage_inflows_csv(
     network: pypsa.Network,
     csv_dir: str | Path,
     inflow_path: str | Path,
+    use_investment_periods: bool = False,
+    investment_manifest: str | Path | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Add inflow time series for hydro storage units to PyPSA network from CSV data.
 
@@ -593,6 +602,61 @@ def add_storage_inflows_csv(
             "static_value": 0,
         },
     }
+
+    if use_investment_periods:
+        if load_manifest is None or load_group_profiles is None:
+            msg = "Investment-period helpers unavailable; cannot load storage inflows."
+            raise RuntimeError(msg)
+        if investment_manifest is None:
+            msg = "investment_manifest must be provided for investment-period inflows"
+            raise ValueError(msg)
+        if investment_group is None:
+            investment_group = "storage_inflows"
+
+        manifest_path = Path(investment_manifest)
+        manifest_data = load_manifest(manifest_path)
+        if investment_group not in manifest_data:
+            logger.warning(
+                "Investment manifest missing storage inflow group '%s'; falling back to chronological inflows.",
+                investment_group,
+            )
+        else:
+            profiles = load_group_profiles(
+                manifest_data,
+                manifest_path.parent,
+                investment_group,
+            )
+            profiles = profiles.reindex(network.snapshots)
+            profiles = profiles.groupby(level=0, group_keys=False).apply(
+                lambda frame: frame.ffill().bfill()
+            )
+            profiles = profiles.fillna(0.0)
+
+            matched = 0
+            for storage_name in network.storage_units.index:
+                column = _match_profile_column(storage_name, profiles.columns)
+                if column is None:
+                    logger.debug(
+                        "No investment-period inflow column found for storage unit %s",
+                        storage_name,
+                    )
+                    stats["storage_units_without_inflows"] += 1
+                    continue
+                network.storage_units_t.inflow[storage_name] = profiles[
+                    column
+                ].to_numpy()
+                stats["storage_units_with_inflows"] += 1
+                stats["inflow_sources"].setdefault("investment_period", 0)
+                stats["inflow_sources"]["investment_period"] += 1
+                matched += 1
+
+            logger.info(
+                "Loaded investment-period inflows for %d storage units (group '%s').",
+                matched,
+                investment_group,
+            )
+            stats["mode"] = "investment_periods"
+            return stats
 
     # Load Storage.csv
     storage_df = load_static_properties(csv_dir, "Storage")
@@ -799,6 +863,26 @@ def load_inflow_from_file(
         return None
     else:
         return inflows_resampled
+
+
+def _match_profile_column(name: str, columns: pd.Index) -> str | None:
+    if name in columns:
+        return name
+    lower_map = {col.lower(): col for col in columns}
+    lowered = name.lower()
+    if lowered in lower_map:
+        return lower_map[lowered]
+    sanitized = name.replace(" ", "_").lower()
+    for col in columns:
+        if col.replace(" ", "_").lower() == sanitized:
+            return col
+    target = "".join(ch for ch in name.lower() if ch.isalnum())
+    if target:
+        for col in columns:
+            compare = "".join(ch for ch in str(col).lower() if ch.isalnum())
+            if target in compare:
+                return col
+    return None
 
 
 def create_inflow_from_timeslice_array(

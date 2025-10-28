@@ -36,6 +36,12 @@ from db.csv_readers import (
     read_plexos_input_csv,
 )
 
+try:
+    from network.investment import load_group_profiles, load_manifest
+except ImportError:  # pragma: no cover
+    load_manifest = None
+    load_group_profiles = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -2140,6 +2146,9 @@ def generate_stochastic_outages_csv(
     random_seed: int | None = None,
     generator_filter: Callable[[str], bool] | None = None,
     existing_outage_events: list[OutageEvent] | None = None,
+    use_investment_periods: bool = False,
+    investment_manifest: str | Path | None = None,
+    investment_group: str | None = None,
 ) -> list[OutageEvent]:
     """Generate both forced and maintenance outages from CSV properties.
 
@@ -2215,6 +2224,58 @@ def generate_stochastic_outages_csv(
     >>> all_events = explicit_events + stochastic_events
     >>> schedule = build_outage_schedule(all_events, network.snapshots)
     """
+    if use_investment_periods:
+        if load_manifest is None or load_group_profiles is None:
+            msg = "Investment-period helpers unavailable; cannot load outage profiles."
+            raise RuntimeError(msg)
+        if investment_manifest is None:
+            msg = "investment_manifest must be provided for investment-period outages"
+            raise ValueError(msg)
+        if investment_group is None:
+            investment_group = "outages"
+
+        manifest_path = Path(investment_manifest)
+        manifest_data = load_manifest(manifest_path)
+        if investment_group not in manifest_data:
+            logger.warning(
+                "Investment manifest missing outage group '%s'; falling back to stochastic generation.",
+                investment_group,
+            )
+        else:
+            profiles = load_group_profiles(
+                manifest_data,
+                manifest_path.parent,
+                investment_group,
+            )
+            profiles = profiles.reindex(network.snapshots)
+            profiles = profiles.groupby(level=0, group_keys=False).apply(
+                lambda frame: frame.ffill().bfill()
+            )
+            profiles = profiles.fillna(1.0)
+
+            affected = 0
+            for gen in network.generators.index:
+                column = _match_profile_column(gen, profiles.columns)
+                if column is None:
+                    continue
+                factor = profiles[column].to_numpy()
+                if gen in network.generators_t.p_max_pu.columns:
+                    network.generators_t.p_max_pu[gen] = (
+                        network.generators_t.p_max_pu[gen] * factor
+                    )
+                if gen in network.generators_t.p_min_pu.columns:
+                    network.generators_t.p_min_pu[gen] = (
+                        network.generators_t.p_min_pu[gen] * factor
+                    )
+                affected += 1
+
+            logger.info(
+                "Applied investment-period outage factors to %d generators (group '%s').",
+                affected,
+                investment_group,
+            )
+            return []
+
     csv_dir = Path(csv_dir)
 
     # Reduce logging and avoid unnecessary list operations for performance
@@ -2244,3 +2305,23 @@ def generate_stochastic_outages_csv(
     if len(all_events) > 1:
         all_events.sort(key=lambda e: e.start)
     return all_events
+
+
+def _match_profile_column(name: str, columns: pd.Index) -> str | None:
+    if name in columns:
+        return name
+    lower_map = {col.lower(): col for col in columns}
+    lowered = name.lower()
+    if lowered in lower_map:
+        return lower_map[lowered]
+    sanitized = name.replace(" ", "_").lower()
+    for col in columns:
+        if col.replace(" ", "_").lower() == sanitized:
+            return col
+    target = "".join(ch for ch in name.lower() if ch.isalnum())
+    if target:
+        for col in columns:
+            compare = "".join(ch for ch in str(col).lower() if ch.isalnum())
+            if target in compare:
+                return col
+    return None
