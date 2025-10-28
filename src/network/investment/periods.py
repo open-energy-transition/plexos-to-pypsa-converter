@@ -230,6 +230,61 @@ def build_snapshot_multiindex(
     return snapshots_index, period_series, snapshot_series
 
 
+def infer_profile_lengths(
+    manifest: dict[str, Any],
+    base_dir: str | Path,
+) -> dict[str, int]:
+    """Infer number of timesteps for each representative day-type."""
+    base_dir = Path(base_dir)
+    lengths: dict[str, int] = {}
+    for profile_set in manifest.values():
+        for entries in profile_set.values():
+            for entry in entries:
+                name = entry["name"]
+                if name in lengths:
+                    continue
+                csv_path = base_dir / entry["csv"]
+                df = pd.read_csv(csv_path)
+                if "minutes" in df.columns:
+                    df = df.drop(columns="minutes")
+                lengths[name] = len(df)
+    return lengths
+
+
+def load_group_profiles(
+    manifest: dict[str, Any],
+    base_dir: str | Path,
+    group: str,
+) -> pd.DataFrame:
+    """Load representative-day profiles for a specific group into MultiIndex frame."""
+    base_dir = Path(base_dir)
+    group_data = manifest.get(group)
+    if not group_data:
+        msg = f"Group '{group}' not found in investment manifest keys: {list(manifest.keys())}"
+        raise KeyError(msg)
+
+    frames: list[pd.DataFrame] = []
+    for period_label, entries in group_data.items():
+        for entry in entries:
+            csv_path = base_dir / entry["csv"]
+            df = pd.read_csv(csv_path)
+            if "minutes" in df.columns:
+                df = df.drop(columns="minutes")
+            snapshot_labels = [f"{entry['name']}::{idx:02d}" for idx in range(len(df))]
+            df.insert(0, "_snapshot", snapshot_labels)
+            df.insert(0, "_period", period_label)
+            frames.append(df)
+
+    if not frames:
+        msg = f"No profiles found for group '{group}' in manifest."
+        raise ValueError(msg)
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.set_index(["_period", "_snapshot"])
+    combined.index.names = ["period", "snapshot"]
+    return combined
+
+
 def _detect_period_labels(
     manifest: dict[str, Any],
     order: Sequence[str] | None,

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from plexosdb import PlexosDB
@@ -20,6 +21,12 @@ from network.costs_csv import (
     set_battery_marginal_costs_csv,
 )
 from network.generators_csv import port_generators_csv
+from network.investment import (
+    build_snapshot_multiindex,
+    infer_profile_lengths,
+    load_group_profiles,
+    load_manifest,
+)
 from network.links_csv import port_links_csv
 from network.storage_csv import port_storage_csv
 
@@ -121,6 +128,9 @@ def setup_network_csv(
     transmission_as_lines: bool = False,
     bidirectional_links: bool = True,
     load_scenario: str | None = None,
+    use_investment_periods: bool = False,
+    investment_manifest: str | None = None,
+    investment_group: str = "demand",
 ) -> dict:
     """Set up PyPSA network from CSV exports.
 
@@ -165,6 +175,14 @@ def setup_network_csv(
     load_scenario : str, optional
         For demand data with multiple scenarios (iterations), specify which scenario
         to use. If None, defaults to first scenario. Example: "iteration_1"
+    use_investment_periods : bool, default False
+        If True, build the network using representative investment-period profiles
+        rather than the full chronological traces.
+    investment_manifest : str, optional
+        Path to the investment_periods.json manifest (absolute or relative to
+        the model directory) produced by prepare_investment_periods_step.
+    investment_group : str, default "demand"
+        Manifest group key that contains the load profiles to import.
 
     Returns
     -------
@@ -177,129 +195,183 @@ def setup_network_csv(
     logger.info(f"  CSV directory: {csv_dir}")
     logger.info(f"  Demand strategy: {demand_assignment_strategy}")
 
+    manifest_data: dict | None = None
+    manifest_path_obj: Path | None = None
+    manifest_base: Path | None = None
+    investment_info: dict[str, Any] | None = None
+
     # 1. Add buses
     num_buses = add_buses_csv(network, csv_dir)
 
     # 2. Add carriers
     num_carriers = add_carriers_csv(network, csv_dir)
 
-    # 3. Set up snapshots and demand (still uses PlexosDB for now if available)
-    # TODO: Could be migrated to CSV in future
-    logger.info("Setting up snapshots and demand from CSV files...")
-    if snapshots_source:
-        add_snapshots(network, snapshots_source)
-    else:
-        logger.warning(
-            "No snapshots_source provided, network will need snapshots set manually"
-        )
+    load_summary: dict[str, Any] | None = None
 
-    if demand_source:
-        # Handle participation_factors strategy separately
-        if demand_assignment_strategy == "participation_factors":
-            logger.info("  Using participation factors strategy")
-            # Parse demand data first
-            demand_df = parse_demand_data(demand_source)
-            # Call participation factors function directly
-            _add_loads_with_participation_factors(
-                network=network,
-                demand_df=demand_df,
-                csv_dir=csv_dir,
-                load_scenario=load_scenario,
-            )
+    if use_investment_periods:
+        logger.info("Investment-period mode enabled; loading manifest and snapshots...")
+        if investment_manifest is not None:
+            manifest_path_obj = Path(investment_manifest)
+            if not manifest_path_obj.is_absolute():
+                manifest_path_obj = (Path.cwd() / manifest_path_obj).resolve()
         else:
-            # Use standard add_loads_flexible for other strategies
-            # Determine which node to assign demand to
-            # Priority: demand_target_node > strategy-based target_node/aggregate_node_name
-            demand_node = None
-            demand_aggregate = None
+            manifest_path_obj = (
+                csv_dir.parent.parent / "investment_periods" / "investment_periods.json"
+            ).resolve()
 
-            if demand_target_node:
-                # Explicit demand target node - overrides strategy
-                demand_node = demand_target_node
-                logger.info(f"  Assigning all demand to node: {demand_target_node}")
-            elif demand_assignment_strategy == "target_node":
-                demand_node = target_node
-            elif demand_assignment_strategy == "aggregate_node":
-                demand_aggregate = aggregate_node_name
+        manifest_data = load_manifest(manifest_path_obj)
+        manifest_base = manifest_path_obj.parent
 
-            add_loads_flexible(
-                network=network,
-                demand_source=demand_source,
-                target_node=demand_node,
-                aggregate_node_name=demand_aggregate,
-                load_scenario=load_scenario,
-            )
-    # 4. Add generators
-    logger.info("Adding generators from CSV...")
-    port_generators_csv(
-        network=network,
-        csv_dir=csv_dir,
-        timeslice_csv=timeslice_csv,
-        vre_profiles_path=vre_profiles_path,
-        target_node=target_node,
-    )
-
-    # NOTE: Generator Units time series (retirements, new builds) are NOT applied here.
-    # Units MUST be applied AFTER VRE profiles are loaded, otherwise they get overwritten.
-    # Call apply_generator_units_timeseries_csv() manually after loading VRE profiles.
-
-    # 5. Add storage
-    logger.info("Adding storage from CSV...")
-    port_storage_csv(
-        network=network,
-        csv_dir=csv_dir,
-        timeslice_csv=timeslice_csv,
-    )
-
-    # 5b. Set battery costs
-    if len(network.storage_units) > 0:
-        logger.info("Setting battery costs...")
-
-        set_battery_capital_costs_csv(network, csv_dir)
-        set_battery_marginal_costs_csv(network, csv_dir)
-
-    # 6. Add transmission links
-    logger.info("Adding transmission links from CSV...")
-    if transmission_as_lines:
-        logger.warning(
-            "transmission_as_lines=True not yet supported in CSV mode. "
-            "Using Links instead."
+        profile_lengths = infer_profile_lengths(manifest_data, manifest_base)
+        snapshots_index, period_weights, snapshot_weights = build_snapshot_multiindex(
+            manifest_data,
+            profile_lengths=profile_lengths,
         )
-    port_links_csv(
-        network=network,
-        csv_dir=csv_dir,
-        timeslice_csv=timeslice_csv,
-        target_node=target_node,
-        bidirectional_links=bidirectional_links,
-    )
 
-    # 7. Set fuel prices
-    logger.info("Setting fuel prices from CSV...")
-    fuel_prices = parse_fuel_prices_csv(
-        csv_dir=csv_dir,
-        network=network,
-        timeslice_csv=timeslice_csv,
-    )
+        network.set_snapshots(snapshots_index)
+        snapshot_weight_df = network.snapshot_weightings.copy()
+        snapshot_weight_df["objective"] = snapshot_weights.to_numpy()
+        snapshot_weight_df["years"] = snapshot_weights.to_numpy()
+        network.snapshot_weightings = snapshot_weight_df
 
-    # Apply fuel prices to carriers (if carriers_t exists)
-    if not fuel_prices.empty and len(network.snapshots) > 0:
-        # Initialize carriers_t if it doesn't exist
-        if not hasattr(network, "carriers_t") or network.carriers_t is None:
-            network.carriers_t = {}
+        period_df = pd.DataFrame(
+            {
+                "objective": period_weights,
+                "years": period_weights,
+            }
+        )
+        period_df.index.name = "period"
+        network.investment_period_weightings = period_df
 
-        # Initialize marginal_cost DataFrame if it doesn't exist
-        if "marginal_cost" not in network.carriers_t:
-            network.carriers_t["marginal_cost"] = pd.DataFrame(
-                index=network.snapshots,
-                columns=network.carriers.index,
+        logger.info("Loading demand profiles from investment manifest...")
+        demand_profiles = load_group_profiles(
+            manifest_data, manifest_base, investment_group
+        )
+        demand_profiles = demand_profiles.reindex(network.snapshots)
+        column_mapping = {
+            column: column.split("_", 1)[0] for column in demand_profiles.columns
+        }
+        collapsed_demand = demand_profiles.T.groupby(column_mapping).sum().T.fillna(0.0)
+        load_summary = _apply_investment_period_loads(
+            network=network,
+            demand_df=collapsed_demand,
+            demand_target_node=demand_target_node,
+        )
+
+        investment_info = {
+            "manifest": str(manifest_path_obj),
+            "periods": period_weights.to_dict(),
+        }
+    else:
+        logger.info("Setting up snapshots and demand from CSV files...")
+        if snapshots_source:
+            add_snapshots(network, snapshots_source)
+        else:
+            logger.warning(
+                "No snapshots_source provided, network will need snapshots set manually"
             )
 
-        for carrier in fuel_prices.columns:
-            if carrier in network.carriers.index:
-                network.carriers_t["marginal_cost"][carrier] = fuel_prices[carrier]
+        if demand_source:
+            if demand_assignment_strategy == "participation_factors":
+                logger.info("  Using participation factors strategy")
+                demand_df = parse_demand_data(demand_source)
+                _add_loads_with_participation_factors(
+                    network=network,
+                    demand_df=demand_df,
+                    csv_dir=csv_dir,
+                    load_scenario=load_scenario,
+                )
+            else:
+                demand_node = None
+                demand_aggregate = None
 
-    # 8. Demand aggregation is handled by add_loads_flexible above
-    # No additional processing needed here
+                if demand_target_node:
+                    demand_node = demand_target_node
+                    logger.info(f"  Assigning all demand to node: {demand_target_node}")
+                elif demand_assignment_strategy == "target_node":
+                    demand_node = target_node
+                elif demand_assignment_strategy == "aggregate_node":
+                    demand_aggregate = aggregate_node_name
+
+                add_loads_flexible(
+                    network=network,
+                    demand_source=demand_source,
+                    target_node=demand_node,
+                    aggregate_node_name=demand_aggregate,
+                    load_scenario=load_scenario,
+                )
+    if not use_investment_periods:
+        # 4. Add generators
+        logger.info("Adding generators from CSV...")
+        port_generators_csv(
+            network=network,
+            csv_dir=csv_dir,
+            timeslice_csv=timeslice_csv,
+            vre_profiles_path=vre_profiles_path,
+            target_node=target_node,
+        )
+
+        # NOTE: Generator Units time series (retirements, new builds) are NOT applied here.
+        # Units MUST be applied AFTER VRE profiles are loaded, otherwise they get overwritten.
+        # Call apply_generator_units_timeseries_csv() manually after loading VRE profiles.
+
+        # 5. Add storage
+        logger.info("Adding storage from CSV...")
+        port_storage_csv(
+            network=network,
+            csv_dir=csv_dir,
+            timeslice_csv=timeslice_csv,
+        )
+
+        # 5b. Set battery costs
+        if len(network.storage_units) > 0:
+            logger.info("Setting battery costs...")
+
+            set_battery_capital_costs_csv(network, csv_dir)
+            set_battery_marginal_costs_csv(network, csv_dir)
+
+        # 6. Add transmission links
+        logger.info("Adding transmission links from CSV...")
+        if transmission_as_lines:
+            logger.warning(
+                "transmission_as_lines=True not yet supported in CSV mode. "
+                "Using Links instead."
+            )
+        port_links_csv(
+            network=network,
+            csv_dir=csv_dir,
+            timeslice_csv=timeslice_csv,
+            target_node=target_node,
+            bidirectional_links=bidirectional_links,
+        )
+
+        # 7. Set fuel prices
+        logger.info("Setting fuel prices from CSV...")
+        fuel_prices = parse_fuel_prices_csv(
+            csv_dir=csv_dir,
+            network=network,
+            timeslice_csv=timeslice_csv,
+        )
+
+        # Apply fuel prices to carriers (if carriers_t exists)
+        if not fuel_prices.empty and len(network.snapshots) > 0:
+            # Initialize carriers_t if it doesn't exist
+            if not hasattr(network, "carriers_t") or network.carriers_t is None:
+                network.carriers_t = {}
+
+            # Initialize marginal_cost DataFrame if it doesn't exist
+            if "marginal_cost" not in network.carriers_t:
+                network.carriers_t["marginal_cost"] = pd.DataFrame(
+                    index=network.snapshots,
+                    columns=network.carriers.index,
+                )
+
+            for carrier in fuel_prices.columns:
+                if carrier in network.carriers.index:
+                    network.carriers_t["marginal_cost"][carrier] = fuel_prices[carrier]
+
+        # 8. Demand aggregation is handled by add_loads_flexible above
+        # No additional processing needed here
 
     summary = {
         "method": "csv",
@@ -317,6 +389,22 @@ def setup_network_csv(
         summary["target_node"] = target_node
     if aggregate_node_name:
         summary["aggregate_node"] = aggregate_node_name
+    if load_summary:
+        summary["loads"] = load_summary
+    if investment_info:
+        summary["investment"] = investment_info
+
+    if use_investment_periods:
+        summary["snapshots_mode"] = "investment_periods"
+        logger.info(
+            "Investment-period setup complete (skipping generator/storage/link import in this mode)."
+        )
+        logger.info(f"  Buses: {num_buses}")
+        logger.info(f"  Loads: {len(network.loads)}")
+        logger.info(f"  Snapshots: {len(network.snapshots)}")
+        return summary
+    else:
+        summary.setdefault("snapshots_mode", "chronological")
 
     logger.info("CSV-based network setup complete")
     logger.info(f"  Buses: {num_buses}")
@@ -327,3 +415,44 @@ def setup_network_csv(
     logger.info(f"  Snapshots: {len(network.snapshots)}")
 
     return summary
+
+
+def _apply_investment_period_loads(
+    network: Network,
+    demand_df: pd.DataFrame,
+    demand_target_node: str | None,
+) -> dict[str, Any]:
+    """Assign investment-period demand profiles to network loads."""
+    load_names: list[str] = []
+
+    if demand_target_node:
+        total_series = demand_df.sum(axis=1)
+        load_name = f"Load_{demand_target_node}"
+        if load_name not in network.loads.index:
+            if demand_target_node not in network.buses.index:
+                logger.warning(
+                    "Demand target node '%s' not found in buses. Skipping load creation.",
+                    demand_target_node,
+                )
+                return {"mode": "investment_periods", "loads": load_names}
+            network.add("Load", load_name, bus=demand_target_node)
+        network.loads_t.p_set.loc[:, load_name] = total_series.to_numpy()
+        load_names.append(load_name)
+        logger.info("  Assigned aggregated demand to load %s", load_name)
+        return {"mode": "investment_periods", "loads": load_names}
+
+    for zone in demand_df.columns:
+        load_name = f"Load_{zone}"
+        if zone not in network.buses.index:
+            logger.warning(
+                "Bus '%s' missing for investment-period load; skipping column.",
+                zone,
+            )
+            continue
+        if load_name not in network.loads.index:
+            network.add("Load", load_name, bus=zone)
+        network.loads_t.p_set.loc[:, load_name] = demand_df[zone].to_numpy()
+        load_names.append(load_name)
+
+    logger.info("  Added %d loads from investment-period profiles", len(load_names))
+    return {"mode": "investment_periods", "loads": load_names}
