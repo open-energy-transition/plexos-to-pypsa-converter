@@ -190,5 +190,15 @@ doc/visualization/html/
 # example data
 src/examples/data/
 
+# solved networks
+src/examples/results/
+
 # claude
-CLAUDE.md
+CLAUDE.mdsrc/
+
+# scratch
+scratch/
+
+# archive directory for legacy code
+archive/
+src/examples/archive/

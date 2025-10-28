@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from pypsa import Network
 
@@ -129,9 +130,7 @@ def setup_gas_electric_network_csv(network: Network, csv_path: str) -> dict[str,
                     * (
                         1
                         + 0.3
-                        * pd.np.sin(
-                            pd.np.arange(len(network.snapshots)) * 2 * pd.np.pi / 24
-                        )
+                        * np.sin(np.arange(len(network.snapshots)) * 2 * np.pi / 24)
                     ),
                     index=network.snapshots,
                 )
@@ -903,9 +902,7 @@ def add_flow_demand_csv(network: Network, sector: str) -> None:
                     * (
                         1
                         + 0.3
-                        * pd.np.sin(
-                            pd.np.arange(len(network.snapshots)) * 2 * pd.np.pi / 24
-                        )
+                        * np.sin(np.arange(len(network.snapshots)) * 2 * np.pi / 24)
                     ),
                     index=network.snapshots,
                 )

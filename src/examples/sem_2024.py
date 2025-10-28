@@ -1,36 +1,33 @@
-from collections import defaultdict
+"""SEM 2024-2032 Validation Model - Workflow execution.
 
-import pandas as pd
+This script demonstrates using the registry-driven workflow system to execute
+the standard processing pipeline for the SEM model.
 
-from network.conversion import create_model
+For manual/custom workflow execution, see legacy/sem_2024_manual.py
 
-# Constants
-MODEL_ID = "sem-2024-2032"
-SNAPSHOTS_PER_YEAR = 60
+To run the default workflow:
+    network, summary = run_model_workflow("sem-2024-2032")
+
+To override specific parameters:
+    network, summary = run_model_workflow(
+        "sem-2024-2032",
+        optimize__year=2024,  # Override optimization year
+        scale_p_min_pu__scaling_factor=0.5,  # Different scaling
+    )
+"""
+
+from workflow import run_model_workflow
 
 if __name__ == "__main__":
-    # Create network using unified factory (uses default target_node strategy)
-    network, setup_summary = create_model(MODEL_ID)
+    # Execute standard workflow from registry
+    network, summary = run_model_workflow("sem-2024-2032")
 
-    print("\nSetup Summary:")
-    if "target_node" in setup_summary:
-        print(f"  Target node: {setup_summary['target_node']}")
-    if "peak_demand" in setup_summary:
-        print(f"  Peak demand: {setup_summary['peak_demand']:.2f} MW")
-    print(f"  Total buses: {len(network.buses)}")
-    print(f"  Total generators: {len(network.generators)}")
-    print(f"  Total storage units: {len(network.storage_units)}")
-
-    network.consistency_check()
-
-    # Select subset of snapshots for optimization
-    snapshots_by_year: defaultdict[int, list] = defaultdict(list)
-    for snap in network.snapshots:
-        year = pd.Timestamp(snap).year
-        if len(snapshots_by_year[year]) < SNAPSHOTS_PER_YEAR:
-            snapshots_by_year[year].append(snap)
-
-    subset = [snap for snaps in snapshots_by_year.values() for snap in snaps]
-
-    # Optimize network
-    network.optimize(solver_name="highs", snapshots=subset)
+    print("\n" + "=" * 60)
+    print("SEM 2024-2032 Workflow Complete")
+    print("=" * 60)
+    print(
+        f"\nNetwork: {len(network.buses)} buses, {len(network.generators)} generators"
+    )
+    print(f"Snapshots: {len(network.snapshots)}")
+    print(f"\nOptimization status: {network.results.status}")
+    print(f"Objective value: {network.objective:,.0f}")

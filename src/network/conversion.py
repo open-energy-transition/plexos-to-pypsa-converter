@@ -14,12 +14,8 @@ from plexosdb import PlexosDB
 
 from db.registry import MODEL_REGISTRY
 from network.core import setup_network
-from network.multi_sector_db import (
-    setup_enhanced_flow_network_with_csv,
-    setup_flow_network_db,
-    setup_gas_electric_network_db,
-    setup_marei_csv_network,
-)
+from network.core_csv import setup_network_csv
+from utils.csv_export import check_csv_export_exists, export_csvs_from_xml
 from utils.model_paths import get_model_directory, get_model_xml_path
 
 
@@ -77,6 +73,7 @@ def _create_electricity_model(
     model_dir: Path,
     config: dict,
     db: PlexosDB,
+    use_csv: bool = False,
 ) -> tuple[pypsa.Network, dict]:
     """Create electricity-only PyPSA model.
 
@@ -92,12 +89,80 @@ def _create_electricity_model(
         Merged configuration (defaults + overrides)
     db : PlexosDB
         Loaded PLEXOS database
+    use_csv : bool, default False
+        If True, use CSV-based conversion approach
 
     Returns
     -------
     tuple[pypsa.Network, dict]
         Network and setup summary
     """
+    network = pypsa.Network()
+
+    if use_csv:
+        # CSV-based path
+        csv_dir = config.get("csv_dir")
+        if csv_dir is None:
+            msg = "csv_dir must be provided when use_csv=True"
+            raise ValueError(msg)
+
+        # Auto-detection logic for snapshots_source (same as PlexosDB path)
+        snapshots_source = config.get("snapshots_source")
+        demand_source = config.get("demand_source")
+
+        # Check for explicit demand file configuration
+        if config.get("demand_file") and snapshots_source is None:
+            demand_file_path = model_dir / config["demand_file"]
+            if demand_file_path.exists():
+                snapshots_source = str(demand_file_path)
+                demand_source = str(demand_file_path)
+            else:
+                msg = f"Configured demand_file not found: {demand_file_path}"
+                raise FileNotFoundError(msg)
+
+        # Auto-determine paths if not explicitly provided
+        if snapshots_source is None:
+            # Check for common snapshot directories
+            candidates = [
+                "Traces/demand",  # AEMO pattern
+                "demand",  # Simple pattern
+                "LoadProfile",  # CAISO pattern
+                "load",  # Alternative pattern
+            ]
+            for candidate in candidates:
+                candidate_path = model_dir / candidate
+                if candidate_path.exists():
+                    snapshots_source = str(candidate_path)
+                    break
+
+        if demand_source is None:
+            demand_source = snapshots_source
+
+        print("Setting up electricity model from CSVs...")
+        setup_summary = setup_network_csv(
+            network=network,
+            csv_dir=csv_dir,
+            db=db,
+            snapshots_source=snapshots_source,
+            demand_source=demand_source,
+            timeslice_csv=config.get("timeslice_csv"),
+            vre_profiles_path=config.get("vre_profiles_path"),
+            model_name=config.get("model_name"),
+            inflow_path=config.get("inflow_path"),
+            target_node=config.get("target_node"),
+            aggregate_node_name=config.get("aggregate_node_name"),
+            demand_assignment_strategy=config.get(
+                "demand_assignment_strategy", "per_node"
+            ),
+            demand_target_node=config.get("demand_target_node"),
+            transmission_as_lines=config.get("transmission_as_lines", False),
+            bidirectional_links=config.get("bidirectional_links", True),
+            load_scenario=config.get("load_scenario"),
+        )
+
+        return network, setup_summary
+
+    # Original PlexosDB-based path
     network = pypsa.Network()
 
     # Get demand assignment strategy
@@ -176,146 +241,16 @@ def _create_electricity_model(
     elif strategy == "aggregate_node":
         setup_args["aggregate_node_name"] = config.get("aggregate_node_name")
 
+    # Add demand-specific target node (independent of strategy)
+    if "demand_target_node" in config:
+        setup_args["demand_target_node"] = config.get("demand_target_node")
+
+    # Add load scenario parameter
+    setup_args["load_scenario"] = config.get("load_scenario")
+
     # Set up network
     print(f"Setting up {strategy} electricity model...")
     setup_summary = setup_network(**setup_args)
-
-    return network, setup_summary
-
-
-def _create_gas_electric_model(
-    model_id: str,
-    xml_file: Path,
-    model_dir: Path,
-    config: dict,
-    db: PlexosDB,
-) -> tuple[pypsa.Network, dict]:
-    """Create multi-sector gas+electric PyPSA model.
-
-    Parameters
-    ----------
-    model_id : str
-        Model identifier from MODEL_REGISTRY
-    xml_file : Path
-        Path to PLEXOS XML file
-    model_dir : Path
-        Path to model directory
-    config : dict
-        Merged configuration (defaults + overrides)
-    db : PlexosDB
-        Loaded PLEXOS database
-
-    Returns
-    -------
-    tuple[pypsa.Network, dict]
-        Network and setup summary
-    """
-    network = pypsa.Network()
-
-    use_csv = config.get("use_csv_integration", False)
-
-    if use_csv:
-        # Enhanced setup with CSV data integration
-        csv_data_path = config.get("csv_data_path")
-        if csv_data_path is None:
-            # Auto-determine CSV path
-            csv_dir = model_dir / "CSV Files"
-            if csv_dir.exists():
-                csv_data_path = str(csv_dir)
-            else:
-                msg = (
-                    f"CSV Files directory not found in {model_dir}. "
-                    "Set use_csv_integration=False or provide csv_data_path."
-                )
-                raise FileNotFoundError(msg)
-
-        print("Setting up gas+electric model with CSV integration...")
-        setup_summary = setup_marei_csv_network(
-            network=network,
-            db=db,
-            csv_data_path=csv_data_path,
-            infrastructure_scenario=config.get("infrastructure_scenario", "PCI"),
-            pricing_scheme=config.get("pricing_scheme", "Production"),
-            generators_as_links=config.get("generators_as_links", False),
-        )
-    else:
-        # Traditional database-only setup
-        print("Setting up gas+electric model from database...")
-        setup_summary = setup_gas_electric_network_db(
-            network=network,
-            db=db,
-            generators_as_links=config.get("generators_as_links", False),
-            testing_mode=config.get("testing_mode", False),
-            timeslice_csv=config.get("timeslice_csv"),
-            vre_profiles_path=config.get("vre_profiles_path", str(model_dir)),
-        )
-
-    return network, setup_summary
-
-
-def _create_flow_model(
-    model_id: str,
-    xml_file: Path,
-    model_dir: Path,
-    config: dict,
-    db: PlexosDB,
-) -> tuple[pypsa.Network, dict]:
-    """Create multi-sector flow PyPSA model (electricity + hydrogen + ammonia).
-
-    Parameters
-    ----------
-    model_id : str
-        Model identifier from MODEL_REGISTRY
-    xml_file : Path
-        Path to PLEXOS XML file
-    model_dir : Path
-        Path to model directory
-    config : dict
-        Merged configuration (defaults + overrides)
-    db : PlexosDB
-        Loaded PLEXOS database
-
-    Returns
-    -------
-    tuple[pypsa.Network, dict]
-        Network and setup summary
-    """
-    network = pypsa.Network()
-
-    use_csv = config.get("use_csv_integration", True)
-
-    if use_csv:
-        # Enhanced setup with CSV data integration
-        inputs_folder = config.get("inputs_folder")
-        if inputs_folder is None:
-            # Auto-determine inputs folder (XML is in subdirectory, Inputs is relative to XML)
-            inputs_path = xml_file.parent / "Inputs"
-            if inputs_path.exists():
-                inputs_folder = str(inputs_path)
-            else:
-                msg = (
-                    f"Inputs folder not found at {inputs_path}. "
-                    "Set use_csv_integration=False or provide inputs_folder path."
-                )
-                raise FileNotFoundError(msg)
-
-        print("Setting up flow model with CSV integration...")
-        setup_summary = setup_enhanced_flow_network_with_csv(
-            network=network,
-            db=db,
-            inputs_folder=inputs_folder,
-            testing_mode=config.get("testing_mode", False),
-            timeslice_csv=config.get("timeslice_csv"),
-        )
-    else:
-        # Traditional database-only setup
-        print("Setting up flow model from database...")
-        setup_summary = setup_flow_network_db(
-            network=network,
-            db=db,
-            testing_mode=config.get("testing_mode", False),
-            timeslice_csv=config.get("timeslice_csv"),
-        )
 
     return network, setup_summary
 
@@ -344,6 +279,8 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
         Optional configuration overrides. Available options depend on model type:
 
         Electricity models:
+        - use_csv : bool
+            Enable CSV-based conversion (auto-generates CSVs from XML if needed)
         - demand_assignment_strategy : str
             "per_node", "target_node", or "aggregate_node"
         - target_node : str
@@ -364,10 +301,14 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Path to timeslice CSV file
         - transmission_as_lines : bool
             Use Line components instead of Links
+        - load_scenario : str, optional
+            For demand data with multiple scenarios (iterations), specify which
+            scenario to use. If None, defaults to first scenario.
+            Example: "iteration_1" to select first scenario explicitly
 
         Gas+Electric models (MaREI-EU):
-        - use_csv_integration : bool
-            Enable CSV data integration (default from registry)
+        - use_csv : bool
+            Enable CSV data integration (default False)
         - csv_data_path : str
             Path to CSV Files directory
         - infrastructure_scenario : str
@@ -380,7 +321,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Process limited subsets for testing
 
         Flow models (PLEXOS-MESSAGE):
-        - use_csv_integration : bool
+        - use_csv : bool
             Enable CSV data integration (default from registry)
         - inputs_folder : str
             Path to Inputs folder with CSV data
@@ -410,9 +351,12 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     Create SEM model with custom target node:
     >>> network, summary = create_model("sem-2024-2032", target_node="CustomNode")
 
+    Create SEM model with CSV-based conversion (auto-generates CSVs if needed):
+    >>> network, summary = create_model("sem-2024-2032", use_csv=True)
+
     Create MaREI model with CSV integration:
     >>> network, summary = create_model("marei-eu",
-    ...                                  use_csv_integration=True,
+    ...                                  use_csv=True,
     ...                                  infrastructure_scenario="High")
 
     Create PLEXOS-MESSAGE model in testing mode:
@@ -461,32 +405,68 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     # Merge configurations
     config = _merge_configs(default_config, config_overrides)
 
+    # Check for CSV usage and auto-generate if needed
+    use_csv = config.get("use_csv", False)
+    csv_dir = None
+
+    if use_csv and model_type in ["electricity", "multi_sector_gas_electric"]:
+        print(f"\nChecking for CSV exports in {model_dir}...")
+
+        # Check if CSV export already exists
+        csv_export_path = check_csv_export_exists(model_dir)
+
+        if csv_export_path:
+            print(f"Found existing CSV export at: {csv_export_path}")
+            csv_dir = csv_export_path
+        else:
+            print("CSV export not found. Generating CSVs from XML...")
+            print("This may take a few minutes...")
+
+            # Generate CSVs from XML
+            csv_output_dir = model_dir / "csvs_from_xml"
+            try:
+                export_csvs_from_xml(xml_file, csv_output_dir)
+                print(f"Successfully exported CSVs to: {csv_output_dir}")
+            except Exception as e:
+                msg = f"Failed to export CSVs from XML: {e}"
+                print(f"Error: {msg}")
+                print("Falling back to PlexosDB-based approach")
+                use_csv = False
+            else:
+                # Verify the export
+                csv_export_path = check_csv_export_exists(model_dir)
+                if not csv_export_path:
+                    msg = "CSV export completed but verification failed"
+                    print(f"Error: {msg}")
+                    print("Falling back to PlexosDB-based approach")
+                    use_csv = False
+                else:
+                    csv_dir = csv_export_path
+
+        # Store csv_dir in config for use by _create_electricity_model
+        if csv_dir:
+            config["csv_dir"] = csv_dir
+
     print(f"Creating model: {model_metadata['name']}")
     print(f"Model type: {model_type}")
     print(f"XML file: {xml_file}")
     print(f"Model directory: {model_dir}")
 
     # Load PLEXOS database
-    print("\nLoading PLEXOS database...")
-    db = PlexosDB.from_xml(str(xml_file))
+    db = None
+    if not use_csv:
+        print("\nLoading PLEXOS database...")
+        db = PlexosDB.from_xml(str(xml_file))
 
     # Route to appropriate creation function based on model type
     if model_type == "electricity":
         network, setup_summary = _create_electricity_model(
-            model_id, xml_file, model_dir, config, db
-        )
-    elif model_type == "multi_sector_gas_electric":
-        network, setup_summary = _create_gas_electric_model(
-            model_id, xml_file, model_dir, config, db
-        )
-    elif model_type == "multi_sector_flow":
-        network, setup_summary = _create_flow_model(
-            model_id, xml_file, model_dir, config, db
+            model_id, xml_file, model_dir, config, db, use_csv=use_csv
         )
     else:
         msg = (
             f"Unknown model_type: '{model_type}' for model '{model_id}'. "
-            "Supported types: electricity, multi_sector_gas_electric, multi_sector_flow"
+            "Supported types: electricity"
         )
         raise ValueError(msg)
 

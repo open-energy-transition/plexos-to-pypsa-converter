@@ -1,0 +1,5 @@
+object,category,Max Capacity,Node,Fuel,Units,Max Ramp Up,Max Ramp Down,Min Stable Level,Rating,Forced Outage Rate,Maintenance Rate,Heat Rate,VO&M Charge,Start Cost,Min Up Time,Min Down Time
+Gas1,CCGT,100,Bus1,Gas,1,5,5,40,100,0.02,0.04,7.5,2.5,5000,4,4
+Coal1,Coal,200,Bus1,Coal,1,2,2,60,200,0.05,0.08,10.2,3.0,8000,8,8
+Wind1,Wind Onshore,50,Bus2,,1,,,,,0.01,0.02,,,,,
+Solar1,Solar PV,30,Bus2,,1,,,,,0.005,0.01,,,,,

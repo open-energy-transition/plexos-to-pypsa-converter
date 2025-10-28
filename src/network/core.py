@@ -7,11 +7,37 @@ from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 from pypsa import Network
 
-from network.constraints import add_constraints_enhanced
-from network.generators import port_generators, reassign_generators_to_node
-from network.lines import port_lines
-from network.links import port_links, reassign_links_to_node
-from network.storage import add_hydro_inflows, add_storage
+from db.csv_readers import load_static_properties
+
+# PlexosDB-only imports (archived, not used by CSV workflow)
+# These are only needed for the old setup_network() function
+try:
+    from network.constraints import add_constraints_enhanced
+except ImportError:
+    add_constraints_enhanced = None
+
+try:
+    from network.generators import port_generators, reassign_generators_to_node
+except ImportError:
+    port_generators = None
+    reassign_generators_to_node = None
+
+try:
+    from network.lines import port_lines
+except ImportError:
+    port_lines = None
+
+try:
+    from network.links import port_links, reassign_links_to_node
+except ImportError:
+    port_links = None
+    reassign_links_to_node = None
+
+try:
+    from network.storage import add_hydro_inflows, add_storage
+except ImportError:
+    add_hydro_inflows = None
+    add_storage = None
 
 logger = logging.getLogger(__name__)
 
@@ -884,6 +910,7 @@ def add_loads_flexible(
     bus_mapping=None,
     target_node=None,
     aggregate_node_name=None,
+    load_scenario=None,
 ):
     """Flexible function to add loads to the PyPSA network from various demand data formats.
 
@@ -901,6 +928,9 @@ def add_loads_flexible(
     aggregate_node_name : str, optional
         If specified, creates a new node with this name and assigns all demand to it.
         Example: "Load_Aggregate" to create an aggregate load node.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Examples
     --------
@@ -927,13 +957,15 @@ def add_loads_flexible(
     # Handle different demand assignment modes
     if target_node is not None:
         # Mode 1: Assign all demand to a specific existing node
-        return _add_loads_to_target_node(network, demand_df, target_node)
+        return _add_loads_to_target_node(network, demand_df, target_node, load_scenario)
     elif aggregate_node_name is not None:
         # Mode 2: Create new aggregate node and assign all demand to it
-        return _add_loads_to_aggregate_node(network, demand_df, aggregate_node_name)
+        return _add_loads_to_aggregate_node(
+            network, demand_df, aggregate_node_name, load_scenario
+        )
     else:
         # Mode 3: Default per-node assignment
-        return _add_loads_per_node(network, demand_df)
+        return _add_loads_per_node(network, demand_df, load_scenario)
 
 
 def port_core_network(
@@ -945,6 +977,8 @@ def port_core_network(
     target_node=None,
     aggregate_node_name=None,
     model_name=None,
+    load_scenario=None,
+    demand_target_node=None,
 ):
     """Comprehensive function to set up the core PyPSA network infrastructure.
 
@@ -975,6 +1009,9 @@ def port_core_network(
     model_name : str, optional
         Name of the specific model to use when multiple models exist in the XML file.
         If None and multiple models exist, an error will be raised.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
 
     Returns
     -------
@@ -1047,8 +1084,17 @@ def port_core_network(
 
     # Step 4: Add loads with flexible parsing
     print("4. Adding loads...")
+    # Determine demand target: demand_target_node takes precedence
+    effective_target = demand_target_node if demand_target_node else target_node
+    effective_aggregate = None if demand_target_node else aggregate_node_name
+
     load_summary = add_loads_flexible(
-        network, demand_source, demand_bus_mapping, target_node, aggregate_node_name
+        network,
+        demand_source,
+        demand_bus_mapping,
+        effective_target,
+        effective_aggregate,
+        load_scenario,
     )
 
     print(
@@ -1204,10 +1250,96 @@ def get_demand_format_info(source_path):
     return info
 
 
-def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
+def _normalize_scenario_name(
+    user_input: str | int, available_columns: list
+) -> str | None:
+    """Normalize user scenario input to match actual DataFrame column names.
+
+    Accepts either 1, "1", or "iteration_1" and returns the actual column name.
+    Handles columns with filename prefixes (e.g., "Load_2024 0308_iteration_1").
+    Returns None if scenario not found.
+
+    Parameters
+    ----------
+    user_input : str | int
+        User-provided scenario name (e.g., 1, "1", or "iteration_1")
+    available_columns : list
+        List of available column names in the DataFrame
+
+    Returns
+    -------
+    str or None
+        Normalized column name if found, None otherwise
+
+    Raises
+    ------
+    ValueError
+        If multiple columns match (ambiguous scenario)
+
+    Examples
+    --------
+    >>> # Simple case (no prefix)
+    >>> cols = ["iteration_1", "iteration_2", "iteration_3"]
+    >>> _normalize_scenario_name(1, cols)
+    'iteration_1'
+    >>> _normalize_scenario_name("iteration_2", cols)
+    'iteration_2'
+
+    >>> # With filename prefix (CAISO LoadProfile case)
+    >>> cols = ["Load_2024 0308_iteration_1", "Load_2024 0308_iteration_2"]
+    >>> _normalize_scenario_name(1, cols)
+    'Load_2024 0308_iteration_1'
+    >>> _normalize_scenario_name("iteration_1", cols)
+    'Load_2024 0308_iteration_1'
+    """
+    # Convert integer input to string
+    user_input = str(user_input)
+
+    # If exact match, return as-is
+    if user_input in available_columns:
+        return user_input
+
+    # Try adding "iteration_" prefix
+    prefixed = f"iteration_{user_input}"
+    if prefixed in available_columns:
+        return prefixed
+
+    # Try removing "iteration_" prefix (in case user typed it but columns don't have it)
+    if user_input.startswith("iteration_"):
+        unprefixed = user_input.replace("iteration_", "", 1)
+        if unprefixed in available_columns:
+            return unprefixed
+
+    # Try suffix matching (handles filename-prefixed columns like "Load_2024 0308_iteration_1")
+    # This allows scenario=1 to match columns with arbitrary prefixes
+    for suffix in [f"_{prefixed}", f"_{user_input}"]:
+        matches = [col for col in available_columns if col.endswith(suffix)]
+        if len(matches) == 1:
+            return matches[0]  # Unambiguous match
+        elif len(matches) > 1:
+            # Show first 5 matches for debugging
+            match_preview = matches[:5]
+            if len(matches) > 5:
+                match_preview_str = f"{match_preview} (showing 5 of {len(matches)})"
+            else:
+                match_preview_str = str(matches)
+            msg = (
+                f"Ambiguous scenario '{user_input}': found {len(matches)} matching columns: {match_preview_str}. "
+                f"Please specify the full column name to disambiguate."
+            )
+            raise ValueError(msg)
+
+    # Not found
+    return None
+
+
+def _add_loads_per_node(
+    network: Network, demand_df: pd.DataFrame, load_scenario: str | None = None
+):
     """Assign loads to individual nodes based on matching (default mode).
 
-    For iteration-based formats, creates multiple loads per node (Load1_{Node}, Load2_{Node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
+    For iteration-based formats without scenario selection (legacy), creates multiple loads per node
     For zone-based formats, creates one load per zone (Load_{Zone})
 
     Parameters
@@ -1216,13 +1348,14 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
         The PyPSA network object.
     demand_df : DataFrame
         DataFrame with demand time series for each load zone/iteration.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
     dict
         Summary information about the load assignment.
     """
-    loads_added = 0
     loads_skipped = 0
 
     # Check if this is an iteration-based format
@@ -1245,24 +1378,42 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
         else:
             # Use the first available bus
             target_node = available_buses[0]
-            print(f"  - Assigning iterations to node: {target_node}")
+            print(f"  - Assigning scenario to node: {target_node}")
 
-        # Create one load for each iteration
-        for col in demand_df.columns:
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-                load_name = f"Load{iteration_num}_{target_node}"
+        # Count iteration columns
+        iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
 
-                network.add("Load", name=load_name, bus=target_node)
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
+            )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-                # Add the load time series (align with network snapshots)
-                load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-                network.loads_t.p_set.loc[:, load_name] = load_series
+        # Create single load with selected scenario
+        load_name = f"Load_{target_node}"
+        network.add("Load", name=load_name, bus=target_node)
 
-                loads_added += 1
-                print(
-                    f"  - Added load time series for {load_name} (bus: {target_node})"
-                )
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
 
     else:
         print("Processing zone-based format")
@@ -1301,10 +1452,11 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
             load_series = demand_df[load_zone].reindex(network.snapshots).fillna(0)
             network.loads_t.p_set.loc[:, load_name] = load_series
 
-            loads_added += 1
             print(f"  - Added load time series for {load_name} (bus: {bus_name})")
 
-    print(f"Successfully added {loads_added} loads, skipped {loads_skipped} load zones")
+    print(
+        f"Successfully added {len(network.loads)} loads, skipped {loads_skipped} load zones"
+    )
 
     # Report any network buses without loads (only for zone-based format)
     if not is_iteration_format:
@@ -1324,22 +1476,33 @@ def _add_loads_per_node(network: Network, demand_df: pd.DataFrame):
     else:
         buses_without_loads = []
 
-    return {
-        "mode": "per_node",
-        "loads_added": loads_added,
-        "loads_skipped": loads_skipped,
-        "buses_without_loads": len(buses_without_loads),
-        "format_type": "iteration" if is_iteration_format else "zone",
-        "target_node": target_node if is_iteration_format else None,
-    }
+    if is_iteration_format:
+        return {
+            "mode": "per_node",
+            "format_type": "iteration",
+            "target_node": target_node,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
+        }
+    else:
+        return {
+            "mode": "per_node",
+            "loads_skipped": loads_skipped,
+            "buses_without_loads": len(buses_without_loads),
+            "format_type": "zone",
+        }
 
 
 def _add_loads_to_target_node(
-    network: Network, demand_df: pd.DataFrame, target_node: str
+    network: Network,
+    demand_df: pd.DataFrame,
+    target_node: str,
+    load_scenario: str | None = None,
 ):
     """Assign all demand to a specific existing node.
 
-    For iteration-based formats, creates multiple loads (Load1_{target_node}, Load2_{target_node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
     For zone-based formats, creates a single aggregated load
 
     Parameters
@@ -1350,6 +1513,8 @@ def _add_loads_to_target_node(
         DataFrame with demand time series for each load zone/iteration.
     target_node : str
         Name of the existing node to assign all demand to.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
@@ -1366,8 +1531,6 @@ def _add_loads_to_target_node(
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
 
-    loads_added = 0
-
     if is_iteration_format:
         # Count actual iteration columns (handle both prefixed and non-prefixed)
         iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
@@ -1375,52 +1538,48 @@ def _add_loads_to_target_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Prepare batch data for efficient DataFrame assignment
-        load_time_series_data = {}
-        load_names = []
-
-        # Create one load for each iteration and prepare time series data
-        for col in iteration_cols:
-            # Extract iteration number from column name (handle prefixed names)
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-            else:
-                # Handle prefixed columns like "filename_iteration_1"
-                iteration_num = col.split("iteration_")[1]
-
-            load_name = f"Load{iteration_num}_{target_node}"
-            load_names.append(load_name)
-
-            network.add("Load", name=load_name, bus=target_node)
-
-            # Prepare the load time series (align with network snapshots)
-            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            load_time_series_data[load_name] = load_series
-
-            loads_added += 1
-            print(f"  - Added load {load_name} to bus {target_node}")
-
-        # Batch assign all load time series to avoid DataFrame fragmentation
-        if load_time_series_data:
-            load_time_series_df = pd.DataFrame(load_time_series_data)
-            # Use pd.concat to efficiently add all columns at once
-            network.loads_t.p_set = pd.concat(
-                [network.loads_t.p_set, load_time_series_df], axis=1
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
             )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-        # Calculate total demand for reporting
-        total_demand = demand_df[iteration_cols].sum(axis=1)
-        peak_demand = total_demand.max()
+        # Create single load with selected scenario
+        load_name = f"Load_{target_node}"
+        network.add("Load", name=load_name, bus=target_node)
 
-        print(f"  - Total iterations: {actual_iterations}")
-        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        peak_demand = load_series.max()
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
+        print(f"  - Peak demand: {peak_demand:.2f} MW")
 
         return {
             "mode": "target_node",
             "format_type": "iteration",
             "target_node": target_node,
-            "loads_added": loads_added,
-            "iterations_processed": actual_iterations,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
             "peak_demand": peak_demand,
         }
 
@@ -1438,7 +1597,6 @@ def _add_loads_to_target_node(
         load_series = total_demand.reindex(network.snapshots).fillna(0)
         network.loads_t.p_set.loc[:, load_name] = load_series
 
-        loads_added = 1
         print(f"  - Added aggregated load {load_name} to bus {target_node}")
         print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
         print(f"  - Peak demand: {total_demand.max():.2f} MW")
@@ -1454,11 +1612,14 @@ def _add_loads_to_target_node(
 
 
 def _add_loads_to_aggregate_node(
-    network: Network, demand_df: pd.DataFrame, aggregate_node_name: str
+    network: Network,
+    demand_df: pd.DataFrame,
+    aggregate_node_name: str,
+    load_scenario: str | None = None,
 ):
     """Create a new aggregate node and assign all demand to it.
 
-    For iteration-based formats, creates multiple loads (Load1_{aggregate_node}, Load2_{aggregate_node}, etc.)
+    For iteration-based formats with load_scenario specified or defaulted, creates single load
     For zone-based formats, creates a single aggregated load
 
     Parameters
@@ -1469,6 +1630,8 @@ def _add_loads_to_aggregate_node(
         DataFrame with demand time series for each load zone/iteration.
     aggregate_node_name : str
         Name for the new aggregate node.
+    load_scenario : str, optional
+        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
 
     Returns
     -------
@@ -1490,8 +1653,6 @@ def _add_loads_to_aggregate_node(
     # Check if this is an iteration-based format
     is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
 
-    loads_added = 0
-
     if is_iteration_format:
         # Count actual iteration columns (handle both prefixed and non-prefixed)
         iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
@@ -1499,52 +1660,48 @@ def _add_loads_to_aggregate_node(
 
         print(f"Processing iteration-based format with {actual_iterations} iterations")
 
-        # Prepare batch data for efficient DataFrame assignment
-        load_time_series_data = {}
-        load_names = []
-
-        # Create one load for each iteration and prepare time series data
-        for col in iteration_cols:
-            # Extract iteration number from column name (handle prefixed names)
-            if col.startswith("iteration_"):
-                iteration_num = col.split("_")[1]
-            else:
-                # Handle prefixed columns like "filename_iteration_1"
-                iteration_num = col.split("iteration_")[1]
-
-            load_name = f"Load{iteration_num}_{aggregate_node_name}"
-            load_names.append(load_name)
-
-            network.add("Load", name=load_name, bus=aggregate_node_name)
-
-            # Prepare the load time series (align with network snapshots)
-            load_series = demand_df[col].reindex(network.snapshots).fillna(0)
-            load_time_series_data[load_name] = load_series
-
-            loads_added += 1
-            print(f"  - Added load {load_name} to bus {aggregate_node_name}")
-
-        # Batch assign all load time series to avoid DataFrame fragmentation
-        if load_time_series_data:
-            load_time_series_df = pd.DataFrame(load_time_series_data)
-            # Use pd.concat to efficiently add all columns at once
-            network.loads_t.p_set = pd.concat(
-                [network.loads_t.p_set, load_time_series_df], axis=1
+        # Scenario selection logic
+        if load_scenario is None:
+            # Default to first scenario
+            selected_scenario = iteration_cols[0]
+            # Extract numeric part for user-friendly message
+            first_num = iteration_cols[0].replace("iteration_", "")
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(
+                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
             )
+            print(
+                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
+            )
+        else:
+            # Normalize user input to match column names
+            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
+            if selected_scenario is None:
+                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
+                raise ValueError(msg)
+            print(f"  - Multiple load scenarios detected: {iteration_cols}")
+            print(f"  - Using user-specified scenario: {selected_scenario}")
 
-        # Calculate total demand for reporting
-        total_demand = demand_df[iteration_cols].sum(axis=1)
-        peak_demand = total_demand.max()
+        # Create single load with selected scenario
+        load_name = f"Load_{aggregate_node_name}"
+        network.add("Load", name=load_name, bus=aggregate_node_name)
 
-        print(f"  - Total iterations: {actual_iterations}")
-        print(f"  - Peak demand (all iterations): {peak_demand:.2f} MW")
+        # Add the load time series (align with network snapshots)
+        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
+        network.loads_t.p_set.loc[:, load_name] = load_series
+
+        peak_demand = load_series.max()
+
+        print(f"  - Added load {load_name} using scenario {selected_scenario}")
+        print(f"  - Peak demand: {peak_demand:.2f} MW")
 
         return {
             "mode": "aggregate_node",
             "format_type": "iteration",
             "aggregate_node": aggregate_node_name,
-            "loads_added": loads_added,
-            "iterations_processed": actual_iterations,
+            "load_name": load_name,
+            "scenario_selected": selected_scenario,
+            "scenarios_available": iteration_cols,
             "peak_demand": peak_demand,
         }
 
@@ -1562,7 +1719,6 @@ def _add_loads_to_aggregate_node(
         load_series = total_demand.reindex(network.snapshots).fillna(0)
         network.loads_t.p_set.loc[:, load_name] = load_series
 
-        loads_added = 1
         print(f"  - Added aggregated load {load_name} to bus {aggregate_node_name}")
         print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
         print(f"  - Peak demand: {total_demand.max():.2f} MW")
@@ -1575,6 +1731,490 @@ def _add_loads_to_aggregate_node(
             "zones_aggregated": len(demand_df.columns),
             "peak_demand": total_demand.max(),
         }
+
+
+def _add_loads_with_participation_factors(
+    network: Network,
+    demand_df: pd.DataFrame,
+    csv_dir: str | Path,
+    load_scenario: str | None = None,
+) -> dict:
+    """Add loads using participation factors (unified strategy for CAISO and NREL-118 patterns).
+
+    Auto-detects model structure and applies appropriate distribution:
+    - CAISO pattern: System load -> Regions (region-level factors in Region.csv)
+    - NREL-118 pattern: Regional loads -> Nodes (node-level factors in Node.csv)
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network
+    demand_df : pd.DataFrame
+        Demand data (system-wide or pre-loaded)
+    csv_dir : str | Path
+        Directory containing Node.csv and Region.csv
+    load_scenario : str, optional
+        Scenario selection for iteration-based formats
+
+    Returns
+    -------
+    dict
+        Summary with load information
+
+    Examples
+    --------
+    CAISO IRP23:
+        - Single system load file
+        - Region.csv has "Load" column (factors sum to 1.0)
+        - Distributes to 4 nodes: CIPB, CIPV, CISC, CISD
+
+    NREL-118:
+        - Per-region load files (Load R1, Load R2, Load R3)
+        - Node.csv has "Load Participation Factor" column
+        - Distributes to 90 nodes across 3 regions
+    """
+    csv_dir = Path(csv_dir)
+
+    # Load metadata
+    try:
+        node_df = load_static_properties(csv_dir, "Node")
+        region_df = load_static_properties(csv_dir, "Region")
+    except Exception as e:
+        msg = f"Failed to load Node.csv or Region.csv: {e}"
+        raise ValueError(msg) from e
+
+    # Detect model pattern
+    has_node_factors = "Load Participation Factor" in node_df.columns
+    has_region_factors = "Load" in region_df.columns
+    has_region_load_files = "Load.Data File" in region_df.columns
+
+    logger.info("Detecting load distribution pattern...")
+    logger.info(f"  Node-level factors: {has_node_factors}")
+    logger.info(f"  Region-level factors: {has_region_factors}")
+    logger.info(f"  Region load files: {has_region_load_files}")
+
+    # Route to appropriate sub-strategy
+    if has_region_load_files and has_node_factors:
+        # NREL-118 pattern: Regional loads -> Nodes
+        logger.info(
+            "Pattern detected: Regional loads with node-level participation factors (NREL-118 style)"
+        )
+        return _distribute_regional_loads_to_nodes(
+            network, node_df, region_df, csv_dir, load_scenario
+        )
+
+    elif has_region_factors and not has_region_load_files:
+        # CAISO pattern: System load -> Regions
+        logger.info(
+            "Pattern detected: System load with region-level participation factors (CAISO style)"
+        )
+        return _distribute_system_load_to_regions(
+            network, demand_df, node_df, region_df, load_scenario
+        )
+
+    else:
+        msg = (
+            "Cannot determine load distribution pattern. Expected either:\n"
+            "  1. Region.csv with 'Load.Data File' + Node.csv with 'Load Participation Factor' (NREL-118)\n"
+            "  2. Region.csv with 'Load' column without 'Load.Data File' (CAISO)"
+        )
+        raise ValueError(msg)
+
+
+def _distribute_system_load_to_regions(
+    network: Network,
+    demand_df: pd.DataFrame,
+    node_df: pd.DataFrame,
+    region_df: pd.DataFrame,
+    load_scenario: str | None = None,
+) -> dict:
+    """Distribute system-wide load to regions using region-level participation factors (CAISO pattern).
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network
+    demand_df : pd.DataFrame
+        System-wide demand data
+    node_df : pd.DataFrame
+        Node metadata with Region column
+    region_df : pd.DataFrame
+        Region metadata with Load column (participation factors)
+    load_scenario : str, optional
+        Scenario selection
+
+    Returns
+    -------
+    dict
+        Summary information
+    """
+    # Get system load (scenario already selected by parse_demand_data)
+    if isinstance(demand_df, pd.Series):
+        system_load = demand_df
+    elif len(demand_df.columns) == 1:
+        system_load = demand_df.iloc[:, 0]
+    # Multiple columns - need scenario selection
+    elif load_scenario:
+        # Use _normalize_scenario_name to handle filename prefixes
+        selected_scenario = _normalize_scenario_name(
+            load_scenario, demand_df.columns.tolist()
+        )
+        if selected_scenario is None:
+            msg = f"Scenario '{load_scenario}' not found in columns: {demand_df.columns.tolist()}"
+            raise ValueError(msg)
+        system_load = demand_df[selected_scenario]
+        logger.info(f"Using load scenario: {selected_scenario}")
+    else:
+        # Default to first column
+        system_load = demand_df.iloc[:, 0]
+        logger.warning(
+            f"Multiple load columns found, using first: {demand_df.columns[0]}"
+        )
+
+    # Get regions with participation factors
+    regions_with_load = region_df[region_df["Load"].notna()].copy()
+
+    if regions_with_load.empty:
+        msg = "No regions found with Load participation factors in Region.csv"
+        raise ValueError(msg)
+
+    # Validate factors sum to approximately 1.0
+    total_factor = regions_with_load["Load"].astype(float).sum()
+    if not (0.99 <= total_factor <= 1.01):
+        logger.warning(
+            f"Region load participation factors sum to {total_factor:.6f}, expected ~1.0. "
+            f"Normalizing factors."
+        )
+        # Normalize
+        regions_with_load["Load"] = (
+            regions_with_load["Load"].astype(float) / total_factor
+        )
+
+    loads_added = 0
+    peak_demand_total = 0
+
+    for region_name, region_row in regions_with_load.iterrows():
+        factor = float(region_row["Load"])
+
+        # Find node for this region (expect 1:1 mapping)
+        nodes_in_region = node_df[node_df["Region"] == region_name]
+
+        if nodes_in_region.empty:
+            logger.warning(f"No nodes found for region {region_name}, skipping")
+            continue
+
+        if len(nodes_in_region) > 1:
+            logger.warning(
+                f"Multiple nodes found for region {region_name}: {nodes_in_region.index.tolist()}. "
+                f"Using first node: {nodes_in_region.index[0]}"
+            )
+
+        node_name = nodes_in_region.index[0]
+
+        # Check if bus exists in network
+        if node_name not in network.buses.index:
+            logger.warning(
+                f"Bus {node_name} not in network, skipping load for region {region_name}"
+            )
+            continue
+
+        # Create load
+        load_name = f"Load_{region_name}"
+        regional_load = system_load * factor
+
+        network.add(
+            "Load",
+            load_name,
+            bus=node_name,
+            p_set=regional_load,
+        )
+
+        loads_added += 1
+        peak_demand_total += regional_load.max()
+
+        logger.info(
+            f"  Added {load_name} to bus {node_name}: "
+            f"factor={factor:.4f} ({factor * 100:.2f}%), peak={regional_load.max():.1f} MW"
+        )
+
+    logger.info(
+        f"Added {loads_added} loads with total peak demand: {peak_demand_total:.1f} MW"
+    )
+
+    return {
+        "strategy": "participation_factors (system->regions)",
+        "loads_added": loads_added,
+        "regions": len(regions_with_load),
+        "peak_demand": peak_demand_total,
+    }
+
+
+def _resolve_data_file_reference(data_file_ref: str, csv_dir: Path) -> Path | None:
+    """Resolve a Data File reference to an absolute file path.
+
+    Parameters
+    ----------
+    data_file_ref : str
+        Data File reference like "Data File.Load R1"
+    csv_dir : Path
+        Directory containing CSV files (e.g., .../csvs_from_xml/System/)
+
+    Returns
+    -------
+    Path or None
+        Absolute path to the data file, or None if not found
+
+    Examples
+    --------
+    >>> ref = "Data File.Load R1"
+    >>> csv_dir = Path("nrel-118/csvs_from_xml/System")
+    >>> path = _resolve_data_file_reference(ref, csv_dir)
+    >>> # Returns: nrel-118/Input files/RT/Load/LoadR1RT.csv
+    """
+    try:
+        # Load Data File.csv
+        data_file_df = load_static_properties(csv_dir, "Data File")
+
+        if data_file_df.empty:
+            logger.warning("Data File.csv not found or empty")
+            return None
+
+        # Strip "Data File." prefix from reference
+        if data_file_ref.startswith("Data File."):
+            object_name = data_file_ref.replace("Data File.", "", 1)
+        else:
+            object_name = data_file_ref
+
+        # Look up in Data File.csv
+        if object_name not in data_file_df.index:
+            logger.warning(
+                f"Data File object '{object_name}' not found in Data File.csv"
+            )
+            return None
+
+        # Get filename from "Filename(text)" column
+        if "Filename(text)" not in data_file_df.columns:
+            logger.warning("Data File.csv missing 'Filename(text)' column")
+            return None
+
+        filename_text = data_file_df.at[object_name, "Filename(text)"]
+
+        if pd.isna(filename_text):
+            logger.warning(f"Data File object '{object_name}' has no Filename(text)")
+            return None
+
+        # Convert backslashes to forward slashes (Windows to Unix paths)
+        filename_text = str(filename_text).replace("\\", "/")
+
+        # Resolve relative to model base directory (parent of csvs_from_xml)
+        # csv_dir is typically: .../model_name/csvs_from_xml/System/
+        # model_base is: .../model_name/
+        csv_parent = csv_dir.parent  # .../csvs_from_xml/System -> .../csvs_from_xml
+        if csv_parent.name == "csvs_from_xml":
+            model_base = csv_parent.parent
+        else:
+            # Fallback: assume csv_dir is directly under model base
+            model_base = csv_dir.parent
+
+        file_path = model_base / filename_text
+
+        if not file_path.exists():
+            logger.warning(f"Data File path does not exist: {file_path}")
+            return None
+        else:
+            return file_path
+
+    except Exception as e:
+        logger.warning(f"Failed to resolve Data File reference '{data_file_ref}': {e}")
+        return None
+
+
+def _load_regional_load_file(file_path: Path) -> pd.Series | None:
+    """Load a regional load file (simple DATETIME/value format).
+
+    Parameters
+    ----------
+    file_path : Path
+        Path to regional load CSV file
+
+    Returns
+    -------
+    pd.Series or None
+        Time series of load values with DatetimeIndex, or None if failed
+
+    Examples
+    --------
+    File format:
+        "DATETIME","value"
+        "1/1/24 1:00",5465.73
+        "1/1/24 2:00",4994.54
+    """
+    try:
+        # Read CSV
+        df = pd.read_csv(file_path)
+
+        # Check for required columns
+        if "DATETIME" not in df.columns or "value" not in df.columns:
+            logger.warning(
+                f"Regional load file missing required columns (DATETIME, value): {file_path}"
+            )
+            return None
+
+        # Parse datetime column
+        df["datetime"] = pd.to_datetime(df["DATETIME"], format="%m/%d/%y %H:%M")
+
+        # Set index and return as Series
+        df = df.set_index("datetime")
+        load_series = df["value"]
+
+        logger.info(
+            f"Loaded regional load file: {file_path.name} ({len(load_series)} timesteps)"
+        )
+
+    except Exception as e:
+        logger.warning(f"Failed to load regional load file {file_path}: {e}")
+        return None
+    else:
+        return load_series
+
+
+def _distribute_regional_loads_to_nodes(
+    network: Network,
+    node_df: pd.DataFrame,
+    region_df: pd.DataFrame,
+    csv_dir: Path,
+    load_scenario: str | None = None,
+) -> dict:
+    """Distribute regional loads to nodes using node-level participation factors (NREL-118 pattern).
+
+    Parameters
+    ----------
+    network : Network
+        PyPSA network
+    node_df : pd.DataFrame
+        Node metadata with Load Participation Factor and Region columns
+    region_df : pd.DataFrame
+        Region metadata with Load.Data File references
+    csv_dir : Path
+        Directory containing CSV files
+    load_scenario : str, optional
+        Scenario selection
+
+    Returns
+    -------
+    dict
+        Summary information
+    """
+    # Get regions with load files
+    regions_with_loads = region_df[region_df["Load.Data File"].notna()].copy()
+
+    if regions_with_loads.empty:
+        msg = "No regions found with Load.Data File references in Region.csv"
+        raise ValueError(msg)
+
+    loads_added = 0
+    peak_demand_total = 0
+
+    for region_name, region_row in regions_with_loads.iterrows():
+        # Get nodes in this region with participation factors
+        nodes_in_region = node_df[
+            (node_df["Region"] == region_name)
+            & (node_df["Load Participation Factor"].notna())
+        ].copy()
+
+        if nodes_in_region.empty:
+            logger.warning(
+                f"No nodes with participation factors found for region {region_name}, skipping"
+            )
+            continue
+
+        # Get participation factors and normalize
+        factors = nodes_in_region["Load Participation Factor"].astype(float)
+        total_factor = factors.sum()
+
+        if total_factor == 0:
+            logger.warning(
+                f"Region {region_name} has zero total participation factor, skipping"
+            )
+            continue
+
+        if not (0.95 <= total_factor <= 1.05):
+            logger.warning(
+                f"Region {region_name}: participation factors sum to {total_factor:.6f}, expected ~1.0. "
+                f"Normalizing."
+            )
+
+        normalized_factors = factors / total_factor
+
+        # Load regional load profile
+        data_file_ref = region_row["Load.Data File"]
+
+        # Resolve Data File reference to actual file path
+        file_path = _resolve_data_file_reference(data_file_ref, csv_dir)
+        if file_path is None:
+            logger.warning(
+                f"Region {region_name}: Could not resolve Data File reference '{data_file_ref}', skipping"
+            )
+            continue
+
+        # Load the regional load file
+        regional_load = _load_regional_load_file(file_path)
+        if regional_load is None:
+            logger.warning(
+                f"Region {region_name}: Could not load regional load file, skipping"
+            )
+            continue
+
+        # Distribute regional load to nodes using participation factors
+        for node_name, factor in zip(
+            nodes_in_region.index, normalized_factors, strict=False
+        ):
+            # Check if bus exists in network
+            if node_name not in network.buses.index:
+                logger.warning(
+                    f"Bus {node_name} not in network, skipping load for this node"
+                )
+                continue
+
+            # Calculate node load
+            node_load = regional_load * factor
+
+            # Align with network snapshots
+            node_load_aligned = node_load.reindex(network.snapshots).fillna(0)
+
+            # Create load
+            load_name = f"Load_{node_name}"
+            network.add(
+                "Load",
+                load_name,
+                bus=node_name,
+                p_set=node_load_aligned,
+            )
+
+            loads_added += 1
+            peak_demand_total += node_load_aligned.max()
+
+            logger.info(
+                f"  Added {load_name} to bus {node_name}: "
+                f"factor={factor:.4f} ({factor * 100:.2f}%), peak={node_load_aligned.max():.1f} MW"
+            )
+
+    if loads_added == 0:
+        logger.warning(
+            "No loads added. Check that regional load files exist and are accessible."
+        )
+    else:
+        logger.info(
+            f"Added {loads_added} loads across {len(regions_with_loads)} regions "
+            f"with total peak demand: {peak_demand_total:.1f} MW"
+        )
+
+    return {
+        "strategy": "participation_factors (regions->nodes)",
+        "loads_added": loads_added,
+        "regions": len(regions_with_loads),
+        "peak_demand": peak_demand_total,
+    }
 
 
 def setup_network(
@@ -1590,6 +2230,8 @@ def setup_network(
     model_name=None,
     inflow_path=None,
     transmission_as_lines=False,
+    load_scenario=None,
+    demand_target_node=None,
 ):
     """Unified network setup function that automatically detects the appropriate mode.
 
@@ -1629,6 +2271,13 @@ def setup_network(
     transmission_as_lines : bool, optional
         If True, convert PLEXOS Line objects to PyPSA Lines with electrical impedance.
         If False (default), use existing Links behavior for backward compatibility.
+    load_scenario : str, optional
+        For demand data with multiple scenarios (iterations), specify which scenario
+        to use. If None, defaults to first scenario. Example: "iteration_1"
+    demand_target_node : str, optional
+        Specific node to assign ALL demand to, regardless of setup mode.
+        This allows keeping generators on their original nodes while
+        consolidating all demand to one node. Takes precedence over target_node.
 
     Returns
     -------
@@ -1712,6 +2361,8 @@ def setup_network(
         target_node=target_node,
         aggregate_node_name=aggregate_node_name,
         model_name=model_name,
+        load_scenario=load_scenario,
+        demand_target_node=demand_target_node,
     )
 
     # Step 2: Add storage (batteries, hydro, pumped hydro)
