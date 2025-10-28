@@ -139,15 +139,15 @@ def apply_generator_units_timeseries_csv(
     """Apply time-varying Units to scale generator capacity and handle retirements.
 
     This function handles:
-    - Generator retirements (Units → 0)
-    - New builds coming online (Units 0 → N)
+    - Generator retirements (Units -> 0)
+    - New builds coming online (Units 0 -> N)
     - Capacity scaling for multi-unit facilities (Units > 1)
-    - Partial retirements (Units N → M where M < N)
+    - Partial retirements (Units N -> M where M < N)
 
     The implementation:
     1. Parses static Units from Generator.csv
     2. Loads time-varying Units from Time varying properties.csv
-    3. Sets p_nom to maximum capacity (p_nom × max_units)
+    3. Sets p_nom to maximum capacity (p_nom * max_units)
     4. Applies time-varying capacity via p_max_pu multiplier
     5. Applies same multiplier to p_min_pu (if exists) for dispatch mode consistency
 
@@ -300,11 +300,11 @@ def apply_generator_units_timeseries_csv(
         # Log notable cases
         if max_units > 1:
             logger.debug(
-                f"{gen}: Scaled capacity {original_p_nom:.1f} → {new_p_nom:.1f} MW (Units: {max_units})"
+                f"{gen}: Scaled capacity {original_p_nom:.1f} -> {new_p_nom:.1f} MW (Units: {max_units})"
             )
         if min_units == 0 and max_units > 0:
             logger.debug(
-                f"{gen}: Time-varying operation (Units: {min_units} → {max_units})"
+                f"{gen}: Time-varying operation (Units: {min_units} -> {max_units})"
             )
 
     # Log summary

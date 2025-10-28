@@ -174,39 +174,39 @@ def export_outputs(fig: go.Figure, output_dir: Path) -> None:
     # Export interactive HTML
     html_path = output_dir / "html" / "milestones.html"
     fig.write_html(str(html_path))
-    logging.info("✓ Interactive HTML saved to: %s", html_path)
+    logging.info("Saved interactive HTML to: %s", html_path)
 
     # Export static PNG
     png_path = output_dir / "image" / "milestones.png"
     try:
         fig.write_image(str(png_path), width=1200, height=400, scale=2)
-        logging.info("✓ Static PNG saved to: %s", png_path)
+        logging.info("Saved static PNG to: %s", png_path)
     except Exception as e:
-        logging.warning("⚠ Could not save PNG image: %s", e)
+        logging.warning("WARNING: Could not save PNG image: %s", e)
         logging.info("  Hint: Install kaleido with: pip install kaleido")
 
 
 def main() -> None:
     """Execute main function."""
-    logging.info("📊 Generating Feature Conversion Milestones Timeline...")
+    logging.info("Generating Feature Conversion Milestones Timeline...")
 
     # Get script directory
     script_dir = Path(__file__).parent
 
     # Load data
-    logging.info("📂 Loading milestone data from JSON...")
+    logging.info("Loading milestone data from JSON...")
     milestones_data = load_data()
     logging.info("   - Loaded %d milestones", len(milestones_data["milestones"]))
 
     # Create figure
-    logging.info("🎨 Creating timeline figure...")
+    logging.info("Creating timeline figure...")
     fig = create_figure(milestones_data)
 
     # Export outputs
-    logging.info("💾 Exporting outputs...")
+    logging.info("Exporting outputs...")
     export_outputs(fig, script_dir)
 
-    logging.info("\\n✅ Done! Milestones timeline generated successfully.")
+    logging.info("\\nDone! Milestones timeline generated successfully.")
     logging.info(
         "\\nView interactive version: %s", script_dir / "html" / "milestones.html"
     )

@@ -536,7 +536,7 @@ def add_storage_inflows_csv(
     - Timeslice arrays (Natural Inflow.Timeslice column)
     - Static values (Natural Inflow column)
 
-    The function auto-discovers storage→inflow linkages from Storage.csv and Data File.csv,
+    The function auto-discovers storage->inflow linkages from Storage.csv and Data File.csv,
     loads the appropriate inflow data, and applies it to network.storage_units_t.inflow.
 
     Parameters

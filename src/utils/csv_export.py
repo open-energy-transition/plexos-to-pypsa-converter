@@ -94,7 +94,7 @@ def export_csvs_from_xml(
                 logger.exception(f"Failed to export system {system_name}")
                 raise
 
-    logger.info(f"✓ CSV export complete: {output_dir}")
+    logger.info(f"CSV export complete: {output_dir}")
     return output_dir
 
 

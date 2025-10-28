@@ -67,7 +67,7 @@ def _run_optional_solve(
     objective = result[0]
     status = result[1]
 
-    print("\n✓ Solve results:")
+    print("\nSolve results:")
     print(f"  - Objective: {objective}")
     print(f"  - Status: {status}")
 

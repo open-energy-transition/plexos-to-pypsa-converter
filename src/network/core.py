@@ -1742,8 +1742,8 @@ def _add_loads_with_participation_factors(
     """Add loads using participation factors (unified strategy for CAISO and NREL-118 patterns).
 
     Auto-detects model structure and applies appropriate distribution:
-    - CAISO pattern: System load → Regions (region-level factors in Region.csv)
-    - NREL-118 pattern: Regional loads → Nodes (node-level factors in Node.csv)
+    - CAISO pattern: System load -> Regions (region-level factors in Region.csv)
+    - NREL-118 pattern: Regional loads -> Nodes (node-level factors in Node.csv)
 
     Parameters
     ----------
@@ -1795,7 +1795,7 @@ def _add_loads_with_participation_factors(
 
     # Route to appropriate sub-strategy
     if has_region_load_files and has_node_factors:
-        # NREL-118 pattern: Regional loads → Nodes
+        # NREL-118 pattern: Regional loads -> Nodes
         logger.info(
             "Pattern detected: Regional loads with node-level participation factors (NREL-118 style)"
         )
@@ -1804,7 +1804,7 @@ def _add_loads_with_participation_factors(
         )
 
     elif has_region_factors and not has_region_load_files:
-        # CAISO pattern: System load → Regions
+        # CAISO pattern: System load -> Regions
         logger.info(
             "Pattern detected: System load with region-level participation factors (CAISO style)"
         )
@@ -1942,7 +1942,7 @@ def _distribute_system_load_to_regions(
     )
 
     return {
-        "strategy": "participation_factors (system→regions)",
+        "strategy": "participation_factors (system->regions)",
         "loads_added": loads_added,
         "regions": len(regions_with_load),
         "peak_demand": peak_demand_total,
@@ -2210,7 +2210,7 @@ def _distribute_regional_loads_to_nodes(
         )
 
     return {
-        "strategy": "participation_factors (regions→nodes)",
+        "strategy": "participation_factors (regions->nodes)",
         "loads_added": loads_added,
         "regions": len(regions_with_loads),
         "peak_demand": peak_demand_total,

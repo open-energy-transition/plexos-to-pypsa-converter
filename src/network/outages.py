@@ -444,7 +444,7 @@ def apply_outage_schedule(
     -----
     Example behavior with 500 MW thermal generator (2 units, 50% min load):
     - Before: p_min_pu=0.5 (static), p_max_pu=1.0
-    - One unit out (Outage Rating=250 MW) → schedule=0.5
+    - One unit out (Outage Rating=250 MW) -> schedule=0.5
     - After: p_min_pu=0.25 (time series, 125 MW), p_max_pu=0.5 (250 MW)
     - Maintains 50% turndown ratio while respecting reduced capacity
     """
@@ -1294,7 +1294,7 @@ def apply_expected_outage_derating(
     factors. Does NOT match PLEXOS behavior (which uses Monte Carlo and PASA),
     but provides a deterministic fallback when stochastic methods are not used.
 
-    availability = (1 - forced_outage_rate) × (1 - maintenance_rate)
+    availability = (1 - forced_outage_rate) * (1 - maintenance_rate)
 
     WARNING: This is a simplified approximation. PLEXOS uses:
     - Monte Carlo simulation for forced outages (discrete random events)
@@ -1459,7 +1459,7 @@ def parse_generator_outage_properties_csv(
     pd.DataFrame
         DataFrame with columns: [generator, forced_outage_rate, maintenance_rate,
         mean_time_to_repair, outage_rating, outage_factor]. Indexed by generator name.
-        Rates and factors are converted from percentages to fractions (10.9 → 0.109).
+        Rates and factors are converted from percentages to fractions (10.9 -> 0.109).
 
     Examples
     --------
@@ -1587,14 +1587,14 @@ def generate_forced_outages_simplified(
     - Random placement throughout simulation period
 
     Mathematical model:
-    - Expected outage hours = FOR × total_hours
-    - Number of outages ≈ (FOR × total_hours) / MTTR
+    - Expected outage hours = FOR * total_hours
+    - Number of outages approximately (FOR * total_hours) / MTTR
     - Each outage duration = MTTR hours (simplified from exponential)
     - Random uniform placement without overlap checking
 
     If existing_outage_events is provided, explicit outage hours are deducted
     from the FOR budget to avoid double-counting:
-    - Adjusted outage hours = (FOR × total_hours) - explicit_hours
+    - Adjusted outage hours = (FOR * total_hours) - explicit_hours
     - Only generates forced outages for remaining adjusted hours
 
     Limitations vs PLEXOS:
@@ -1840,7 +1840,7 @@ def schedule_maintenance_simplified(
     - Simple greedy heuristic (not optimization like PLEXOS)
 
     Algorithm:
-    1. Calculate required maintenance hours = MR × total_hours
+    1. Calculate required maintenance hours = MR * total_hours
     2. If demand_profile provided, identify low-demand windows
     3. Schedule maintenance in lowest-demand windows
     4. Enforce minimum spacing between maintenance events
@@ -1848,7 +1848,7 @@ def schedule_maintenance_simplified(
 
     If existing_outage_events is provided, explicit outage hours are deducted
     from the MR budget to avoid double-counting:
-    - Adjusted maintenance hours = (MR × total_hours) - explicit_hours
+    - Adjusted maintenance hours = (MR * total_hours) - explicit_hours
     - Only schedules maintenance for remaining adjusted hours
 
     Limitations vs PLEXOS PASA:

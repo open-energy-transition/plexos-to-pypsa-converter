@@ -825,7 +825,7 @@ def add_generators_csv(
                     network.add("Carrier", fuel_carrier)
                 network.add("Bus", fuel_bus_name, carrier=fuel_carrier)
 
-            # Create generator-link (fuel bus → electric bus)
+            # Create generator-link (fuel bus -> electric bus)
             link_name = f"gen_link_{gen}"
             if link_name not in network.links.index:
                 # Set efficiency based on technology
@@ -985,9 +985,9 @@ def set_min_stable_levels_csv(
     Notes
     -----
     Property precedence (first match wins):
-    1. Min Stable Factor (percentage) → p_min_pu = value / 100
-    2. Min Stable Level (MW) → p_min_pu = value / p_nom
-    3. Min Pump Load (MW, for storage) → p_min_pu = value / p_nom
+    1. Min Stable Factor (percentage) -> p_min_pu = value / 100
+    2. Min Stable Level (MW) -> p_min_pu = value / p_nom
+    3. Min Pump Load (MW, for storage) -> p_min_pu = value / p_nom
     4. Fallback: p_min_pu = 0.0 (no minimum constraint)
     """
     # Get the generator minimum stable levels from CSV
@@ -1465,12 +1465,12 @@ def load_data_file_profiles_csv(
 ) -> dict:
     """Load time series profiles from Data File.csv mappings and apply to network.
 
-    This is a fully generic function that auto-discovers generator→profile linkages
+    This is a fully generic function that auto-discovers generator->profile linkages
     from PLEXOS Data File.csv metadata and applies loaded data to PyPSA network properties
     with configurable mapping options.
 
     The function performs these steps:
-    1. Parse Data File.csv to map data file objects → CSV filenames
+    1. Parse Data File.csv to map data file objects -> CSV filenames
     2. Parse Generator.csv to find generators with "{property_name}.Data File" references
        (or use manual_mappings as fallback if auto-discovery fails)
     3. Create missing carriers if carrier_mapping is provided
@@ -2096,7 +2096,7 @@ def apply_generator_units_timeseries_csv(
 ) -> dict:
     """Apply time-varying Units to scale generator capacity and handle retirements.
 
-    ⚠️  **CRITICAL EXECUTION ORDER**:
+    WARNING:  **CRITICAL EXECUTION ORDER**:
     This function MUST be called AFTER VRE profiles are loaded via
     load_data_file_profiles_csv(). If called before VRE loading, Units
     adjustments will be overwritten.
@@ -2112,15 +2112,15 @@ def apply_generator_units_timeseries_csv(
     retirement/build schedules and capacity scaling.
 
     This function handles:
-    - Generator retirements (Units → 0)
-    - New builds coming online (Units 0 → N)
+    - Generator retirements (Units -> 0)
+    - New builds coming online (Units 0 -> N)
     - Capacity scaling for multi-unit facilities (Units > 1)
-    - Partial retirements (Units N → M where M < N)
+    - Partial retirements (Units N -> M where M < N)
 
     The implementation:
     1. Parses static Units from Generator.csv
     2. Loads time-varying Units from Time varying properties.csv
-    3. Sets p_nom to maximum capacity (p_nom × max_units)
+    3. Sets p_nom to maximum capacity (p_nom * max_units)
     4. Applies time-varying capacity via p_max_pu and p_min_pu multipliers
 
     Parameters
@@ -2317,11 +2317,11 @@ def apply_generator_units_timeseries_csv(
         # Log notable cases
         if max_units > 1:
             logger.debug(
-                f"{gen}: Scaled capacity {original_p_nom:.1f} → {new_p_nom:.1f} MW (Units: {max_units})"
+                f"{gen}: Scaled capacity {original_p_nom:.1f} -> {new_p_nom:.1f} MW (Units: {max_units})"
             )
         if min_units == 0 and max_units > 0:
             logger.debug(
-                f"{gen}: Time-varying operation (Units: {min_units} → {max_units})"
+                f"{gen}: Time-varying operation (Units: {min_units} -> {max_units})"
             )
 
     # Log summary
@@ -2586,7 +2586,7 @@ def port_generators_csv(
     - Sets capital costs
     - Sets marginal costs (time-dependent)
     - Sets VRE profiles for solar and wind generators
-    - Optionally converts conventional generators to fuel→electric links
+    - Optionally converts conventional generators to fuel->electric links
     - Optionally reassigns all generators to a specific node
 
     Parameters

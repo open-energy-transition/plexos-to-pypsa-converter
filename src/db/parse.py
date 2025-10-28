@@ -214,8 +214,8 @@ def read_timeslice_activity(
     Notes
     -----
     The function automatically detects the format based on column names:
-    - If DATETIME/NAME/TIMESLICE columns exist → activity timeseries format
-    - If object/Include(text) columns exist → pattern definition format
+    - If DATETIME/NAME/TIMESLICE columns exist -> activity timeseries format
+    - If object/Include(text) columns exist -> pattern definition format
     """
     df = pd.read_csv(timeslice_csv)
 

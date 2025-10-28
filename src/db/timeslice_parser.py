@@ -18,10 +18,10 @@ Operators:
     ; (semicolon): OR logic - any condition can be met
 
 Examples:
-    "M6-9,H16-22" → Summer months (Jun-Sep) AND peak hours (4pm-10pm)
-    "W1;W2-7,H7-22" → Sunday OR (weekdays AND hours 7am-10pm)
-    "!H1-6" → All hours EXCEPT 1-6
-    "M4-9,H1-3,24" → Months Apr-Sep AND (hours 1-3 OR hour 24)
+    "M6-9,H16-22" -> Summer months (Jun-Sep) AND peak hours (4pm-10pm)
+    "W1;W2-7,H7-22" -> Sunday OR (weekdays AND hours 7am-10pm)
+    "!H1-6" -> All hours EXCEPT 1-6
+    "M4-9,H1-3,24" -> Months Apr-Sep AND (hours 1-3 OR hour 24)
 """
 
 import logging
@@ -320,7 +320,7 @@ def _apply_symbol_filter(
         # Convert PLEXOS day (1-7) to Python day (0-6)
         python_days = {
             (w - 1) % 7 for w in values
-        }  # 1→0 (Sun), 2→1 (Mon), ..., 7→6 (Sat)
+        }  # 1->0 (Sun), 2->1 (Mon), ..., 7->6 (Sat)
         mask = pd.Series(
             [dt.dayofweek in python_days for dt in snapshots], index=snapshots
         )
