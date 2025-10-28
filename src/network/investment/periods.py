@@ -8,10 +8,12 @@ them across different PLEXOS exports.
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -154,6 +156,122 @@ def write_profile_csv(profile: RepresentativeProfile, target_path: Path) -> None
     frame = profile_to_minutes_dataframe(profile)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(target_path)
+
+
+def load_manifest(manifest_path: str | Path) -> dict[str, Any]:
+    """Load investment period metadata JSON written by the aggregation step."""
+    manifest_path = Path(manifest_path)
+    if not manifest_path.exists():
+        msg = f"Investment period manifest not found at {manifest_path}"
+        raise FileNotFoundError(msg)
+    with manifest_path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def build_snapshot_multiindex(
+    manifest: dict[str, Any],
+    period_order: Sequence[str] | None = None,
+    representative_order: Sequence[str] | None = None,
+    profile_lengths: Mapping[str, int] | None = None,
+) -> tuple[pd.MultiIndex, pd.Series, pd.Series]:
+    """Construct MultiIndex snapshots and weighting series from manifest data.
+
+    Parameters
+    ----------
+    manifest : dict
+        Parsed JSON manifest mapping profile groups to period metadata.
+    period_order : sequence of str, optional
+        Explicit ordering of period labels. When omitted, periods are sorted.
+    representative_order : sequence of str, optional
+        Ordering of day-type names within each period.
+    profile_lengths : mapping, optional
+        Precomputed lengths (number of representative timesteps) for each
+        day-type name. Defaults to 48 half-hour slots.
+
+    Returns
+    -------
+    snapshots : pd.MultiIndex
+        MultiIndex with levels (period, snapshot_label) suitable for PyPSA.
+    period_weights : pd.Series
+        Series indexed by period level with year-based weightings.
+    snapshot_weights : pd.Series
+        Series aligned with snapshots giving per-snapshot weights (years).
+    """
+    periods = _detect_period_labels(manifest, period_order)
+    snapshot_labels: list[tuple[str, str]] = []
+    snapshot_weights: dict[tuple[str, str], float] = {}
+    period_weights: dict[str, float] = {}
+
+    for period in periods:
+        groups = _collect_groups(manifest, period, representative_order)
+        total_weight = 0.0
+        for group_name, weight_years in groups:
+            total_weight += weight_years
+            length = profile_lengths.get(group_name, 48) if profile_lengths else 48
+            if length <= 0:
+                continue
+            per_snapshot_weight = weight_years / length
+            for idx in range(length):
+                label = f"{group_name}::{idx:02d}"
+                snapshot_labels.append((period, label))
+                snapshot_weights[(period, label)] = per_snapshot_weight
+        period_weights[period] = total_weight
+
+    snapshots_index = pd.MultiIndex.from_tuples(
+        snapshot_labels,
+        names=["period", "snapshot"],
+    )
+    period_series = pd.Series(period_weights, name="period_weight_years")
+    snapshot_series = (
+        pd.Series(snapshot_weights, name="snapshot_weight_years")
+        .reindex(snapshots_index)
+        .fillna(0.0)
+    )
+    return snapshots_index, period_series, snapshot_series
+
+
+def _detect_period_labels(
+    manifest: dict[str, Any],
+    order: Sequence[str] | None,
+) -> list[str]:
+    labels: set[str] = set()
+    for group_data in manifest.values():
+        labels.update(group_data.keys())
+    if order:
+        ordered = [label for label in order if label in labels]
+        ordered.extend(sorted(label for label in labels if label not in ordered))
+        return ordered
+    return sorted(labels)
+
+
+def _collect_groups(
+    manifest: dict[str, Any],
+    period_label: str,
+    representative_order: Sequence[str] | None,
+) -> list[tuple[str, float]]:
+    weights: dict[str, float] = {}
+    for profile_set in manifest.values():
+        entries = profile_set.get(period_label, [])
+        for entry in entries:
+            name = entry["name"]
+            weight = float(entry["weight_years"])
+            weights[name] = weights.get(name, 0.0) + weight
+
+    if representative_order:
+        ordered = [
+            (name, weights[name]) for name in representative_order if name in weights
+        ]
+        remainder = sorted(
+            (
+                (name, w)
+                for name, w in weights.items()
+                if name not in representative_order
+            ),
+            key=lambda item: item[0],
+        )
+        return ordered + remainder
+
+    return sorted(weights.items(), key=lambda item: item[0])
 
 
 def _resolution_from_period(period: pd.Series) -> int:
