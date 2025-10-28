@@ -36,7 +36,7 @@ dependencies = [
     "rarfile>=4.0",
     "requests>=2.31",
     "tqdm>=4.66",
-    "coad @ git+https://github.com/open-energy-transition/plexos-coad.git@feat/export-temporal#egg=coad",
+    "plexos-coad-oet>=0.1.0",
 ]
 
 [project.urls]
