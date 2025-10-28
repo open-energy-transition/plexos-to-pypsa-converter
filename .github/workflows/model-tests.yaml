@@ -15,7 +15,7 @@ env:
   # Set to 'true' to enable consistency checks (disabled during development)
   RUN_CONSISTENCY_CHECKS: 'false'
   # Set to 'true' to enable solve tests (disabled during development)
-  RUN_SOLVE_TESTS: 'false'
+  RUN_SOLVE_TESTS: 'true'
   # Number of snapshots to use for solve tests
   SOLVE_SNAPSHOT_LIMIT: '50'
   # Specify which models to test (user will configure these)
