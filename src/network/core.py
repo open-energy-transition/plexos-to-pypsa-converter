@@ -39,6 +39,36 @@ except ImportError:
     add_hydro_inflows = None
     add_storage = None
 
+# PlexosDB-only imports (archived, not used by CSV workflow)
+# These are only needed for the old setup_network() function
+try:
+    from network.constraints import add_constraints_enhanced
+except ImportError:
+    add_constraints_enhanced = None
+
+try:
+    from network.generators import port_generators, reassign_generators_to_node
+except ImportError:
+    port_generators = None
+    reassign_generators_to_node = None
+
+try:
+    from network.lines import port_lines
+except ImportError:
+    port_lines = None
+
+try:
+    from network.links import port_links, reassign_links_to_node
+except ImportError:
+    port_links = None
+    reassign_links_to_node = None
+
+try:
+    from network.storage import add_hydro_inflows, add_storage
+except ImportError:
+    add_hydro_inflows = None
+    add_storage = None
+
 logger = logging.getLogger(__name__)
 
 

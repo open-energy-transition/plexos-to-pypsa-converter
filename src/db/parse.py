@@ -200,6 +200,9 @@ def read_timeslice_activity(
     Supports two formats:
     1. Activity timeseries (AEMO format): DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
     2. Pattern definitions (SEM/CAISO format): object, category, Include(text) with patterns
+    Supports two formats:
+    1. Activity timeseries (AEMO format): DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
+    2. Pattern definitions (SEM/CAISO format): object, category, Include(text) with patterns
 
     Parameters
     ----------
@@ -219,6 +222,33 @@ def read_timeslice_activity(
     """
     df = pd.read_csv(timeslice_csv)
 
+    # Detect format based on columns
+    columns_lower = [col.lower() for col in df.columns]
+
+    # Format 1: Activity timeseries (DATETIME, NAME, TIMESLICE)
+    if (
+        "datetime" in columns_lower
+        and "name" in columns_lower
+        and "timeslice" in columns_lower
+    ):
+        return _read_timeslice_activity_timeseries(df, snapshots)
+
+    # Format 2: Pattern definitions (object, Include(text))
+    elif "object" in df.columns and any("include" in col.lower() for col in df.columns):
+        return _read_timeslice_activity_patterns(df, snapshots, trading_periods_per_day)
+
+    else:
+        msg = f"Unknown timeslice CSV format. Columns: {df.columns.tolist()}"
+        raise ValueError(msg)
+
+
+def _read_timeslice_activity_timeseries(
+    df: pd.DataFrame, snapshots: pd.DatetimeIndex
+) -> pd.DataFrame:
+    """Parse timeslice activity timeseries format (AEMO-style).
+
+    Format: DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
+    """
     # Detect format based on columns
     columns_lower = [col.lower() for col in df.columns]
 

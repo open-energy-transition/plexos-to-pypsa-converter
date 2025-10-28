@@ -1,4 +1,4 @@
-"""Generate Model × Feature Coverage Heatmap.
+"""Generate Model x Feature Coverage Heatmap.
 
 This script creates a heatmap showing the conversion status of features across
 different PLEXOS models. It reads configuration from JSON files and exports both
@@ -172,7 +172,7 @@ def create_heatmap_figure(models_data: dict, coverage_data: dict) -> go.Figure:
     # Update layout
     fig.update_layout(
         title={
-            "text": "Model × Feature Coverage Matrix",
+            "text": "Model x Feature Coverage Matrix",
             "x": 0.5,
             "xanchor": "center",
         },
@@ -232,41 +232,41 @@ def export_outputs(fig: go.Figure, output_dir: Path) -> None:
     # Export interactive HTML
     html_path = output_dir / "html" / "coverage_heatmap.html"
     fig.write_html(str(html_path))
-    logging.info("✓ Interactive HTML saved to: %s", html_path)
+    logging.info("Saved interactive HTML to: %s", html_path)
 
     # Export static PNG
     png_path = output_dir / "image" / "coverage_heatmap.png"
     try:
         fig.write_image(str(png_path), width=1000, height=600, scale=2)
-        logging.info("✓ Static PNG saved to: %s", png_path)
+        logging.info("Saved static PNG to: %s", png_path)
     except Exception as e:
-        logging.warning("⚠ Could not save PNG image: %s", e)
+        logging.warning("WARNING: Could not save PNG image: %s", e)
         logging.info("  Hint: Install kaleido with: pip install kaleido")
 
 
 def main() -> None:
     """Execture main function."""
-    logging.info("📊 Generating Model × Feature Coverage Heatmap...")
+    logging.info("Generating Model x Feature Coverage Heatmap...")
 
     # Get script directory
     script_dir = Path(__file__).parent
 
     # Load data
-    logging.info("📂 Loading data from JSON files...")
+    logging.info("Loading data from JSON files...")
     models_data, coverage_data = load_data()
     logging.info("   - Loaded %d models", len(models_data["models"]))
     logging.info("   - Loaded %d features", len(coverage_data["features"]))
     logging.info("   - Loaded %d coverage entries", len(coverage_data["coverage"]))
 
     # Create figure
-    logging.info("🎨 Creating heatmap figure...")
+    logging.info("Creating heatmap figure...")
     fig = create_heatmap_figure(models_data, coverage_data)
 
     # Export outputs
-    logging.info("💾 Exporting outputs...")
+    logging.info("Exporting outputs...")
     export_outputs(fig, script_dir)
 
-    logging.info("\n✅ Done! Heatmap generated successfully.")
+    logging.info("\nDone! Heatmap generated successfully.")
     logging.info(
         "\nView interactive version: %s", script_dir / "html" / "coverage_heatmap.html"
     )

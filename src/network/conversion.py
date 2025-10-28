@@ -91,6 +91,8 @@ def _create_electricity_model(
         Loaded PLEXOS database
     use_csv : bool, default False
         If True, use CSV-based conversion approach
+    use_csv : bool, default False
+        If True, use CSV-based conversion approach
 
     Returns
     -------
@@ -335,6 +337,8 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
         Gas+Electric models (MaREI-EU):
         - use_csv : bool
             Enable CSV data integration (default False)
+        - use_csv : bool
+            Enable CSV data integration (default False)
         - csv_data_path : str
             Path to CSV Files directory
         - infrastructure_scenario : str
@@ -347,6 +351,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             Process limited subsets for testing
 
         Flow models (PLEXOS-MESSAGE):
+        - use_csv : bool
         - use_csv : bool
             Enable CSV data integration (default from registry)
         - inputs_folder : str
