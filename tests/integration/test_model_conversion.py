@@ -9,11 +9,15 @@ Usage:
     python tests/integration/test_model_conversion.py \
         --model-id sem-2024-2032 \
         --no-consistency-check \
-        --output-file model_stats.txt
+        --run-solve \
+        --solver-name highs \
+        --snapshot-limit 50 \
+        --output-file sem_stats.txt
 """
 
 import argparse
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 # Add src to path for imports
@@ -21,6 +25,56 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from db.registry import MODEL_REGISTRY
 from workflow.executor import run_model_workflow
+
+EXCLUDED_STEPS: set[str] = {"optimize", "save_network"}
+
+
+def _build_conversion_workflow(workflow: dict, excluded_steps: Iterable[str]) -> dict:
+    """Return a shallow copy of the workflow without excluded steps."""
+    workflow_copy = dict(workflow)
+    workflow_copy["steps"] = [
+        step for step in workflow["steps"] if step["name"] not in excluded_steps
+    ]
+    return workflow_copy
+
+
+def _run_optional_consistency_check(network, skip_check: bool) -> None:
+    if skip_check:
+        return
+    print("\nRunning consistency check...")
+    network.consistency_check()
+    print("  - Consistency check passed")
+
+
+def _run_optional_solve(
+    model_id: str,
+    network,
+    snapshot_limit: int,
+    solver_name: str,
+) -> tuple[float, str, int]:
+    """Run an optional solve on the converted network."""
+    print(f"\n{'-' * 60}")
+    print(f"Running solve for {model_id}")
+    print(f"Solver: {solver_name}")
+    print(f"Snapshot limit: {snapshot_limit}")
+    print(f"{'-' * 60}\n")
+
+    snapshots = network.snapshots[:snapshot_limit]
+    print(f"  - Original snapshots: {len(network.snapshots)}")
+    print(f"  - Limited snapshots: {len(snapshots)}")
+
+    result = network.optimize(snapshots=snapshots, solver_name=solver_name)
+    objective = result[0]
+    status = result[1]
+
+    print("\n✓ Solve results:")
+    print(f"  - Objective: {objective}")
+    print(f"  - Status: {status}")
+
+    assert status == "optimal", f"Solve failed with status: {status}"
+    assert objective is not None, "No objective value returned"
+
+    return objective, status, len(snapshots)
 
 
 def test_sem_conversion(args):
@@ -38,8 +92,8 @@ def test_sem_conversion(args):
     - Bus creation
     - Optional consistency check
 
-    Note: Optimization is skipped for faster CI testing.
-          Use test_model_solve.py to test solving.
+    Note: Optimization and save_network steps are removed unless --run-solve
+    is supplied.
 
     Args:
         args: Command-line arguments
@@ -52,22 +106,12 @@ def test_sem_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize step
+        # Get workflow from registry and filter out optimize/save steps
         model_config = MODEL_REGISTRY["sem-2024-2032"]
         workflow = model_config["processing_workflow"]
+        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        # Create modified workflow without optimize step
-        workflow_no_optimize = {
-            "csv_dir_pattern": workflow.get("csv_dir_pattern"),
-            "solver_config": workflow.get("solver_config"),
-            "steps": [
-                step
-                for step in workflow["steps"]
-                if step["name"] not in ["optimize", "save_network"]
-            ],
-        }
-
-        print("Running workflow (optimize step excluded for faster testing)...")
+        print("Running workflow (optimize/save steps excluded for faster testing)...")
         network, summary = run_model_workflow(
             "sem-2024-2032", workflow_overrides=workflow_no_optimize
         )
@@ -98,10 +142,15 @@ def test_sem_conversion(args):
         assert len(network.snapshots) > 0, "No snapshots created"
 
         # Optional consistency check
-        if not args.no_consistency_check:
-            print("\nRunning consistency check...")
-            network.consistency_check()
-            print("  - Consistency check passed")
+        _run_optional_consistency_check(network, args.no_consistency_check)
+
+        if args.run_solve:
+            objective, status, used_snapshots = _run_optional_solve(
+                "sem-2024-2032",
+                network,
+                snapshot_limit=args.snapshot_limit,
+                solver_name=args.solver_name,
+            )
 
         # Write stats to output file
         if args.output_file:
@@ -111,6 +160,10 @@ def test_sem_conversion(args):
                 f.write(f"links={len(network.links)}\n")
                 f.write(f"storage_units={len(network.storage_units)}\n")
                 f.write(f"snapshots={len(network.snapshots)}\n")
+                if args.run_solve:
+                    f.write(f"solve_status={status}\n")
+                    f.write(f"solve_objective={objective}\n")
+                    f.write(f"solve_snapshots={used_snapshots}\n")
             print(f"\nStats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
@@ -143,8 +196,8 @@ def test_aemo_conversion(args):
     - Bus creation
     - Optional consistency check
 
-    Note: Optimization is skipped for faster CI testing.
-          Use test_model_solve.py to test solving.
+    Note: Optimization and save_network steps are removed unless --run-solve
+    is supplied.
 
     Args:
         args: Command-line arguments
@@ -157,22 +210,12 @@ def test_aemo_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize step
+        # Get workflow from registry and filter out optimize/save steps
         model_config = MODEL_REGISTRY["aemo-2024-isp-progressive-change"]
         workflow = model_config["processing_workflow"]
+        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        # Create modified workflow without optimize step
-        workflow_no_optimize = {
-            "csv_dir_pattern": workflow.get("csv_dir_pattern"),
-            "solver_config": workflow.get("solver_config"),
-            "steps": [
-                step
-                for step in workflow["steps"]
-                if step["name"] not in ["optimize", "save_network"]
-            ],
-        }
-
-        print("Running workflow (optimize step excluded for faster testing)...")
+        print("Running workflow (optimize/save steps excluded for faster testing)...")
         network, summary = run_model_workflow(
             "aemo-2024-isp-progressive-change", workflow_overrides=workflow_no_optimize
         )
@@ -203,10 +246,15 @@ def test_aemo_conversion(args):
         assert len(network.snapshots) > 0, "No snapshots created"
 
         # Optional consistency check
-        if not args.no_consistency_check:
-            print("\nRunning consistency check...")
-            network.consistency_check()
-            print("  - Consistency check passed")
+        _run_optional_consistency_check(network, args.no_consistency_check)
+
+        if args.run_solve:
+            objective, status, used_snapshots = _run_optional_solve(
+                "aemo-2024-isp-progressive-change",
+                network,
+                snapshot_limit=args.snapshot_limit,
+                solver_name=args.solver_name,
+            )
 
         # Write stats to output file
         if args.output_file:
@@ -216,6 +264,10 @@ def test_aemo_conversion(args):
                 f.write(f"links={len(network.links)}\n")
                 f.write(f"storage_units={len(network.storage_units)}\n")
                 f.write(f"snapshots={len(network.snapshots)}\n")
+                if args.run_solve:
+                    f.write(f"solve_status={status}\n")
+                    f.write(f"solve_objective={objective}\n")
+                    f.write(f"solve_snapshots={used_snapshots}\n")
             print(f"\nStats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
@@ -250,8 +302,8 @@ def test_caiso_conversion(args):
     - Bus creation
     - Optional consistency check
 
-    Note: Optimization is skipped for faster CI testing.
-          Use test_model_solve.py to test solving.
+    Note: Optimization and save_network steps are removed unless --run-solve
+    is supplied.
 
     Args:
         args: Command-line arguments
@@ -264,17 +316,12 @@ def test_caiso_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize step only
+        # Get workflow from registry and filter out optimize/save steps
         model_config = MODEL_REGISTRY["caiso-irp23"]
         workflow = model_config["processing_workflow"]
-        workflow_no_optimize = workflow.copy()
-        workflow_no_optimize["steps"] = [
-            step
-            for step in workflow["steps"]
-            if step["name"] not in ["optimize", "save_network"]
-        ]
+        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        print("Running workflow (optimize step excluded for faster testing)...")
+        print("Running workflow (optimize/save steps excluded for faster testing)...")
         network, summary = run_model_workflow(
             "caiso-irp23", workflow_overrides=workflow_no_optimize
         )
@@ -305,10 +352,15 @@ def test_caiso_conversion(args):
         assert len(network.snapshots) > 0, "No snapshots created"
 
         # Optional consistency check
-        if not args.no_consistency_check:
-            print("\nRunning consistency check...")
-            network.consistency_check()
-            print("  - Consistency check passed")
+        _run_optional_consistency_check(network, args.no_consistency_check)
+
+        if args.run_solve:
+            objective, status, used_snapshots = _run_optional_solve(
+                "caiso-irp23",
+                network,
+                snapshot_limit=args.snapshot_limit,
+                solver_name=args.solver_name,
+            )
 
         # Write stats to output file
         if args.output_file:
@@ -318,6 +370,10 @@ def test_caiso_conversion(args):
                 f.write(f"links={len(network.links)}\n")
                 f.write(f"storage_units={len(network.storage_units)}\n")
                 f.write(f"snapshots={len(network.snapshots)}\n")
+                if args.run_solve:
+                    f.write(f"solve_status={status}\n")
+                    f.write(f"solve_objective={objective}\n")
+                    f.write(f"solve_snapshots={used_snapshots}\n")
             print(f"\nStats written to {args.output_file}")
 
         print(f"\n{'=' * 60}")
@@ -352,6 +408,9 @@ Examples:
 
     # Test CAISO conversion
     python tests/integration/test_model_conversion.py --model-id caiso-irp23 --output-file caiso_stats.txt
+
+    # Test SEM conversion plus solve
+    python tests/integration/test_model_conversion.py --model-id sem-2024-2032 --run-solve --snapshot-limit 50 --output-file sem_stats.txt
         """,
     )
     parser.add_argument(
@@ -366,7 +425,24 @@ Examples:
         help="Skip PyPSA consistency check (faster)",
     )
     parser.add_argument(
-        "--output-file", required=True, help="File to write conversion statistics"
+        "--run-solve",
+        action="store_true",
+        help="Run a limited optimization after conversion",
+    )
+    parser.add_argument(
+        "--solver-name",
+        default="highs",
+        help="Solver to use when running the optional optimization (default: highs)",
+    )
+    parser.add_argument(
+        "--snapshot-limit",
+        type=int,
+        default=50,
+        help="Number of snapshots to include in the optional solve (default: 50)",
+    )
+    parser.add_argument(
+        "--output-file",
+        help="File to write combined conversion and optional solve statistics",
     )
 
     args = parser.parse_args()
