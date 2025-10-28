@@ -110,7 +110,7 @@ jobs:
           $consistency_flag \
           --output-file model2_stats.txt
 
-    - name: Test Model Solves (Optional)
+    - name: Test Model Solves
       if: env.RUN_SOLVE_TESTS == 'true'
       shell: bash
       run: |
