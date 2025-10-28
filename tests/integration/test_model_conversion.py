@@ -63,6 +63,15 @@ def _run_optional_solve(
     print(f"  - Original snapshots: {len(network.snapshots)}")
     print(f"  - Limited snapshots: {len(snapshots)}")
 
+    print("DEBUG -- Printing links with ramp limits:")
+    print(
+        network.links.loc[
+            network.links["ramp_limit_up"].notna()
+            | network.links["ramp_limit_down"].notna(),
+            ["p_nom", "p_nom_extendable", "ramp_limit_up", "ramp_limit_down"],
+        ]
+    )
+
     result = network.optimize(snapshots=snapshots, solver_name=solver_name)
     objective = result[0]
     status = result[1]
