@@ -1,6 +1,7 @@
 """Pre-defined workflow step implementations for workflow system."""
 
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,8 @@ from network.ramp import fix_outage_ramp_conflicts
 from network.slack import add_slack_generators
 from network.storage_csv import add_storage_inflows_csv
 from workflow.filters import resolve_filter_preset
+
+logger = logging.getLogger(__name__)
 
 
 def create_model_step(
@@ -103,15 +106,26 @@ def prepare_investment_periods_step(
     metadata: dict[str, dict[str, list[dict[str, float | str]]]] = {}
     summary_totals: dict[str, dict[str, float]] = {}
 
-    for group_label, trace_path in trace_groups.items():
+    for group_label, definition in trace_groups.items():
+        if isinstance(definition, dict):
+            trace_path = definition.get("path")
+            pattern = definition.get("pattern", csv_pattern)
+            file_limit = definition.get("limit", file_limit)
+        else:
+            trace_path = definition
+            pattern = csv_pattern
         target_path = Path(trace_path)
         if not target_path.is_absolute():
             target_path = base_dir / trace_path
-        data = load_directory_timeseries(
-            target_path,
-            pattern=csv_pattern,
-            limit=file_limit,
-        )
+        try:
+            data = load_directory_timeseries(
+                target_path,
+                pattern=pattern,
+                limit=file_limit,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("Skipping investment trace group '%s': %s", group_label, exc)
+            continue
         stats = compute_period_statistics(data, investment_periods, classifier)
         metadata[group_label] = {}
         summary_totals[group_label] = {}
@@ -206,6 +220,9 @@ def load_vre_profiles_step(
     carrier_mapping: dict | None = None,
     value_scaling: float = 1.0,
     manual_mappings: dict | None = None,
+    use_investment_periods: bool = False,
+    investment_manifest: str | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Step: Load VRE generation profiles from CSV Data Files."""
     filter_fn = resolve_filter_preset(generator_filter, network)
@@ -222,6 +239,9 @@ def load_vre_profiles_step(
         carrier_mapping=carrier_mapping or {},
         value_scaling=value_scaling,
         manual_mappings=manual_mappings or {},
+        use_investment_periods=use_investment_periods,
+        investment_manifest=investment_manifest,
+        investment_group=investment_group,
     )
     return {"load_vre_profiles": summary}
 
@@ -234,6 +254,10 @@ def load_hydro_dispatch_step(
     generator_filter: str = "hydro_only",
     load_rating: bool = True,
     load_min_stable: bool = True,
+    use_investment_periods: bool = False,
+    investment_manifest: str | None = None,
+    investment_group_rating: str | None = None,
+    investment_group_min_stable: str | None = None,
 ) -> dict:
     """Step: Load hydro dispatch profiles (Rating and Min Stable Level).
 
@@ -269,6 +293,9 @@ def load_hydro_dispatch_step(
 
     # Load Rating profiles (p_max_pu) for hydro dispatch schedules
     if load_rating:
+        rating_group = (
+            investment_group_rating or investment_group_min_stable or "hydro_rating"
+        )
         rating_summary = load_data_file_profiles_csv(
             network=network,
             csv_dir=csv_dir,
@@ -280,11 +307,17 @@ def load_hydro_dispatch_step(
             scenario=scenario,
             generator_filter=filter_fn,
             carrier_mapping={"Hydro": "hydro", "ROR": "hydro"},
+            use_investment_periods=use_investment_periods,
+            investment_manifest=investment_manifest,
+            investment_group=rating_group,
         )
         summary["rating"] = rating_summary
 
     # Load Min Stable Level profiles (p_min_pu) for must-run constraints
     if load_min_stable:
+        min_group = (
+            investment_group_min_stable or investment_group_rating or "hydro_min_stable"
+        )
         min_summary = load_data_file_profiles_csv(
             network=network,
             csv_dir=csv_dir,
@@ -295,6 +328,9 @@ def load_hydro_dispatch_step(
             apply_mode="replace",
             scenario=scenario,
             generator_filter=filter_fn,
+            use_investment_periods=use_investment_periods,
+            investment_manifest=investment_manifest,
+            investment_group=min_group,
         )
         summary["min_stable"] = min_summary
 
@@ -305,12 +341,18 @@ def add_storage_inflows_step(
     network: pypsa.Network,
     csv_dir: str | Path,
     inflow_path: str | Path,
+    use_investment_periods: bool = False,
+    investment_manifest: str | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Step: Add natural inflow time series to storage units (hydro)."""
     summary = add_storage_inflows_csv(
         network=network,
         csv_dir=csv_dir,
         inflow_path=inflow_path,
+        use_investment_periods=use_investment_periods,
+        investment_manifest=investment_manifest,
+        investment_group=investment_group,
     )
     return {"add_storage_inflows": summary}
 
@@ -333,6 +375,9 @@ def parse_outages_step(
     include_maintenance: bool = True,
     generator_filter: str = "exclude_vre",
     random_seed: int = 42,
+    use_investment_periods: bool = False,
+    investment_manifest: str | None = None,
+    investment_group: str | None = None,
 ) -> dict:
     """Step: Parse explicit outages and generate stochastic outages, then apply to network."""
     summary = {}
@@ -361,6 +406,9 @@ def parse_outages_step(
         random_seed=random_seed,
         existing_outage_events=explicit_events if include_explicit else None,
         generator_filter=filter_fn,
+        use_investment_periods=use_investment_periods,
+        investment_manifest=investment_manifest,
+        investment_group=investment_group,
     )
     summary["stochastic_outages"] = len(stochastic_events)
     all_events = explicit_events + stochastic_events

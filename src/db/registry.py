@@ -86,6 +86,44 @@ MODEL_REGISTRY = {
                     "params": {"use_csv": True},
                 },
                 {
+                    "name": "prepare_investment_periods",
+                    "params": {
+                        "enabled": True,
+                        "timeslice_csv": "Traces/timeslice/timeslice_RefYear4006.csv",
+                        "trace_groups": {
+                            "demand": "Traces/demand",
+                            "solar": "Traces/solar",
+                            "wind": "Traces/wind",
+                            "storage_inflows": {
+                                "path": "Traces/hydro",
+                                "pattern": "MonthlyNaturalInflow_*.csv",
+                            },
+                            "hydro_rating": {
+                                "path": "Traces/hydro",
+                                "pattern": "HydroRating_*.csv",
+                            },
+                            "hydro_min_stable": {
+                                "path": "Traces/hydro",
+                                "pattern": "HydroMinStable_*.csv",
+                            },
+                        },
+                        "periods": [
+                            {"label": "2025", "start_year": 2024, "end_year": 2029},
+                            {"label": "2030", "start_year": 2030, "end_year": 2034},
+                            {"label": "2035", "start_year": 2035, "end_year": 2039},
+                            {"label": "2040", "start_year": 2040, "end_year": 2044},
+                            {"label": "2045", "start_year": 2045, "end_year": 2049},
+                            {"label": "2050", "start_year": 2050, "end_year": 2053},
+                        ],
+                        "group_patterns": {
+                            "Hot Day": ["Hot Day"],
+                            "Typical Summer": ["Typical Summer"],
+                            "Winter": ["Winter"],
+                        },
+                        "default_group": "Typical Summer",
+                    },
+                },
+                {
                     "name": "load_vre_profiles",
                     "params": {
                         "csv_dir": None,
@@ -99,6 +137,7 @@ MODEL_REGISTRY = {
                         "carrier_mapping": {"Wind": "wind", "Solar": "solar"},
                         "value_scaling": 1.0,
                         "manual_mappings": {},
+                        "use_investment_periods": False,
                     },
                 },
                 {
@@ -106,6 +145,9 @@ MODEL_REGISTRY = {
                     "params": {
                         "csv_dir": None,
                         "inflow_path": None,
+                        "use_investment_periods": True,
+                        "investment_manifest": "investment_periods/investment_periods.json",
+                        "investment_group": "storage_inflows",
                     },
                 },
                 {
@@ -121,6 +163,9 @@ MODEL_REGISTRY = {
                         "include_maintenance": True,
                         "generator_filter": "exclude_vre",
                         "random_seed": 42,
+                        "use_investment_periods": True,
+                        "investment_manifest": "investment_periods/investment_periods.json",
+                        "investment_group": "outages",
                     },
                 },
                 {
@@ -279,6 +324,44 @@ MODEL_REGISTRY = {
                     "params": {"use_csv": True},
                 },
                 {
+                    "name": "prepare_investment_periods",
+                    "params": {
+                        "enabled": True,
+                        "timeslice_csv": "Traces/timeslice/timeslice_RefYear4006.csv",
+                        "trace_groups": {
+                            "demand": "Traces/demand",
+                            "solar": "Traces/solar",
+                            "wind": "Traces/wind",
+                            "storage_inflows": {
+                                "path": "Traces/hydro",
+                                "pattern": "MonthlyNaturalInflow_*.csv",
+                            },
+                            "hydro_rating": {
+                                "path": "Traces/hydro",
+                                "pattern": "HydroRating_*.csv",
+                            },
+                            "hydro_min_stable": {
+                                "path": "Traces/hydro",
+                                "pattern": "HydroMinStable_*.csv",
+                            },
+                        },
+                        "periods": [
+                            {"label": "2025", "start_year": 2024, "end_year": 2029},
+                            {"label": "2030", "start_year": 2030, "end_year": 2034},
+                            {"label": "2035", "start_year": 2035, "end_year": 2039},
+                            {"label": "2040", "start_year": 2040, "end_year": 2044},
+                            {"label": "2045", "start_year": 2045, "end_year": 2049},
+                            {"label": "2050", "start_year": 2050, "end_year": 2053},
+                        ],
+                        "group_patterns": {
+                            "Hot Day": ["Hot Day"],
+                            "Typical Summer": ["Typical Summer"],
+                            "Winter": ["Winter"],
+                        },
+                        "default_group": "Typical Summer",
+                    },
+                },
+                {
                     "name": "load_vre_profiles",
                     "params": {
                         "csv_dir": None,
@@ -299,6 +382,9 @@ MODEL_REGISTRY = {
                     "params": {
                         "csv_dir": None,
                         "inflow_path": None,
+                        "use_investment_periods": True,
+                        "investment_manifest": "investment_periods/investment_periods.json",
+                        "investment_group": "storage_inflows",
                     },
                 },
                 {
@@ -465,6 +551,32 @@ MODEL_REGISTRY = {
                 {
                     "name": "create_model",
                     "params": {"use_csv": True},
+                },
+                {
+                    "name": "prepare_investment_periods",
+                    "params": {
+                        "enabled": True,
+                        "timeslice_csv": "Traces/timeslice/timeslice_RefYear4006.csv",
+                        "trace_groups": {
+                            "demand": "Traces/demand",
+                            "solar": "Traces/solar",
+                            "wind": "Traces/wind",
+                        },
+                        "periods": [
+                            {"label": "2025", "start_year": 2024, "end_year": 2029},
+                            {"label": "2030", "start_year": 2030, "end_year": 2034},
+                            {"label": "2035", "start_year": 2035, "end_year": 2039},
+                            {"label": "2040", "start_year": 2040, "end_year": 2044},
+                            {"label": "2045", "start_year": 2045, "end_year": 2049},
+                            {"label": "2050", "start_year": 2050, "end_year": 2053},
+                        ],
+                        "group_patterns": {
+                            "Hot Day": ["Hot Day"],
+                            "Typical Summer": ["Typical Summer"],
+                            "Winter": ["Winter"],
+                        },
+                        "default_group": "Typical Summer",
+                    },
                 },
                 {
                     "name": "load_vre_profiles",
