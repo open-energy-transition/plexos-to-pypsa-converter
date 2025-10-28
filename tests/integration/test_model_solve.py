@@ -47,7 +47,9 @@ def test_sem_solve_limited_snapshots(args):
         workflow = model_config["processing_workflow"]
         workflow_no_optimize = workflow.copy()
         workflow_no_optimize["steps"] = [
-            step for step in workflow["steps"] if step["name"] != "optimize"
+            step
+            for step in workflow["steps"]
+            if step["name"] not in ["optimize", "save_network"]
         ]
 
         print("Running workflow (optimize step excluded for solve test)...")
@@ -125,7 +127,9 @@ def test_aemo_solve_limited_snapshots(args):
         workflow = model_config["processing_workflow"]
         workflow_no_optimize = workflow.copy()
         workflow_no_optimize["steps"] = [
-            step for step in workflow["steps"] if step["name"] != "optimize"
+            step
+            for step in workflow["steps"]
+            if step["name"] not in ["optimize", "save_network"]
         ]
 
         print("Running workflow (optimize step excluded for solve test)...")
@@ -203,7 +207,9 @@ def test_caiso_solve_limited_snapshots(args):
         workflow = model_config["processing_workflow"]
         workflow_no_optimize = workflow.copy()
         workflow_no_optimize["steps"] = [
-            step for step in workflow["steps"] if step["name"] != "optimize"
+            step
+            for step in workflow["steps"]
+            if step["name"] not in ["optimize", "save_network"]
         ]
 
         print("Running workflow (optimize step excluded for solve test)...")
