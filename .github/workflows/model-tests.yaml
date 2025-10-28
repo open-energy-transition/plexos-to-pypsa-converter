@@ -89,40 +89,33 @@ jobs:
         python scripts/download_models.py \
           --models "${{ env.MODEL_1 }}" "${{ env.MODEL_2 }}"
 
-    - name: Test Model Conversions
+    - name: Test Model Conversion and Solves
       id: test-conversions
       shell: bash
       run: |
-        # Test Model 1
-        consistency_flag=""
+        consistency_args=()
         if [ "${{ env.RUN_CONSISTENCY_CHECKS }}" != "true" ]; then
-          consistency_flag="--no-consistency-check"
+          consistency_args=(--no-consistency-check)
+        fi
+
+        solve_args_model1=()
+        solve_args_model2=()
+        if [ "${{ env.RUN_SOLVE_TESTS }}" = "true" ]; then
+          solve_args_model1=(--run-solve --solver-name highs --snapshot-limit "${{ env.SOLVE_SNAPSHOT_LIMIT }}")
+          solve_args_model2=(--run-solve --solver-name highs --snapshot-limit "${{ env.SOLVE_SNAPSHOT_LIMIT }}")
         fi
 
         python tests/integration/test_model_conversion.py \
           --model-id "${{ env.MODEL_1 }}" \
-          $consistency_flag \
-          --output-file model1_stats.txt
+          --output-file model1_stats.txt \
+          "${consistency_args[@]}" \
+          "${solve_args_model1[@]}"
 
-        # Test Model 2  
         python tests/integration/test_model_conversion.py \
           --model-id "${{ env.MODEL_2 }}" \
-          $consistency_flag \
-          --output-file model2_stats.txt
-
-    - name: Test Model Solves
-      if: env.RUN_SOLVE_TESTS == 'true'
-      shell: bash
-      run: |
-        python tests/integration/test_model_solve.py \
-          --model-id "${{ env.MODEL_1 }}" \
-          --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
-          --output-file model1_solve.txt
-
-        python tests/integration/test_model_solve.py \
-          --model-id "${{ env.MODEL_2 }}" \
-          --snapshot-limit ${{ env.SOLVE_SNAPSHOT_LIMIT }} \
-          --output-file model2_solve.txt
+          --output-file model2_stats.txt \
+          "${consistency_args[@]}" \
+          "${solve_args_model2[@]}"
 
     - name: Generate test summary
       if: always()
@@ -130,7 +123,7 @@ jobs:
         python -c "
         import os
 
-        def write_model_summary(summary, model_name, model_id, stats_file, solve_file):
+        def write_model_summary(summary, model_name, model_id, stats_file):
             if os.path.exists(stats_file):
                 summary.write(f'**{model_name}: {model_id}** (Success)\n')
                 with open(stats_file, 'r') as f:
@@ -138,14 +131,6 @@ jobs:
                         if '=' in line:
                             key, value = line.strip().split('=', 1)
                             summary.write(f'- {key}: {value}\n')
-                
-                if os.path.exists(solve_file):
-                    summary.write('\n  **Solve Results:**\n')
-                    with open(solve_file, 'r') as f:
-                        for line in f:
-                            if '=' in line:
-                                key, value = line.strip().split('=', 1)
-                                summary.write(f'  - {key}: {value}\n')
             else:
                 summary.write(f'**{model_name}: {model_id}** (Conversion failed)\n')
             summary.write('\n')
@@ -154,8 +139,8 @@ jobs:
         if summary_file:
             with open(summary_file, 'a') as summary:
                 summary.write('### Model Conversion Test Results\n\n')
-                write_model_summary(summary, 'Model 1', '${{ env.MODEL_1 }}', 'model1_stats.txt', 'model1_solve.txt')
-                write_model_summary(summary, 'Model 2', '${{ env.MODEL_2 }}', 'model2_stats.txt', 'model2_solve.txt')
+                write_model_summary(summary, 'Model 1', '${{ env.MODEL_1 }}', 'model1_stats.txt')
+                write_model_summary(summary, 'Model 2', '${{ env.MODEL_2 }}', 'model2_stats.txt')
                 summary.write('---\n')
                 summary.write('Consistency checks: ${{ env.RUN_CONSISTENCY_CHECKS }}\n')
                 summary.write('Solve tests: ${{ env.RUN_SOLVE_TESTS }}\n')
