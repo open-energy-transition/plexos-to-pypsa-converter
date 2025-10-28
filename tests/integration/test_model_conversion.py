@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import importlib.metadata as md
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -27,6 +28,12 @@ from db.registry import MODEL_REGISTRY
 from workflow.executor import run_model_workflow
 
 EXCLUDED_STEPS: set[str] = {"optimize", "save_network"}
+
+print("\nDEBUG: Print Model Conversion Environment")
+print("pypsa", md.version("pypsa"))
+print("pypsa dist", md.distribution("pypsa").locate_file(""))
+print("linopy", md.version("linopy"))
+print("linopy dist", md.distribution("linopy").locate_file(""))
 
 
 def _build_conversion_workflow(workflow: dict, excluded_steps: Iterable[str]) -> dict:
