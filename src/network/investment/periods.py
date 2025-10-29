@@ -619,10 +619,32 @@ def apply_investment_periods_to_network(
         raise ValueError(msg)
 
     filtered_snapshots = chronological_snapshots[valid_mask]
-    filtered_periods = [str(label) for label in period_labels if label is not None]
+    filtered_labels = [str(label) for label in period_labels if label is not None]
+
+    # Determine numeric identifiers for each investment period label
+    start_year_map = {
+        str(period.label): int(period.start_year) for period in investment_periods
+    }
+    label_to_id: dict[str, int] = {}
+    label_mapping: dict[int, str] = {}
+    period_ids: list[int] = []
+
+    for label in filtered_labels:
+        period_id = start_year_map.get(label)
+        if period_id is None:
+            try:
+                period_id = int(label)
+            except (TypeError, ValueError):
+                # Fallback to sequential integers in order of appearance
+                if label not in label_to_id:
+                    label_to_id[label] = len(label_to_id)
+                period_id = label_to_id[label]
+        period_id = int(period_id)
+        period_ids.append(period_id)
+        label_mapping.setdefault(period_id, label)
 
     multi_index = pd.MultiIndex.from_arrays(
-        [filtered_periods, filtered_snapshots], names=["period", "timestamp"]
+        [period_ids, filtered_snapshots], names=["period", "timestamp"]
     )
 
     # Capture existing time-series data indexed by snapshots
@@ -681,19 +703,12 @@ def apply_investment_periods_to_network(
 
     # Update snapshot weightings DataFrame
     network.snapshot_weightings.loc[:, :] = 0.0
+    weights_array = snapshot_weights.to_numpy()
     for column in network.snapshot_weightings.columns:
-        network.snapshot_weightings[column] = snapshot_weights.to_numpy()
-    if "objective" not in network.snapshot_weightings.columns:
-        network.snapshot_weightings["objective"] = snapshot_weights.to_numpy()
-    if "years" not in network.snapshot_weightings.columns:
-        network.snapshot_weightings["years"] = snapshot_weights.to_numpy()
-
-    # Restore any additional snapshot weighting columns from original where possible
+        network.snapshot_weightings[column] = weights_array
     for column in snapshot_weightings.columns:
-        if column in {"objective", "years"}:
-            continue
-        if column in network.snapshot_weightings.columns:
-            network.snapshot_weightings[column] = snapshot_weights.to_numpy()
+        if column not in network.snapshot_weightings.columns:
+            network.snapshot_weightings[column] = weights_array
 
     # Set investment period weightings
     period_weights = snapshot_weights.groupby(level=0).sum()
@@ -701,13 +716,20 @@ def apply_investment_periods_to_network(
         {
             "objective": period_weights,
             "years": period_weights,
+            "label": [label_mapping[int(idx)] for idx in period_weights.index],
         }
     )
+    network.investment_period_weightings.index.name = "period"
+    network.investment_period_weightings.index = pd.Index(
+        period_weights.index, dtype=int
+    )
+    network.investment_periods = pd.Index(period_weights.index.astype(int), dtype=int)
 
     return {
         "applied": True,
         "period_weights": period_weights.to_dict(),
         "snapshot_weight_total_years": float(snapshot_weights.sum()),
+        "label_mapping": label_mapping,
     }
 
 
