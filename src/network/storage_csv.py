@@ -21,10 +21,15 @@ from network.generators_csv import _discover_datafile_mappings
 from utils.paths import safe_join
 
 try:
-    from network.investment import load_group_profiles, load_manifest
+    from network.investment import (
+        get_snapshot_timestamps,
+        load_group_profiles,
+        load_manifest,
+    )
 except ImportError:  # pragma: no cover - optional dependency path
     load_manifest = None
     load_group_profiles = None
+    get_snapshot_timestamps = None
 
 logger = logging.getLogger(__name__)
 
@@ -668,7 +673,10 @@ def add_storage_inflows_csv(
     datafile_to_csv = _discover_datafile_mappings(csv_dir)
 
     # Get network snapshots for time series alignment
-    snapshots = pd.DatetimeIndex(network.snapshots)
+    if get_snapshot_timestamps is not None:
+        snapshots = get_snapshot_timestamps(network.snapshots)
+    else:
+        snapshots = pd.DatetimeIndex(network.snapshots)
 
     # Process each storage unit in the network
     for storage_name in network.storage_units.index:

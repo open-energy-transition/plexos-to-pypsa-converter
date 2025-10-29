@@ -37,10 +37,15 @@ from db.csv_readers import (
 )
 
 try:
-    from network.investment import load_group_profiles, load_manifest
+    from network.investment import (
+        get_snapshot_timestamps,
+        load_group_profiles,
+        load_manifest,
+    )
 except ImportError:  # pragma: no cover
     load_manifest = None
     load_group_profiles = None
+    get_snapshot_timestamps = None
 
 logger = logging.getLogger(__name__)
 
@@ -351,12 +356,12 @@ def _create_ramp_trajectory(
     return np.array(trajectory)
 
 
-def _infer_timestep_hours(snapshots: pd.DatetimeIndex) -> float:
+def _infer_timestep_hours(snapshots: pd.Index) -> float:
     """Infer timestep duration in hours from snapshots.
 
     Parameters
     ----------
-    snapshots : pd.DatetimeIndex
+    snapshots : pd.Index
         Network snapshots
 
     Returns
@@ -364,12 +369,17 @@ def _infer_timestep_hours(snapshots: pd.DatetimeIndex) -> float:
     float
         Timestep duration in hours
     """
-    if len(snapshots) < 2:
+    if get_snapshot_timestamps is not None:
+        times = get_snapshot_timestamps(snapshots)
+    else:
+        times = pd.DatetimeIndex(snapshots)
+
+    if len(times) < 2:
         return 1.0  # Default to hourly
 
     # Get most common time difference
-    time_diffs = snapshots[1:] - snapshots[:-1]
-    most_common_diff = time_diffs.value_counts().index[0]
+    time_diffs = times[1:] - times[:-1]
+    most_common_diff = pd.Series(time_diffs).mode().iloc[0]
 
     return most_common_diff.total_seconds() / 3600.0
 
@@ -1191,6 +1201,13 @@ def load_outages_from_monthly_files(
     else:
         scenario_col = None
 
+    # Determine snapshot timestamps for interpolation when needed
+    snapshot_times: pd.DatetimeIndex | None = None
+    if get_snapshot_timestamps is not None:
+        snapshot_times = get_snapshot_timestamps(network.snapshots)
+    else:
+        snapshot_times = pd.DatetimeIndex(network.snapshots)
+
     # Get list of generators to process
     generators = list(network.generators.index)
     if generator_filter is not None:
@@ -1220,7 +1237,7 @@ def load_outages_from_monthly_files(
                 month_data = read_plexos_input_csv(
                     outage_file,
                     scenario=scenario_col,
-                    snapshots=network.snapshots,
+                    snapshots=snapshot_times,
                 )
 
                 # Verify we got a single column (one scenario)

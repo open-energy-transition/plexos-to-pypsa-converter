@@ -31,6 +31,17 @@ from network.carriers_csv import parse_fuel_prices_csv
 from network.costs_csv import set_capital_costs_generic_csv
 from utils.paths import contains_path_pattern, extract_filename, safe_join
 
+try:  # Optional import to avoid circular dependency in minimal installs
+    from network.investment import (
+        get_snapshot_timestamps,
+        load_group_profiles,
+        load_manifest,
+    )
+except ImportError:  # pragma: no cover
+    get_snapshot_timestamps = None
+    load_group_profiles = None
+    load_manifest = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -678,11 +689,15 @@ def add_generators_csv(
         time_varying_props = pd.DataFrame()
 
     # Get model start date from network snapshots (if available)
-    model_start_date = (
-        network.snapshots.min()
-        if hasattr(network, "snapshots") and len(network.snapshots) > 0
-        else None
-    )
+    snapshot_times: pd.DatetimeIndex | None = None
+    model_start_date = None
+    if hasattr(network, "snapshots") and len(network.snapshots) > 0:
+        if get_snapshot_timestamps is not None:
+            snapshot_times = get_snapshot_timestamps(network.snapshots)
+        else:
+            snapshot_times = pd.DatetimeIndex(network.snapshots)
+        if len(snapshot_times) > 0:
+            model_start_date = snapshot_times.min()
 
     for gen in generators:
         # Check for time-varying Max Capacity with dates (capacity expansions)
@@ -1582,6 +1597,13 @@ def load_data_file_profiles_csv(
     profiles_path = Path(profiles_path)
     summary_mode = "investment_periods" if use_investment_periods else apply_mode
 
+    snapshot_times: pd.DatetimeIndex | None = None
+    if hasattr(network, "snapshots") and len(network.snapshots) > 0:
+        if get_snapshot_timestamps is not None:
+            snapshot_times = get_snapshot_timestamps(network.snapshots)
+        else:
+            snapshot_times = pd.DatetimeIndex(network.snapshots)
+
     # Step 1: Discover data file mappings
     datafile_to_csv = _discover_datafile_mappings(csv_dir)
 
@@ -1755,7 +1777,7 @@ def load_data_file_profiles_csv(
             profile_df = read_plexos_input_csv(
                 csv_path,
                 scenario=scenario,
-                snapshots=network.snapshots,  # Enable tiling for annual profiles
+                snapshots=snapshot_times if snapshot_times is not None else None,
                 interpolation_method="linear",  # Linear interpolation for sparse data
             )
 
