@@ -51,6 +51,7 @@ class RepresentativeProfile:
     weight_years: float
     offsets: pd.TimedeltaIndex
     values: pd.DataFrame
+    base_timestamp: pd.Timestamp | None = None
 
 
 def load_timeseries_matrix(csv_path: str | Path) -> pd.DataFrame:
@@ -209,6 +210,7 @@ def build_snapshot_multiindex(
     profile_offsets: Mapping[str, pd.TimedeltaIndex] | None = None,
     base_timestamp: pd.Timestamp | None = None,
     period_base_dates: Mapping[str, pd.Timestamp] | None = None,
+    profile_base_dates: Mapping[str, pd.Timestamp] | None = None,
 ) -> tuple[pd.MultiIndex, pd.Series, pd.Series, dict[str, pd.Timestamp]]:
     """Construct MultiIndex snapshots and weighting series from manifest data."""
     if profile_offsets is None:
@@ -241,9 +243,15 @@ def build_snapshot_multiindex(
                 continue
             total_weight += weight_years
             per_snapshot_weight = weight_years / len(offsets)
-            group_offset = base_datetimes[group_name] - base_timestamp
-            period_base = period_base_dates.get(period, base_timestamp)
-            timestamps = period_base + group_offset + offsets
+            base_override = None
+            if profile_base_dates is not None:
+                base_override = profile_base_dates.get(group_name)
+            if base_override is not None:
+                timestamps = base_override + offsets
+            else:
+                group_offset = base_datetimes[group_name] - base_timestamp
+                period_base = period_base_dates.get(period, base_timestamp)
+                timestamps = period_base + group_offset + offsets
             for ts in timestamps:
                 key = (period, ts)
                 snapshot_labels.append(key)
@@ -344,9 +352,14 @@ def load_group_profiles(
                 )
                 offsets = offsets[: len(df)]
 
-            group_offset = base_datetimes[entry["name"]] - base_timestamp
-            period_base = period_base_dates.get(period_label, base_timestamp)
-            timestamps = period_base + group_offset + offsets
+            entry_base = entry.get("base")
+            if entry_base is not None:
+                base_dt = pd.Timestamp(entry_base)
+                timestamps = base_dt + offsets
+            else:
+                group_offset = base_datetimes[entry["name"]] - base_timestamp
+                period_base = period_base_dates.get(period_label, base_timestamp)
+                timestamps = period_base + group_offset + offsets
             index = pd.MultiIndex.from_arrays(
                 [[period_label] * len(timestamps), timestamps],
                 names=["period", "timestamp"],
@@ -385,6 +398,8 @@ def configure_investment_periods(
         inferred_periods,
         default_base,
     )
+    profile_base_dates = _extract_profile_bases(manifest)
+
     (
         snapshots_index,
         period_weights,
@@ -396,6 +411,7 @@ def configure_investment_periods(
         representative_order=representative_order,
         profile_offsets=profile_offsets,
         period_base_dates=period_base_dates,
+        profile_base_dates=profile_base_dates,
     )
 
     network.set_snapshots(snapshots_index)
@@ -510,6 +526,23 @@ def _assign_base_datetimes(
         name: base_timestamp + pd.to_timedelta(idx, unit="D")
         for idx, name in enumerate(ordered)
     }
+
+
+def _extract_profile_bases(manifest: dict[str, Any]) -> dict[str, pd.Timestamp]:
+    bases: dict[str, pd.Timestamp] = {}
+    for group_name, group_data in manifest.items():
+        if group_name.startswith("_") or not isinstance(group_data, dict):
+            continue
+        for entries in group_data.values():
+            for entry in entries:
+                base_val = entry.get("base")
+                if base_val is None:
+                    continue
+                try:
+                    bases[entry["name"]] = pd.Timestamp(base_val)
+                except (ValueError, TypeError):  # pragma: no cover - invalid metadata
+                    continue
+    return bases
 
 
 def _extract_period_base_dates(
@@ -655,6 +688,12 @@ def compute_period_statistics(
             offsets = pd.TimedeltaIndex(profile.index, name="offset")
             profile.index = offsets
             weight_years = day_counts.get(group_name, 0) / 365.0
+            group_mask = period_df["_group"] == group_name
+            base_timestamp = (
+                period_df.loc[group_mask].index.min().floor("D")
+                if group_mask.any()
+                else None
+            )
 
             period_profiles.append(
                 RepresentativeProfile(
@@ -662,6 +701,7 @@ def compute_period_statistics(
                     weight_years=weight_years,
                     offsets=offsets,
                     values=profile,
+                    base_timestamp=base_timestamp,
                 )
             )
 
