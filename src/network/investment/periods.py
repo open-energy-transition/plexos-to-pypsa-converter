@@ -344,7 +344,7 @@ def load_group_profiles(
                 continue
 
             if len(df) != len(offsets):  # pragma: no cover - defensive logging
-                logger.warning(
+                logger.debug(
                     "Profile length mismatch for '%s' (%d rows vs %d offsets)",
                     entry["name"],
                     len(df),
@@ -393,6 +393,16 @@ def configure_investment_periods(
     dict[str, pd.Timestamp],
 ]:
     """Apply investment-period snapshot structure and weights to a network."""
+    meta = manifest.get("_meta", {}) if manifest else {}
+    format_tag = meta.get("format", "representative")
+    if format_tag == "chronological":
+        return _configure_chronological_periods(
+            network=network,
+            manifest=manifest,
+            base_dir=base_dir,
+            period_order=period_order,
+        )
+
     default_base = pd.Timestamp("2000-01-01")
     profile_offsets = infer_profile_offsets(manifest, base_dir)
     inferred_periods = _detect_period_labels(manifest, period_order)
@@ -440,6 +450,114 @@ def configure_investment_periods(
         profile_offsets,
         period_base_dates,
     )
+
+
+def _configure_chronological_periods(
+    network: PyPSANetwork,
+    manifest: dict[str, Any],
+    base_dir: str | Path,
+    period_order: Sequence[str] | None = None,
+) -> tuple[
+    pd.MultiIndex,
+    pd.Series,
+    pd.Series,
+    dict[str, pd.TimedeltaIndex],
+    dict[str, pd.Timestamp],
+]:
+    """Configure MultiIndex snapshots for chronological manifests."""
+    base_dir = Path(base_dir)
+    snapshots_meta = manifest.get("snapshots")
+    if not snapshots_meta:
+        msg = "Chronological manifest missing 'snapshots' section."
+        raise ValueError(msg)
+    csv_name = snapshots_meta.get("csv")
+    if not csv_name:
+        msg = "Chronological manifest requires snapshots['csv'] entry."
+        raise ValueError(msg)
+
+    snapshot_path = base_dir / csv_name
+    if not snapshot_path.exists():
+        msg = f"Chronological snapshots CSV not found: {snapshot_path}"
+        raise FileNotFoundError(msg)
+
+    chronology_df = pd.read_csv(snapshot_path, parse_dates=["timestamp"])
+    if "period" not in chronology_df.columns:
+        msg = "Chronological snapshots CSV must contain a 'period' column."
+        raise ValueError(msg)
+
+    chronology_df = chronology_df.dropna(subset=["period"]).copy()
+    chronology_df["period"] = chronology_df["period"].astype(str)
+    chronology_df = chronology_df.sort_values("timestamp").reset_index(drop=True)
+
+    if period_order:
+        chronology_df["period"] = pd.Categorical(
+            chronology_df["period"],
+            categories=list(period_order),
+            ordered=True,
+        )
+        chronology_df = chronology_df.sort_values(
+            ["period", "timestamp"], kind="stable"
+        )
+        chronology_df["period"] = chronology_df["period"].astype(str)
+
+    if chronology_df.empty:
+        msg = "Chronological snapshots CSV produced no valid entries."
+        raise ValueError(msg)
+
+    if (
+        "weight_years" in chronology_df.columns
+        and chronology_df["weight_years"].notna().all()
+    ):
+        weight_values = chronology_df["weight_years"].astype(float).to_numpy()
+    else:
+        ts_series = chronology_df["timestamp"]
+        step_series = ts_series.diff().shift(-1)
+        if step_series.dropna().empty:
+            fallback_step = pd.Timedelta(minutes=60)
+        else:
+            fallback_step = step_series.dropna().mode().iloc[0]
+        step_series = step_series.fillna(fallback_step)
+        weight_values = (
+            (step_series.dt.total_seconds() / (8760 * 3600)).astype(float).to_numpy()
+        )
+        chronology_df["weight_years"] = weight_values
+
+    snapshots_index = pd.MultiIndex.from_arrays(
+        [chronology_df["period"].to_numpy(), chronology_df["timestamp"].to_numpy()],
+        names=["period", "timestamp"],
+    )
+
+    snapshot_weights = pd.Series(
+        weight_values,
+        index=snapshots_index,
+        name="snapshot_weight_years",
+    )
+    period_weights = snapshot_weights.groupby(level=0).sum()
+
+    network.set_snapshots(snapshots_index)
+    snapshot_df = network.snapshot_weightings.copy()
+    snapshot_df = snapshot_df.reindex(snapshots_index).fillna(0.0)
+    snapshot_df["objective"] = snapshot_weights.to_numpy()
+    snapshot_df["years"] = snapshot_weights.to_numpy()
+    network.snapshot_weightings = snapshot_df
+
+    period_df = pd.DataFrame(
+        {
+            "objective": period_weights,
+            "years": period_weights,
+        }
+    )
+    period_df.index.name = "period"
+    network.investment_period_weightings = period_df
+
+    period_base_dates = {
+        period: chronology_df.loc[chronology_df["period"] == period, "timestamp"].iloc[
+            0
+        ]
+        for period in period_weights.index
+    }
+
+    return snapshots_index, period_weights, snapshot_weights, {}, period_base_dates
 
 
 def get_snapshot_timestamps(snapshots: pd.Index) -> pd.DatetimeIndex:

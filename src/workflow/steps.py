@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,10 +18,8 @@ from network.generators_csv import (
 from network.investment import (
     InvestmentPeriod,
     build_day_type_classifier,
-    compute_period_statistics,
     get_snapshot_timestamps,
     load_directory_timeseries,
-    write_profile_csv,
 )
 from network.outages import (
     apply_outage_schedule,
@@ -49,9 +48,10 @@ def create_model_step(
 
 def prepare_investment_periods_step(
     model_dir: str,
-    timeslice_csv: str,
     trace_groups: Mapping[str, str],
     periods: Sequence[Mapping[str, int]],
+    timeslice_csv: str | None = None,
+    use_representative_days: bool = True,
     unique_day_labels: bool = False,
     network: pypsa.Network | None = None,
     enabled: bool = True,
@@ -71,23 +71,31 @@ def prepare_investment_periods_step(
         }
 
     base_dir = Path(model_dir)
-    timeslice_path = Path(timeslice_csv)
-    if not timeslice_path.is_absolute():
-        timeslice_path = base_dir / timeslice_csv
 
-    if group_patterns is None or not group_patterns:
-        group_patterns = {"base": []}
+    if use_representative_days:
+        if timeslice_csv is None:
+            msg = "timeslice_csv must be provided when use_representative_days=True"
+            raise ValueError(msg)
+        timeslice_path = Path(timeslice_csv)
+        if not timeslice_path.is_absolute():
+            timeslice_path = base_dir / timeslice_csv
 
-    if unique_day_labels:
+        if group_patterns is None or not group_patterns:
+            group_patterns = {"base": []}
 
-        def classifier(ts: pd.Timestamp) -> str:
-            return ts.strftime("%Y-%m-%d")
+        if unique_day_labels:
+
+            def classifier(ts: pd.Timestamp) -> str:
+                return ts.strftime("%Y-%m-%d")
+
+        else:
+            classifier = build_day_type_classifier(
+                timeslice_path,
+                group_patterns,
+                default_group=default_group,
+            )
     else:
-        classifier = build_day_type_classifier(
-            timeslice_path,
-            group_patterns,
-            default_group=default_group,
-        )
+        classifier = None
 
     investment_periods = []
     for period in periods:
@@ -111,60 +119,44 @@ def prepare_investment_periods_step(
     output_dir = base_dir / output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata: dict[str, dict[str, list[dict[str, float | str]]]] = {}
-    period_bases: dict[str, str] = {}
-    summary_totals: dict[str, dict[str, float]] = {}
+    if use_representative_days:
+        (
+            metadata,
+            period_bases,
+            summary_totals,
+            period_weights,
+        ) = _prepare_representative_groups(
+            base_dir=base_dir,
+            trace_groups=trace_groups,
+            investment_periods=investment_periods,
+            classifier=classifier,
+            output_dir=output_dir,
+            csv_pattern=csv_pattern,
+            file_limit=file_limit,
+        )
+        format_tag = "representative"
+    else:
+        (
+            metadata,
+            period_bases,
+            summary_totals,
+            period_weights,
+        ) = _prepare_chronological_groups(
+            base_dir=base_dir,
+            trace_groups=trace_groups,
+            investment_periods=investment_periods,
+            output_dir=output_dir,
+            csv_pattern=csv_pattern,
+            file_limit=file_limit,
+        )
+        format_tag = "chronological"
 
-    for group_label, definition in trace_groups.items():
-        if isinstance(definition, dict):
-            trace_path = definition.get("path")
-            pattern = definition.get("pattern", csv_pattern)
-            file_limit = definition.get("limit", file_limit)
-        else:
-            trace_path = definition
-            pattern = csv_pattern
-        target_path = Path(trace_path)
-        if not target_path.is_absolute():
-            target_path = base_dir / trace_path
-        try:
-            data = load_directory_timeseries(
-                target_path,
-                pattern=pattern,
-                limit=file_limit,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            logger.warning("Skipping investment trace group '%s': %s", group_label, exc)
-            continue
-        stats, bases = compute_period_statistics(data, investment_periods, classifier)
-        for label, base_ts in bases.items():
-            iso = pd.Timestamp(base_ts).isoformat()
-            period_bases.setdefault(label, iso)
-        metadata[group_label] = {}
-        summary_totals[group_label] = {}
-
-        for period_label, period_profiles in stats.items():
-            metadata[group_label][period_label] = []
-            total_weight = 0.0
-            for profile in period_profiles:
-                filename = f"{group_label}__{period_label}__{profile.name.replace(' ', '_')}.csv"
-                write_profile_csv(profile, output_dir / filename)
-                metadata[group_label][period_label].append(
-                    {
-                        "name": profile.name,
-                        "weight_years": profile.weight_years,
-                        "csv": filename,
-                        **(
-                            {"base": profile.base_timestamp.isoformat()}
-                            if profile.base_timestamp is not None
-                            else {}
-                        ),
-                    }
-                )
-                total_weight += profile.weight_years
-        summary_totals[group_label][period_label] = total_weight
-
+    meta_section = metadata.setdefault("_meta", {})
     if period_bases:
-        metadata.setdefault("_meta", {})["period_bases"] = period_bases
+        meta_section["period_bases"] = period_bases
+    if period_weights:
+        meta_section["period_weights"] = period_weights
+    meta_section["format"] = format_tag
 
     metadata_path = output_dir / metadata_filename
     metadata_path.write_text(json.dumps(metadata, indent=2))
@@ -176,6 +168,182 @@ def prepare_investment_periods_step(
             "group_totals": summary_totals,
         }
     }
+
+
+def _prepare_representative_groups(
+    **_: Any,
+) -> tuple[dict, dict[str, str], dict[str, dict[str, float]], dict[str, float]]:
+    """Print placeholder until representative-day aggregation is reintroduced.
+
+    The simplified investment-period workflow currently focuses on full chronology
+    support. Representative-day aggregation will be restored in a future revision
+    once the streamlined path is stable.
+    """
+    msg = (
+        "Representative-day aggregation is temporarily unavailable in the simplified "
+        "investment-period workflow. Set use_representative_days=False to generate a "
+        "chronological manifest."
+    )
+    raise NotImplementedError(msg)
+
+
+def _prepare_chronological_groups(
+    base_dir: Path,
+    trace_groups: Mapping[str, Any],
+    investment_periods: Sequence[InvestmentPeriod],
+    output_dir: Path,
+    csv_pattern: str = "*.csv",
+    file_limit: int | None = None,
+) -> tuple[dict, dict[str, str], dict[str, dict[str, float]], dict[str, float]]:
+    """Generate manifest metadata for full-chronology investment-period runs."""
+    normalized_groups: dict[str, dict[str, str]] = {}
+    resolved_groups: dict[str, tuple[Path, str]] = {}
+
+    for name, spec in trace_groups.items():
+        path, pattern, meta = _resolve_trace_group(
+            base_dir,
+            spec,
+            csv_pattern,
+        )
+        normalized_groups[name] = meta
+        resolved_groups[name] = (path, pattern or csv_pattern)
+
+    if not resolved_groups:
+        msg = "trace_groups must contain at least one entry (e.g. 'demand')."
+        raise ValueError(msg)
+
+    if "demand" in resolved_groups:
+        demand_path, demand_pattern = resolved_groups["demand"]
+    else:
+        demand_path, demand_pattern = next(iter(resolved_groups.values()))
+        logger.warning(
+            "No 'demand' trace group supplied; using '%s' to infer chronology.",
+            next(iter(normalized_groups)),
+        )
+
+    demand_df = load_directory_timeseries(
+        demand_path,
+        pattern=demand_pattern,
+        limit=file_limit,
+    )
+    demand_df = demand_df.sort_index()
+    if demand_df.empty:
+        msg = f"No demand profiles found in {demand_path}"
+        raise ValueError(msg)
+
+    timestamps = demand_df.index.unique().sort_values()
+    if timestamps.empty:
+        msg = f"No timestamps discovered in demand traces at {demand_path}"
+        raise ValueError(msg)
+
+    period_lookup = []
+    for ts in timestamps:
+        period = None
+        for investment_period in investment_periods:
+            if investment_period.contains(ts):
+                period = investment_period.label
+                break
+        period_lookup.append(period)
+
+    chronology_df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "period": period_lookup,
+        }
+    )
+    chronology_df = chronology_df.dropna(subset=["period"])
+    chronology_df["period"] = chronology_df["period"].astype(str)
+
+    if chronology_df.empty:
+        msg = (
+            "No timestamps fell within the specified investment periods. "
+            "Check the date ranges in the demand traces and period definitions."
+        )
+        raise ValueError(msg)
+
+    ts_series = chronology_df["timestamp"]
+    step_series = ts_series.diff().shift(-1)
+    if step_series.dropna().empty:
+        fallback_step = pd.Timedelta(minutes=60)
+    else:
+        fallback_step = step_series.dropna().mode().iloc[0]
+    step_series = step_series.fillna(fallback_step)
+    chronology_df["weight_years"] = (step_series / pd.Timedelta(hours=8760)).astype(
+        float
+    )
+
+    snapshot_csv = output_dir / "chronological_snapshots.csv"
+    chronology_df.to_csv(snapshot_csv, index=False)
+
+    period_weights_series = chronology_df.groupby("period")["weight_years"].sum()
+    period_weights = {
+        period: float(weight) for period, weight in period_weights_series.items()
+    }
+
+    period_bases = {
+        period: ts_series.loc[chronology_df["period"] == period].iloc[0].isoformat()
+        for period in period_weights
+    }
+
+    summary_totals = {"snapshots": period_weights.copy()}
+
+    relative_root = Path(os.path.relpath(base_dir, output_dir)).as_posix()
+
+    metadata = {
+        "_meta": {
+            "format": "chronological",
+            "trace_groups": normalized_groups,
+            "timeline": {
+                "start": ts_series.iloc[0].isoformat(),
+                "end": ts_series.iloc[-1].isoformat(),
+            },
+            "time_step_minutes": int(round(fallback_step / pd.Timedelta(minutes=1))),
+            "periods": [
+                {
+                    "label": period.label,
+                    "start_year": period.start_year,
+                    "end_year": period.end_year,
+                }
+                for period in investment_periods
+            ],
+            "model_root": relative_root,
+        },
+        "snapshots": {
+            "csv": snapshot_csv.name,
+            "columns": ["timestamp", "period", "weight_years"],
+            "total_years": float(sum(period_weights.values())),
+            "count": int(len(chronology_df)),
+            "period_weights_years": period_weights.copy(),
+        },
+    }
+
+    return metadata, period_bases, summary_totals, period_weights
+
+
+def _resolve_trace_group(
+    base_dir: Path,
+    spec: Any,
+    default_pattern: str,
+) -> tuple[Path, str, dict[str, str]]:
+    """Normalize trace group specification into filesystem paths."""
+    if isinstance(spec, str):
+        raw_path = Path(spec)
+        pattern = default_pattern
+    elif isinstance(spec, Mapping):
+        raw_path_value = spec.get("path")
+        if raw_path_value is None:
+            msg = "trace_groups entries must provide a 'path'."
+            raise ValueError(msg)
+        raw_path = Path(raw_path_value)
+        pattern = spec.get("pattern", default_pattern)
+    else:
+        msg = "trace_groups values must be a string path or mapping."
+        raise TypeError(msg)
+
+    path = raw_path if raw_path.is_absolute() else base_dir / raw_path
+    meta_path = raw_path.as_posix()
+
+    return path, pattern, {"path": meta_path, "pattern": pattern}
 
 
 def scale_p_min_pu_step(

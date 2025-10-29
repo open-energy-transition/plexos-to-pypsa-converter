@@ -12,6 +12,7 @@ from db.csv_readers import load_static_properties
 from network.carriers_csv import parse_fuel_prices_csv
 from network.core import (
     _add_loads_with_participation_factors,
+    _normalize_scenario_name,
     add_loads_flexible,
     add_snapshots,
     parse_demand_data,
@@ -23,6 +24,7 @@ from network.costs_csv import (
 from network.generators_csv import port_generators_csv
 from network.investment import (
     configure_investment_periods,
+    get_snapshot_timestamps,
     load_group_profiles,
     load_manifest,
 )
@@ -220,9 +222,11 @@ def setup_network_csv(
 
         manifest_data = load_manifest(manifest_path_obj)
         manifest_base = manifest_path_obj.parent
+        manifest_meta = manifest_data.get("_meta", {})
+        manifest_format = manifest_meta.get("format", "representative")
 
         (
-            _,
+            snapshots_index,
             period_weights,
             _,
             profile_offsets,
@@ -233,29 +237,71 @@ def setup_network_csv(
             base_dir=manifest_base,
         )
 
-        logger.info("Loading demand profiles from investment manifest...")
-        demand_profiles = load_group_profiles(
-            manifest_data,
-            manifest_base,
-            investment_group,
-            profile_offsets=profile_offsets,
-            period_base_dates=period_base_dates,
-        )
-        demand_profiles = demand_profiles.reindex(network.snapshots)
-        column_mapping = {
-            column: column.split("_", 1)[0] for column in demand_profiles.columns
-        }
-        collapsed_demand = demand_profiles.T.groupby(column_mapping).sum().T.fillna(0.0)
-        load_summary = _apply_investment_period_loads(
-            network=network,
-            demand_df=collapsed_demand,
-            demand_target_node=demand_target_node,
-        )
-
         investment_info = {
             "manifest": str(manifest_path_obj),
             "periods": period_weights.to_dict(),
+            "format": manifest_format,
         }
+
+        if manifest_format == "representative":
+            logger.info("Loading demand profiles from investment manifest...")
+            demand_profiles = load_group_profiles(
+                manifest_data,
+                manifest_base,
+                investment_group,
+                profile_offsets=profile_offsets,
+                period_base_dates=period_base_dates,
+            )
+            demand_profiles = demand_profiles.reindex(snapshots_index)
+            column_mapping = {
+                column: column.split("_", 1)[0] for column in demand_profiles.columns
+            }
+            collapsed_demand = (
+                demand_profiles.T.groupby(column_mapping).sum().T.fillna(0.0)
+            )
+            load_summary = _apply_investment_period_loads(
+                network=network,
+                demand_df=collapsed_demand,
+                demand_target_node=demand_target_node,
+            )
+        else:
+            logger.info(
+                "Loading chronological demand traces for investment-period snapshots..."
+            )
+            model_root_meta = manifest_meta.get("model_root", "..")
+            model_root_path = (manifest_base / model_root_meta).resolve()
+            demand_source_path = demand_source
+
+            if demand_source_path is None:
+                trace_meta = manifest_meta.get("trace_groups", {})
+                demand_spec = trace_meta.get("demand")
+                if isinstance(demand_spec, dict):
+                    demand_rel = demand_spec.get("path")
+                    if demand_rel:
+                        demand_source_path = (model_root_path / demand_rel).resolve()
+
+            if demand_source_path is None:
+                logger.warning(
+                    "Chronological investment manifest missing demand source; "
+                    "skipping load assignment."
+                )
+                load_summary = {"mode": "investment_periods", "loads": []}
+            else:
+                demand_df = parse_demand_data(str(demand_source_path))
+                demand_df = _select_chronological_demand_columns(
+                    demand_df,
+                    load_scenario=load_scenario,
+                )
+                timestamp_index = get_snapshot_timestamps(network.snapshots)
+                demand_df = demand_df.reindex(timestamp_index)
+                demand_df = demand_df.interpolate(method="linear").ffill().bfill()
+                demand_df.index = network.snapshots
+
+                load_summary = _apply_investment_period_loads(
+                    network=network,
+                    demand_df=demand_df,
+                    demand_target_node=demand_target_node,
+                )
     else:
         logger.info("Setting up snapshots and demand from CSV files...")
         if snapshots_source:
@@ -441,3 +487,39 @@ def _apply_investment_period_loads(
 
     logger.info("  Added %d loads from investment-period profiles", len(load_names))
     return {"mode": "investment_periods", "loads": load_names}
+
+
+def _select_chronological_demand_columns(
+    demand_df: pd.DataFrame, load_scenario: str | None
+) -> pd.DataFrame:
+    """Reduce iteration-formatted demand data to the requested scenario."""
+    is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
+    if not is_iteration_format:
+        return demand_df
+
+    iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
+    if not iteration_cols:
+        return demand_df
+
+    if load_scenario is None:
+        selected = iteration_cols[0]
+        logger.info(
+            "Multiple load scenarios detected (%s); defaulting to '%s'.",
+            iteration_cols,
+            selected,
+        )
+    else:
+        selected = _normalize_scenario_name(load_scenario, iteration_cols)
+        if selected is None:
+            logger.warning(
+                "Requested load_scenario '%s' not found. Available scenarios: %s. "
+                "Defaulting to '%s'.",
+                load_scenario,
+                iteration_cols,
+                iteration_cols[0],
+            )
+            selected = iteration_cols[0]
+
+    reduced = demand_df[[selected]].copy()
+    reduced.columns = [selected]
+    return reduced

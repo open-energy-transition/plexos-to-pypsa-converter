@@ -140,11 +140,15 @@ def _create_electricity_model(
                     snapshots_source = str(candidate_path)
                     break
 
+        detected_snapshots_source = snapshots_source
+
+        if demand_source is None:
+            demand_source = snapshots_source
+
         if use_investment_periods:
             snapshots_source = None
-            demand_source = None
-        elif demand_source is None:
-            demand_source = snapshots_source
+            if demand_source is None:
+                demand_source = detected_snapshots_source
 
         print("Setting up electricity model from CSVs...")
         setup_summary = setup_network_csv(
