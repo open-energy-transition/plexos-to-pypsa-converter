@@ -270,7 +270,9 @@ def infer_profile_offsets(
     """Infer intraday offsets for each representative day profile."""
     base_dir = Path(base_dir)
     offsets: dict[str, pd.TimedeltaIndex] = {}
-    for profile_set in manifest.values():
+    for group_name, profile_set in manifest.items():
+        if group_name.startswith("_") or not isinstance(profile_set, dict):
+            continue
         for entries in profile_set.values():
             for entry in entries:
                 name = entry["name"]
@@ -315,8 +317,10 @@ def load_group_profiles(
     )
 
     if period_base_dates is None:
-        period_base_dates = _infer_period_base_dates(
-            sorted(group_data.keys()), base_timestamp
+        period_base_dates = _extract_period_base_dates(
+            manifest,
+            sorted(group_data.keys()),
+            base_timestamp,
         )
 
     frames: list[pd.DataFrame] = []
@@ -373,7 +377,14 @@ def configure_investment_periods(
     dict[str, pd.Timestamp],
 ]:
     """Apply investment-period snapshot structure and weights to a network."""
+    default_base = pd.Timestamp("2000-01-01")
     profile_offsets = infer_profile_offsets(manifest, base_dir)
+    inferred_periods = _detect_period_labels(manifest, period_order)
+    period_base_dates = _extract_period_base_dates(
+        manifest,
+        inferred_periods,
+        default_base,
+    )
     (
         snapshots_index,
         period_weights,
@@ -384,6 +395,7 @@ def configure_investment_periods(
         period_order=period_order,
         representative_order=representative_order,
         profile_offsets=profile_offsets,
+        period_base_dates=period_base_dates,
     )
 
     network.set_snapshots(snapshots_index)
@@ -426,7 +438,9 @@ def _detect_period_labels(
     order: Sequence[str] | None,
 ) -> list[str]:
     labels: set[str] = set()
-    for group_data in manifest.values():
+    for group_name, group_data in manifest.items():
+        if group_name.startswith("_") or not isinstance(group_data, dict):
+            continue
         labels.update(group_data.keys())
     if order:
         ordered = [label for label in order if label in labels]
@@ -496,6 +510,30 @@ def _assign_base_datetimes(
         name: base_timestamp + pd.to_timedelta(idx, unit="D")
         for idx, name in enumerate(ordered)
     }
+
+
+def _extract_period_base_dates(
+    manifest: dict[str, Any],
+    periods: Sequence[str],
+    default_base: pd.Timestamp,
+) -> dict[str, pd.Timestamp]:
+    bases: dict[str, pd.Timestamp] = {}
+    raw_meta = manifest.get("_meta", {})
+    raw_bases = raw_meta.get("period_bases", {})
+    for label in periods:
+        value = raw_bases.get(label)
+        if value is None:
+            continue
+        try:
+            bases[label] = pd.Timestamp(value)
+        except (ValueError, TypeError):  # pragma: no cover - invalid metadata
+            continue
+    # Fill missing periods with inferred defaults
+    missing = [label for label in periods if label not in bases]
+    if missing:
+        inferred = _infer_period_base_dates(missing, default_base)
+        bases.update(inferred)
+    return bases
 
 
 def _infer_period_base_dates(
@@ -576,15 +614,21 @@ def compute_period_statistics(
     data: pd.DataFrame,
     periods: Iterable[InvestmentPeriod],
     classifier: TimeClassifier,
-) -> dict[str, list[RepresentativeProfile]]:
+) -> tuple[dict[str, list[RepresentativeProfile]], dict[str, pd.Timestamp]]:
     """Aggregate intraday profiles and weights for each investment period."""
     results: dict[str, list[RepresentativeProfile]] = {}
+    period_bases: dict[str, pd.Timestamp] = {}
     for period in periods:
         mask = data.index.map(period.contains)
         period_data = data.loc[mask]
         if period_data.empty:
             results[period.label] = []
+            period_bases[period.label] = pd.Timestamp(period.start_year, 1, 1)
             continue
+
+        # Record canonical base date (start of first day represented in this period)
+        period_start = period_data.index.min().floor("D")
+        period_bases[period.label] = period_start
 
         # Add helper columns for grouping and averaging
         period_df = period_data.copy()
@@ -623,4 +667,4 @@ def compute_period_statistics(
 
         results[period.label] = period_profiles
 
-    return results
+    return results, period_bases
