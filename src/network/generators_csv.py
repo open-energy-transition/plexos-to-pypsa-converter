@@ -88,12 +88,12 @@ def parse_generator_ratings_csv(
     >>> ratings = parse_generator_ratings_csv(csv_dir, network, "timeslice.csv")
     >>> network.generators_t.p_max_pu = ratings
     """
-    snapshots = network.snapshots
+    snapshot_times = get_snapshot_timestamps(network.snapshots)
 
     # Load timeslice activity if provided
     timeslice_activity = None
     if timeslice_csv is not None:
-        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshots)
+        timeslice_activity = read_timeslice_activity(timeslice_csv, snapshot_times)
 
     # Load static generator properties
     generator_df = load_static_properties(csv_dir, "Generator")
@@ -104,7 +104,7 @@ def parse_generator_ratings_csv(
     if generator_df.empty:
         logger.warning("No generators found in CSV that match network generators")
         return pd.DataFrame(
-            index=snapshots, columns=network.generators.index, dtype=float
+            index=snapshot_times, columns=network.generators.index, dtype=float
         )
 
     # Load time-varying properties for Rating, Rating Factor, and Max Capacity
@@ -133,7 +133,7 @@ def parse_generator_ratings_csv(
         gen_time_varying=gen_time_varying,
         generator_df=generator_df,
         network=network,
-        snapshots=snapshots,
+        snapshots=snapshot_times,
         timeslice_activity=timeslice_activity,
         dataid_to_timeslice=dataid_to_timeslice,
     )
@@ -2169,9 +2169,9 @@ def build_units_timeseries(
                 # No end date, apply until end of simulation
                 end_date = snapshots[-1]
 
-            # Apply Units value to snapshots in this range
-            mask = (snapshots >= start_date) & (snapshots <= end_date)
-            units_ts.loc[mask] = units_float
+        # Apply Units value to snapshots in this range
+        mask = (snapshots >= start_date) & (snapshots <= end_date)
+        units_ts.loc[mask] = units_float
 
     return units_ts
 
@@ -2252,7 +2252,7 @@ def apply_generator_units_timeseries_csv(
     >>> print(f"  - {summary['generators_with_new_builds']} with new builds")
     """
     csv_dir = Path(csv_dir)
-    snapshots = network.snapshots
+    snapshot_times = get_snapshot_timestamps(network.snapshots)
 
     logger.info(
         "Applying generator Units time series for capacity scaling and retirements..."
@@ -2309,7 +2309,7 @@ def apply_generator_units_timeseries_csv(
 
         # Build Units time series
         units_ts = build_units_timeseries(
-            gen, static_units_str, time_varying, snapshots
+            gen, static_units_str, time_varying, snapshot_times
         )
 
         # Get max Units value (determines p_nom)

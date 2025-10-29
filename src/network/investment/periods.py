@@ -350,7 +350,10 @@ def load_group_profiles(
                     len(df),
                     len(offsets),
                 )
-                offsets = offsets[: len(df)]
+                step_minutes = 0 if len(df) <= 1 else 1440 / len(df)
+                offsets = pd.to_timedelta(
+                    [i * step_minutes for i in range(len(df))], unit="m"
+                )
 
             entry_base = entry.get("base")
             if entry_base is not None:
