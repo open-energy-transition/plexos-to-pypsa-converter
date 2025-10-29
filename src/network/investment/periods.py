@@ -10,13 +10,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from pypsa import Network as PyPSANetwork
+else:  # pragma: no cover - runtime type fallback
+    PyPSANetwork = Any
 
 logger = logging.getLogger(__name__)
 
@@ -200,54 +206,53 @@ def build_snapshot_multiindex(
     manifest: dict[str, Any],
     period_order: Sequence[str] | None = None,
     representative_order: Sequence[str] | None = None,
-    profile_lengths: Mapping[str, int] | None = None,
-) -> tuple[pd.MultiIndex, pd.Series, pd.Series]:
-    """Construct MultiIndex snapshots and weighting series from manifest data.
+    profile_offsets: Mapping[str, pd.TimedeltaIndex] | None = None,
+    base_timestamp: pd.Timestamp | None = None,
+    period_base_dates: Mapping[str, pd.Timestamp] | None = None,
+) -> tuple[pd.MultiIndex, pd.Series, pd.Series, dict[str, pd.Timestamp]]:
+    """Construct MultiIndex snapshots and weighting series from manifest data."""
+    if profile_offsets is None:
+        msg = "profile_offsets must be provided to build snapshot index"
+        raise ValueError(msg)
 
-    Parameters
-    ----------
-    manifest : dict
-        Parsed JSON manifest mapping profile groups to period metadata.
-    period_order : sequence of str, optional
-        Explicit ordering of period labels. When omitted, periods are sorted.
-    representative_order : sequence of str, optional
-        Ordering of day-type names within each period.
-    profile_lengths : mapping, optional
-        Precomputed lengths (number of representative timesteps) for each
-        day-type name. Defaults to 48 half-hour slots.
+    if base_timestamp is None:
+        base_timestamp = pd.Timestamp("2000-01-01")
 
-    Returns
-    -------
-    snapshots : pd.MultiIndex
-        MultiIndex with levels (period, snapshot_label) suitable for PyPSA.
-    period_weights : pd.Series
-        Series indexed by period level with year-based weightings.
-    snapshot_weights : pd.Series
-        Series aligned with snapshots giving per-snapshot weights (years).
-    """
     periods = _detect_period_labels(manifest, period_order)
-    snapshot_labels: list[tuple[str, str]] = []
-    snapshot_weights: dict[tuple[str, str], float] = {}
+    if period_base_dates is None:
+        period_base_dates = _infer_period_base_dates(periods, base_timestamp)
+    representative_names = profile_offsets.keys()
+    base_datetimes = _assign_base_datetimes(
+        representative_names,
+        representative_order,
+        base_timestamp,
+    )
+
+    snapshot_labels: list[tuple[str, pd.Timestamp]] = []
+    snapshot_weights: dict[tuple[str, pd.Timestamp], float] = {}
     period_weights: dict[str, float] = {}
 
     for period in periods:
         groups = _collect_groups(manifest, period, representative_order)
         total_weight = 0.0
         for group_name, weight_years in groups:
-            total_weight += weight_years
-            length = profile_lengths.get(group_name, 48) if profile_lengths else 48
-            if length <= 0:
+            offsets = profile_offsets.get(group_name)
+            if offsets is None or len(offsets) == 0:
                 continue
-            per_snapshot_weight = weight_years / length
-            for idx in range(length):
-                label = f"{group_name}::{idx:02d}"
-                snapshot_labels.append((period, label))
-                snapshot_weights[(period, label)] = per_snapshot_weight
+            total_weight += weight_years
+            per_snapshot_weight = weight_years / len(offsets)
+            group_offset = base_datetimes[group_name] - base_timestamp
+            period_base = period_base_dates.get(period, base_timestamp)
+            timestamps = period_base + group_offset + offsets
+            for ts in timestamps:
+                key = (period, ts)
+                snapshot_labels.append(key)
+                snapshot_weights[key] = per_snapshot_weight
         period_weights[period] = total_weight
 
     snapshots_index = pd.MultiIndex.from_tuples(
         snapshot_labels,
-        names=["period", "snapshot"],
+        names=["period", "timestamp"],
     )
     period_series = pd.Series(period_weights, name="period_weight_years")
     snapshot_series = (
@@ -255,34 +260,42 @@ def build_snapshot_multiindex(
         .reindex(snapshots_index)
         .fillna(0.0)
     )
-    return snapshots_index, period_series, snapshot_series
+    return snapshots_index, period_series, snapshot_series, dict(period_base_dates)
 
 
-def infer_profile_lengths(
+def infer_profile_offsets(
     manifest: dict[str, Any],
     base_dir: str | Path,
-) -> dict[str, int]:
-    """Infer number of timesteps for each representative day-type."""
+) -> dict[str, pd.TimedeltaIndex]:
+    """Infer intraday offsets for each representative day profile."""
     base_dir = Path(base_dir)
-    lengths: dict[str, int] = {}
+    offsets: dict[str, pd.TimedeltaIndex] = {}
     for profile_set in manifest.values():
         for entries in profile_set.values():
             for entry in entries:
                 name = entry["name"]
-                if name in lengths:
+                if name in offsets:
                     continue
                 csv_path = base_dir / entry["csv"]
                 df = pd.read_csv(csv_path)
                 if "minutes" in df.columns:
-                    df = df.drop(columns="minutes")
-                lengths[name] = len(df)
-    return lengths
+                    minutes = df["minutes"].to_numpy()
+                else:
+                    count = max(len(df), 1)
+                    step = 1440 / count
+                    minutes = [idx * step for idx in range(count)]
+                offsets[name] = pd.to_timedelta(minutes, unit="m")
+    return offsets
 
 
 def load_group_profiles(
     manifest: dict[str, Any],
     base_dir: str | Path,
     group: str,
+    profile_offsets: Mapping[str, pd.TimedeltaIndex] | None = None,
+    representative_order: Sequence[str] | None = None,
+    base_timestamp: pd.Timestamp | None = None,
+    period_base_dates: Mapping[str, pd.Timestamp] | None = None,
 ) -> pd.DataFrame:
     """Load representative-day profiles for a specific group into MultiIndex frame."""
     base_dir = Path(base_dir)
@@ -291,6 +304,21 @@ def load_group_profiles(
         msg = f"Group '{group}' not found in investment manifest keys: {list(manifest.keys())}"
         raise KeyError(msg)
 
+    if profile_offsets is None:
+        profile_offsets = infer_profile_offsets(manifest, base_dir)
+
+    if base_timestamp is None:
+        base_timestamp = pd.Timestamp("2000-01-01")
+
+    base_datetimes = _assign_base_datetimes(
+        profile_offsets.keys(), representative_order, base_timestamp
+    )
+
+    if period_base_dates is None:
+        period_base_dates = _infer_period_base_dates(
+            sorted(group_data.keys()), base_timestamp
+        )
+
     frames: list[pd.DataFrame] = []
     for period_label, entries in group_data.items():
         for entry in entries:
@@ -298,19 +326,99 @@ def load_group_profiles(
             df = pd.read_csv(csv_path)
             if "minutes" in df.columns:
                 df = df.drop(columns="minutes")
-            snapshot_labels = [f"{entry['name']}::{idx:02d}" for idx in range(len(df))]
-            df.insert(0, "_snapshot", snapshot_labels)
-            df.insert(0, "_period", period_label)
+
+            offsets = profile_offsets.get(entry["name"])
+            if offsets is None or len(offsets) == 0:
+                continue
+
+            if len(df) != len(offsets):  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Profile length mismatch for '%s' (%d rows vs %d offsets)",
+                    entry["name"],
+                    len(df),
+                    len(offsets),
+                )
+                offsets = offsets[: len(df)]
+
+            group_offset = base_datetimes[entry["name"]] - base_timestamp
+            period_base = period_base_dates.get(period_label, base_timestamp)
+            timestamps = period_base + group_offset + offsets
+            index = pd.MultiIndex.from_arrays(
+                [[period_label] * len(timestamps), timestamps],
+                names=["period", "timestamp"],
+            )
+            df.index = index
             frames.append(df)
 
     if not frames:
         msg = f"No profiles found for group '{group}' in manifest."
         raise ValueError(msg)
 
-    combined = pd.concat(frames, ignore_index=True)
-    combined = combined.set_index(["_period", "_snapshot"])
-    combined.index.names = ["period", "snapshot"]
+    combined = pd.concat(frames, axis=0)
+    combined = combined.sort_index()
     return combined
+
+
+def configure_investment_periods(
+    network: PyPSANetwork,
+    manifest: dict[str, Any],
+    base_dir: str | Path,
+    period_order: Sequence[str] | None = None,
+    representative_order: Sequence[str] | None = None,
+) -> tuple[
+    pd.MultiIndex,
+    pd.Series,
+    pd.Series,
+    dict[str, pd.TimedeltaIndex],
+    dict[str, pd.Timestamp],
+]:
+    """Apply investment-period snapshot structure and weights to a network."""
+    profile_offsets = infer_profile_offsets(manifest, base_dir)
+    (
+        snapshots_index,
+        period_weights,
+        snapshot_weights,
+        period_base_dates,
+    ) = build_snapshot_multiindex(
+        manifest,
+        period_order=period_order,
+        representative_order=representative_order,
+        profile_offsets=profile_offsets,
+    )
+
+    network.set_snapshots(snapshots_index)
+    snapshot_df = network.snapshot_weightings.copy()
+    snapshot_df = snapshot_df.reindex(snapshots_index)
+    snapshot_df["objective"] = snapshot_weights.to_numpy()
+    snapshot_df["years"] = snapshot_weights.to_numpy()
+    network.snapshot_weightings = snapshot_df
+
+    period_df = pd.DataFrame(
+        {
+            "objective": period_weights,
+            "years": period_weights,
+        }
+    )
+    period_df.index.name = "period"
+    network.investment_period_weightings = period_df
+
+    return (
+        snapshots_index,
+        period_weights,
+        snapshot_weights,
+        profile_offsets,
+        period_base_dates,
+    )
+
+
+def get_snapshot_timestamps(snapshots: pd.Index) -> pd.DatetimeIndex:
+    """Return the datetime level of a snapshots index (supports MultiIndex)."""
+    if isinstance(snapshots, pd.MultiIndex):
+        for name in ("timestamp", "timestep", "time", "datetime"):
+            if name in snapshots.names:
+                return pd.DatetimeIndex(snapshots.get_level_values(name))
+        return pd.DatetimeIndex(snapshots.get_level_values(-1))
+    return pd.DatetimeIndex(snapshots)
 
 
 def _detect_period_labels(
@@ -355,6 +463,57 @@ def _collect_groups(
         return ordered + remainder
 
     return sorted(weights.items(), key=lambda item: item[0])
+
+
+def _order_representatives(
+    names: Iterable[str],
+    representative_order: Sequence[str] | None,
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    if representative_order:
+        for name in representative_order:
+            if name in names and name not in seen:
+                ordered.append(name)
+                seen.add(name)
+
+    for name in sorted(names):
+        if name not in seen:
+            ordered.append(name)
+            seen.add(name)
+
+    return ordered
+
+
+def _assign_base_datetimes(
+    names: Iterable[str],
+    representative_order: Sequence[str] | None,
+    base_timestamp: pd.Timestamp,
+) -> dict[str, pd.Timestamp]:
+    ordered = _order_representatives(names, representative_order)
+    return {
+        name: base_timestamp + pd.to_timedelta(idx, unit="D")
+        for idx, name in enumerate(ordered)
+    }
+
+
+def _infer_period_base_dates(
+    periods: Sequence[str],
+    base_timestamp: pd.Timestamp,
+) -> dict[str, pd.Timestamp]:
+    base_dates: dict[str, pd.Timestamp] = {}
+    for idx, label in enumerate(periods):
+        match = re.search(r"(\d{4})", str(label))
+        if match:
+            year = int(match.group(1))
+            try:
+                base_dates[label] = pd.Timestamp(year=year, month=1, day=1)
+                continue
+            except ValueError:  # pragma: no cover - invalid year safeguard
+                pass
+        base_dates[label] = base_timestamp + pd.to_timedelta(idx, unit="Y")
+    return base_dates
 
 
 def _resolution_from_period(period: pd.Series) -> int:
