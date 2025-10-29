@@ -570,6 +570,147 @@ def get_snapshot_timestamps(snapshots: pd.Index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(snapshots)
 
 
+def apply_investment_periods_to_network(
+    network: PyPSANetwork,
+    periods: Sequence[InvestmentPeriod | Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Convert an existing chronological network to investment-period snapshots."""
+    if isinstance(network.snapshots, pd.MultiIndex):
+        logger.info("Network already uses a MultiIndex for snapshots; skipping.")
+        return {
+            "applied": False,
+            "periods": list(getattr(network, "periods", [])),
+        }
+
+    if not periods:
+        msg = "investment periods must be provided for conversion"
+        raise ValueError(msg)
+
+    investment_periods: list[InvestmentPeriod] = []
+    for entry in periods:
+        if isinstance(entry, InvestmentPeriod):
+            investment_periods.append(entry)
+        else:
+            label = entry.get("label")
+            start_year = entry.get("start_year", entry.get("start"))
+            end_year = entry.get("end_year", entry.get("end"))
+            if label is None or start_year is None or end_year is None:
+                msg = f"Invalid investment period entry: {entry}"
+                raise ValueError(msg)
+            investment_periods.append(
+                InvestmentPeriod(
+                    label=str(label), start_year=int(start_year), end_year=int(end_year)
+                )
+            )
+
+    chronological_snapshots = pd.DatetimeIndex(network.snapshots)
+    period_labels: list[str | None] = []
+    for ts in chronological_snapshots:
+        label = None
+        for period in investment_periods:
+            if period.contains(ts):
+                label = period.label
+                break
+        period_labels.append(label)
+
+    valid_mask = [label is not None for label in period_labels]
+    if not any(valid_mask):
+        msg = "No snapshots fall within the provided investment periods."
+        raise ValueError(msg)
+
+    filtered_snapshots = chronological_snapshots[valid_mask]
+    filtered_periods = [str(label) for label in period_labels if label is not None]
+
+    multi_index = pd.MultiIndex.from_arrays(
+        [filtered_periods, filtered_snapshots], names=["period", "timestamp"]
+    )
+
+    # Capture existing time-series data indexed by snapshots
+    dynamic_tables: list[tuple[Any, str, pd.DataFrame]] = []
+    panel_attrs = [
+        attr
+        for attr in dir(network)
+        if attr.endswith("_t") and not attr.startswith("_")
+    ]
+    for attr_name in panel_attrs:
+        panel = getattr(network, attr_name)
+        if not hasattr(panel, "items"):
+            continue
+        for key, df in panel.items():
+            if not isinstance(df, pd.DataFrame):
+                continue
+            if df.empty:
+                dynamic_tables.append((panel, key, df.copy()))
+                continue
+            if isinstance(df.index, pd.MultiIndex):
+                # Should not happen pre-conversion, but handle defensively
+                chrono_index = df.index.get_level_values(-1)
+                df_filtered = df.loc[chrono_index.isin(filtered_snapshots)].copy()
+                df_filtered.index = filtered_snapshots
+            else:
+                df_filtered = df.reindex(filtered_snapshots).copy()
+            dynamic_tables.append((panel, key, df_filtered))
+
+    # Capture existing snapshot weightings aligned to chronological snapshots
+    snapshot_weightings = network.snapshot_weightings.reindex(
+        chronological_snapshots
+    ).fillna(0.0)
+    snapshot_weightings = snapshot_weightings.loc[filtered_snapshots]
+
+    # Apply new snapshots to the network (resets internal structures)
+    network.set_snapshots(multi_index)
+
+    # Restore time-series tables with MultiIndex snapshots
+    for panel, key, df in dynamic_tables:
+        if len(df.index) != len(multi_index):
+            df = df.reindex(filtered_snapshots).fillna(0.0)
+        df.index = multi_index
+        panel[key] = df
+
+    # Compute snapshot weights (years) from chronological spacing
+    timestamp_series = pd.Series(filtered_snapshots)
+    diffs = timestamp_series.diff().shift(-1)
+    if diffs.dropna().empty:
+        step = pd.Timedelta(hours=1)
+    else:
+        step = diffs.dropna().iloc[-1]
+    diffs = diffs.fillna(step)
+    hours = diffs.dt.total_seconds() / 3600.0
+    snapshot_years = hours / 8760.0
+    snapshot_weights = pd.Series(snapshot_years.to_numpy(), index=multi_index)
+
+    # Update snapshot weightings DataFrame
+    network.snapshot_weightings.loc[:, :] = 0.0
+    for column in network.snapshot_weightings.columns:
+        network.snapshot_weightings[column] = snapshot_weights.to_numpy()
+    if "objective" not in network.snapshot_weightings.columns:
+        network.snapshot_weightings["objective"] = snapshot_weights.to_numpy()
+    if "years" not in network.snapshot_weightings.columns:
+        network.snapshot_weightings["years"] = snapshot_weights.to_numpy()
+
+    # Restore any additional snapshot weighting columns from original where possible
+    for column in snapshot_weightings.columns:
+        if column in {"objective", "years"}:
+            continue
+        if column in network.snapshot_weightings.columns:
+            network.snapshot_weightings[column] = snapshot_weights.to_numpy()
+
+    # Set investment period weightings
+    period_weights = snapshot_weights.groupby(level=0).sum()
+    network.investment_period_weightings = pd.DataFrame(
+        {
+            "objective": period_weights,
+            "years": period_weights,
+        }
+    )
+
+    return {
+        "applied": True,
+        "period_weights": period_weights.to_dict(),
+        "snapshot_weight_total_years": float(snapshot_weights.sum()),
+    }
+
+
 def _detect_period_labels(
     manifest: dict[str, Any],
     order: Sequence[str] | None,

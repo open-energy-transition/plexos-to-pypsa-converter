@@ -48,8 +48,8 @@ def create_model_step(
 
 def prepare_investment_periods_step(
     model_dir: str,
-    trace_groups: Mapping[str, str],
     periods: Sequence[Mapping[str, int]],
+    trace_groups: Mapping[str, Any] | None = None,
     timeslice_csv: str | None = None,
     use_representative_days: bool = True,
     unique_day_labels: bool = False,
@@ -71,6 +71,10 @@ def prepare_investment_periods_step(
         }
 
     base_dir = Path(model_dir)
+    if trace_groups is None:
+        trace_groups = _discover_default_trace_groups(base_dir)
+    else:
+        trace_groups = dict(trace_groups)
 
     if use_representative_days:
         if timeslice_csv is None:
@@ -344,6 +348,89 @@ def _resolve_trace_group(
     meta_path = raw_path.as_posix()
 
     return path, pattern, {"path": meta_path, "pattern": pattern}
+
+
+def _discover_default_trace_groups(base_dir: Path) -> dict[str, Any]:
+    """Auto-detect common trace directories within a model export."""
+    search_map: dict[str, list[tuple[str, str]]] = {
+        "demand": [
+            ("Traces/demand", "*.csv"),
+            ("Traces/load", "*.csv"),
+            ("demand", "*.csv"),
+            ("load", "*.csv"),
+            ("LoadProfile", "*.csv"),
+            ("Load", "*.csv"),
+        ],
+        "solar": [
+            ("Traces/solar", "*.csv"),
+            ("Traces/VRE/Solar", "*.csv"),
+            ("solar", "*.csv"),
+            ("Solar", "*.csv"),
+        ],
+        "wind": [
+            ("Traces/wind", "*.csv"),
+            ("Traces/VRE/Wind", "*.csv"),
+            ("wind", "*.csv"),
+            ("Wind", "*.csv"),
+        ],
+        "storage_inflows": [
+            ("Traces/hydro", "MonthlyNaturalInflow_*.csv"),
+            ("Traces/hydro", "NaturalInflow_*.csv"),
+            ("Traces/hydro", "*.csv"),
+        ],
+        "hydro_rating": [
+            ("Traces/hydro", "HydroRating_*.csv"),
+        ],
+        "hydro_min_stable": [
+            ("Traces/hydro", "HydroMinStable_*.csv"),
+        ],
+    }
+
+    discovered: dict[str, Any] = {}
+    base_dir = base_dir.resolve()
+
+    root_candidates: list[Path] = [base_dir]
+    csv_root = base_dir / "csvs_from_xml"
+    if csv_root.exists():
+        root_candidates.append(csv_root)
+        root_candidates.extend(
+            [child for child in csv_root.iterdir() if child.is_dir()]
+        )
+
+    for group_name, options in search_map.items():
+        for rel_path, pattern in options:
+            for root in root_candidates:
+                dir_path = (root / rel_path).resolve()
+                if not dir_path.exists() or not dir_path.is_dir():
+                    continue
+                if not any(dir_path.glob(pattern)):
+                    continue
+                rel_entry = dir_path.relative_to(base_dir)
+                if pattern == "*.csv":
+                    discovered[group_name] = rel_entry.as_posix()
+                else:
+                    discovered[group_name] = {
+                        "path": rel_entry.as_posix(),
+                        "pattern": pattern,
+                    }
+                logger.debug(
+                    "Trace group '%s' auto-detected at %s (pattern=%s)",
+                    group_name,
+                    dir_path,
+                    pattern,
+                )
+                break
+            if group_name in discovered:
+                break
+
+    if "demand" not in discovered:
+        msg = (
+            "Unable to auto-detect demand traces for investment-period aggregation. "
+            "Expected directories such as 'Traces/demand' or 'demand/'."
+        )
+        raise FileNotFoundError(msg)
+
+    return discovered
 
 
 def scale_p_min_pu_step(

@@ -3,6 +3,7 @@
 from network.investment.periods import (
     InvestmentPeriod,
     RepresentativeProfile,
+    apply_investment_periods_to_network,
     build_day_type_classifier,
     build_snapshot_multiindex,
     compute_period_statistics,
@@ -24,6 +25,7 @@ __all__ = [
     "build_snapshot_multiindex",
     "configure_investment_periods",
     "compute_period_statistics",
+    "apply_investment_periods_to_network",
     "get_snapshot_timestamps",
     "load_manifest",
     "load_group_profiles",

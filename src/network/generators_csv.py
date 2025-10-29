@@ -758,8 +758,18 @@ def add_generators_csv(
             snapshot_times = get_snapshot_timestamps(network.snapshots)
         else:
             snapshot_times = pd.DatetimeIndex(network.snapshots)
+
+    def _align_series_to_snapshots(series: pd.Series) -> pd.Series:
+        if snapshot_times is None:
+            aligned = series.copy()
+        else:
+            aligned = series.reindex(snapshot_times).fillna(0.0)
+        if isinstance(network.snapshots, pd.MultiIndex):
+            return pd.Series(aligned.to_numpy(), index=network.snapshots)
+        return aligned
         if len(snapshot_times) > 0:
             model_start_date = snapshot_times.min()
+            print(f"Model start date determined as {model_start_date}")
 
     for gen in generators:
         # Check for time-varying Max Capacity with dates (capacity expansions)
@@ -1726,36 +1736,6 @@ def load_data_file_profiles_csv(
                 network.add("Carrier", carrier)
                 logger.info(f"Created carrier: {carrier}")
 
-    investment_profiles = None
-    investment_base_dir: Path | None = None
-    if use_investment_periods:
-        if load_manifest is None or load_group_profiles is None:
-            msg = (
-                "Investment-period helpers unavailable; cannot load profiles in "
-                "investment-period mode."
-            )
-            raise RuntimeError(msg)
-        if not investment_manifest:
-            msg = "investment_manifest path must be provided for investment-period mode"
-            raise ValueError(msg)
-        if not investment_group:
-            msg = "investment_group must be specified for investment-period mode"
-            raise ValueError(msg)
-        manifest_data = load_manifest(investment_manifest)
-        if investment_group not in manifest_data:
-            logger.warning(
-                "Investment manifest missing group '%s'; falling back to chronological profiles.",
-                investment_group,
-            )
-        else:
-            investment_base_dir = Path(investment_manifest).parent
-            investment_profiles = load_group_profiles(
-                manifest_data,
-                investment_base_dir,
-                investment_group,
-            )
-            investment_profiles = investment_profiles.reindex(network.snapshots)
-
     # Step 4: Load and apply profiles
     profile_dict = {}
     skipped_generators = []
@@ -1789,30 +1769,6 @@ def load_data_file_profiles_csv(
                 f"No CSV file mapping for data file '{datafile_obj}' (gen: {gen_name})"
             )
             skipped_generators.append(gen_name)
-            continue
-
-        if use_investment_periods:
-            column_key = Path(csv_filename).stem
-            if (
-                investment_profiles is None
-                or column_key not in investment_profiles.columns
-            ):
-                logger.warning(
-                    "Investment-period profile column '%s' not found for generator %s",
-                    column_key,
-                    gen_name,
-                )
-                skipped_generators.append(gen_name)
-                continue
-            profile_series = investment_profiles[column_key]
-            if value_scaling != 1.0:
-                profile_series = profile_series * value_scaling
-            profile_dict[gen_name] = profile_series
-            logger.info(
-                "Loaded investment-period profile for %s using column %s",
-                gen_name,
-                column_key,
-            )
             continue
 
         csv_path = profiles_path / csv_filename
@@ -1890,7 +1846,14 @@ def load_data_file_profiles_csv(
         # Apply profiles based on mode
         for gen_name, profile_series in profile_dict.items():
             # Align to network snapshots
-            aligned_profile = profile_series.reindex(snapshots).fillna(0)
+            if snapshot_times is None:
+                aligned = profile_series.copy()
+            else:
+                aligned = profile_series.reindex(snapshot_times).fillna(0.0)
+            if isinstance(network.snapshots, pd.MultiIndex):
+                aligned_profile = pd.Series(aligned.to_numpy(), index=network.snapshots)
+            else:
+                aligned_profile = aligned
 
             if apply_mode == "replace":
                 network.generators_t[target_property][gen_name] = aligned_profile
@@ -2372,6 +2335,8 @@ def apply_generator_units_timeseries_csv(
         units_ts = build_units_timeseries(
             gen, static_units_str, time_varying, snapshot_times
         )
+        if isinstance(network.snapshots, pd.MultiIndex):
+            units_ts = pd.Series(units_ts.to_numpy(), index=network.snapshots)
 
         # Get max Units value (determines p_nom)
         max_units = units_ts.max()

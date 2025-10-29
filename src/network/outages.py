@@ -232,7 +232,11 @@ def build_outage_schedule(
             logger.warning(f"Generator {g} not in schedule columns, skipping event")
             continue
         # Find affected snapshot indices (vectorized)
-        mask = (snapshots >= event.start) & (snapshots < event.end)
+        if isinstance(snapshots, pd.MultiIndex):
+            timestamp_index = get_snapshot_timestamps(snapshots)
+        else:
+            timestamp_index = pd.DatetimeIndex(snapshots)
+        mask = (timestamp_index >= event.start) & (timestamp_index < event.end)
         if not np.any(mask):
             logger.debug(
                 f"Outage event for {g} ({event.start} to {event.end}) "
@@ -1716,9 +1720,33 @@ def generate_forced_outages_simplified(
 
     # Get simulation time range
     snapshots = network.snapshots
-    start_time = snapshots[0]
-    end_time = snapshots[-1]
-    total_hours = len(snapshots)  # Approximate as hourly snapshots
+    if get_snapshot_timestamps is not None and isinstance(snapshots, pd.MultiIndex):
+        timestamp_index = get_snapshot_timestamps(snapshots)
+    else:
+        timestamp_index = pd.DatetimeIndex(snapshots)
+
+    if timestamp_index.empty:
+        logger.warning("No snapshots available for forced outage generation")
+        return []
+
+    start_time = timestamp_index[0]
+    end_time = timestamp_index[-1]
+
+    timestamp_series = timestamp_index.to_series().reset_index(drop=True)
+    diffs = timestamp_series.diff().shift(-1)
+    if diffs.dropna().empty:
+        default_step = pd.Timedelta(hours=1)
+    else:
+        default_step = diffs.dropna().iloc[0]
+    diffs = diffs.fillna(default_step)
+    hours_per_snapshot = diffs.dt.total_seconds() / 3600.0
+    hours_per_snapshot = hours_per_snapshot.fillna(
+        default_step.total_seconds() / 3600.0
+    )
+    total_hours = float(hours_per_snapshot.sum())
+    step_hours = float(hours_per_snapshot.iloc[0])
+    if step_hours <= 0:
+        step_hours = 1.0
 
     # Generate outage events
     outage_events = []
@@ -1783,11 +1811,10 @@ def generate_forced_outages_simplified(
             # For long time periods, use snapshot index sampling instead
             if total_hours > 100000:  # For very long simulations
                 # Sample from snapshot indices instead
-                max_start_idx = max(
-                    0, len(snapshots) - int(MTTR * 2)
-                )  # *2 for safety margin
-                start_idx = int(rng.uniform(0, max_start_idx))
-                outage_start = snapshots[start_idx]
+                safety_margin = max(int(np.ceil(MTTR / step_hours)), 1)
+                max_start_idx = max(0, len(timestamp_index) - safety_margin)
+                start_idx = int(rng.integers(0, max_start_idx + 1))
+                outage_start = timestamp_index[start_idx]
             else:
                 # For shorter simulations, use timedelta
                 outage_start = start_time + pd.Timedelta(hours=start_hour)
@@ -2241,58 +2268,6 @@ def generate_stochastic_outages_csv(
     >>> all_events = explicit_events + stochastic_events
     >>> schedule = build_outage_schedule(all_events, network.snapshots)
     """
-    if use_investment_periods:
-        if load_manifest is None or load_group_profiles is None:
-            msg = "Investment-period helpers unavailable; cannot load outage profiles."
-            raise RuntimeError(msg)
-        if investment_manifest is None:
-            msg = "investment_manifest must be provided for investment-period outages"
-            raise ValueError(msg)
-        if investment_group is None:
-            investment_group = "outages"
-
-        manifest_path = Path(investment_manifest)
-        manifest_data = load_manifest(manifest_path)
-        if investment_group not in manifest_data:
-            logger.warning(
-                "Investment manifest missing outage group '%s'; falling back to stochastic generation.",
-                investment_group,
-            )
-        else:
-            profiles = load_group_profiles(
-                manifest_data,
-                manifest_path.parent,
-                investment_group,
-            )
-            profiles = profiles.reindex(network.snapshots)
-            profiles = profiles.groupby(level=0, group_keys=False).apply(
-                lambda frame: frame.ffill().bfill()
-            )
-            profiles = profiles.fillna(1.0)
-
-            affected = 0
-            for gen in network.generators.index:
-                column = _match_profile_column(gen, profiles.columns)
-                if column is None:
-                    continue
-                factor = profiles[column].to_numpy()
-                if gen in network.generators_t.p_max_pu.columns:
-                    network.generators_t.p_max_pu[gen] = (
-                        network.generators_t.p_max_pu[gen] * factor
-                    )
-                if gen in network.generators_t.p_min_pu.columns:
-                    network.generators_t.p_min_pu[gen] = (
-                        network.generators_t.p_min_pu[gen] * factor
-                    )
-                affected += 1
-
-            logger.info(
-                "Applied investment-period outage factors to %d generators (group '%s').",
-                affected,
-                investment_group,
-            )
-            return []
-
     csv_dir = Path(csv_dir)
 
     # Reduce logging and avoid unnecessary list operations for performance

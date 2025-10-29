@@ -15,6 +15,7 @@ from plexosdb import PlexosDB
 from db.registry import MODEL_REGISTRY
 from network.core import setup_network
 from network.core_csv import setup_network_csv
+from network.investment import apply_investment_periods_to_network
 from utils.csv_export import check_csv_export_exists, export_csvs_from_xml
 from utils.model_paths import get_model_directory, get_model_xml_path
 
@@ -112,8 +113,7 @@ def _create_electricity_model(
         snapshots_source = config.get("snapshots_source")
         demand_source = config.get("demand_source")
         use_investment_periods = config.get("use_investment_periods", False)
-        investment_manifest = config.get("investment_manifest")
-        investment_group = config.get("investment_group", "demand")
+        investment_periods = config.get("investment_periods")
 
         # Check for explicit demand file configuration
         if config.get("demand_file") and snapshots_source is None:
@@ -126,7 +126,7 @@ def _create_electricity_model(
                 raise FileNotFoundError(msg)
 
         # Auto-determine paths if not explicitly provided
-        if not use_investment_periods and snapshots_source is None:
+        if snapshots_source is None:
             # Check for common snapshot directories
             candidates = [
                 "Traces/demand",  # AEMO pattern
@@ -140,15 +140,8 @@ def _create_electricity_model(
                     snapshots_source = str(candidate_path)
                     break
 
-        detected_snapshots_source = snapshots_source
-
         if demand_source is None:
             demand_source = snapshots_source
-
-        if use_investment_periods:
-            snapshots_source = None
-            if demand_source is None:
-                demand_source = detected_snapshots_source
 
         print("Setting up electricity model from CSVs...")
         setup_summary = setup_network_csv(
@@ -170,11 +163,18 @@ def _create_electricity_model(
             transmission_as_lines=config.get("transmission_as_lines", False),
             bidirectional_links=config.get("bidirectional_links", True),
             load_scenario=config.get("load_scenario"),
-            use_investment_periods=use_investment_periods,
-            investment_manifest=investment_manifest,
-            investment_group=investment_group,
+            use_investment_periods=False,
         )
 
+        if use_investment_periods:
+            if not investment_periods:
+                msg = "investment_periods must be provided when use_investment_periods=True"
+                raise ValueError(msg)
+            conversion_summary = apply_investment_periods_to_network(
+                network, investment_periods
+            )
+            setup_summary["snapshots_mode"] = "investment_periods"
+            setup_summary["investment_periods"] = conversion_summary
         return network, setup_summary
 
     # Original PlexosDB-based path
@@ -185,8 +185,7 @@ def _create_electricity_model(
 
     # Build setup_network arguments
     use_investment_periods = config.get("use_investment_periods", False)
-    investment_manifest = config.get("investment_manifest")
-    investment_group = config.get("investment_group", "demand")
+    investment_periods = config.get("investment_periods")
 
     setup_args = {
         "network": network,
@@ -198,9 +197,7 @@ def _create_electricity_model(
         "model_name": config.get("model_name"),
         "inflow_path": config.get("inflow_path"),
         "transmission_as_lines": config.get("transmission_as_lines", False),
-        "use_investment_periods": use_investment_periods,
-        "investment_manifest": investment_manifest,
-        "investment_group": investment_group,
+        "use_investment_periods": False,
     }
 
     # Check for explicit demand file configuration (takes precedence over auto-detection)
@@ -214,7 +211,7 @@ def _create_electricity_model(
             raise FileNotFoundError(msg)
 
     # Auto-determine paths if not explicitly provided
-    if not use_investment_periods and setup_args["snapshots_source"] is None:
+    if setup_args["snapshots_source"] is None:
         # Check for common snapshot directories (including nested paths for AEMO)
         candidates = [
             "Traces/demand",  # AEMO pattern
@@ -228,10 +225,7 @@ def _create_electricity_model(
                 setup_args["snapshots_source"] = str(candidate_path)
                 break
 
-    if use_investment_periods:
-        setup_args["snapshots_source"] = None
-        setup_args["demand_source"] = None
-    elif setup_args["demand_source"] is None:
+    if setup_args["demand_source"] is None:
         setup_args["demand_source"] = setup_args["snapshots_source"]
 
     # Resolve cross-model dependencies (e.g., VRE profiles from AEMO)
@@ -276,6 +270,16 @@ def _create_electricity_model(
     # Set up network
     print(f"Setting up {strategy} electricity model...")
     setup_summary = setup_network(**setup_args)
+
+    if use_investment_periods:
+        if not investment_periods:
+            msg = "investment_periods must be provided when use_investment_periods=True"
+            raise ValueError(msg)
+        conversion_summary = apply_investment_periods_to_network(
+            network, investment_periods
+        )
+        setup_summary["snapshots_mode"] = "investment_periods"
+        setup_summary["investment_periods"] = conversion_summary
 
     return network, setup_summary
 
@@ -331,12 +335,10 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             scenario to use. If None, defaults to first scenario.
             Example: "iteration_1" to select first scenario explicitly
         - use_investment_periods : bool, optional
-            Enable representative-day investment-period snapshots and demand.
-        - investment_manifest : str, optional
-            Path to the investment_periods.json manifest generated by the
-            aggregation step.
-        - investment_group : str, optional
-            Manifest group key containing demand profiles (default "demand").
+            Enable investment-period snapshots. Requires ``investment_periods``.
+        - investment_periods : list[dict], optional
+            Sequence of investment period definitions with ``label``, ``start_year``,
+            and ``end_year`` entries.
 
         Gas+Electric models (MaREI-EU):
         - use_csv : bool

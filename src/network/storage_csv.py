@@ -608,61 +608,6 @@ def add_storage_inflows_csv(
         },
     }
 
-    if use_investment_periods:
-        if load_manifest is None or load_group_profiles is None:
-            msg = "Investment-period helpers unavailable; cannot load storage inflows."
-            raise RuntimeError(msg)
-        if investment_manifest is None:
-            msg = "investment_manifest must be provided for investment-period inflows"
-            raise ValueError(msg)
-        if investment_group is None:
-            investment_group = "storage_inflows"
-
-        manifest_path = Path(investment_manifest)
-        manifest_data = load_manifest(manifest_path)
-        if investment_group not in manifest_data:
-            logger.warning(
-                "Investment manifest missing storage inflow group '%s'; falling back to chronological inflows.",
-                investment_group,
-            )
-        else:
-            profiles = load_group_profiles(
-                manifest_data,
-                manifest_path.parent,
-                investment_group,
-            )
-            profiles = profiles.reindex(network.snapshots)
-            profiles = profiles.groupby(level=0, group_keys=False).apply(
-                lambda frame: frame.ffill().bfill()
-            )
-            profiles = profiles.fillna(0.0)
-
-            matched = 0
-            for storage_name in network.storage_units.index:
-                column = _match_profile_column(storage_name, profiles.columns)
-                if column is None:
-                    logger.debug(
-                        "No investment-period inflow column found for storage unit %s",
-                        storage_name,
-                    )
-                    stats["storage_units_without_inflows"] += 1
-                    continue
-                network.storage_units_t.inflow[storage_name] = profiles[
-                    column
-                ].to_numpy()
-                stats["storage_units_with_inflows"] += 1
-                stats["inflow_sources"].setdefault("investment_period", 0)
-                stats["inflow_sources"]["investment_period"] += 1
-                matched += 1
-
-            logger.info(
-                "Loaded investment-period inflows for %d storage units (group '%s').",
-                matched,
-                investment_group,
-            )
-            stats["mode"] = "investment_periods"
-            return stats
-
     # Load Storage.csv
     storage_df = load_static_properties(csv_dir, "Storage")
     if storage_df.empty:
@@ -677,6 +622,18 @@ def add_storage_inflows_csv(
         snapshots = get_snapshot_timestamps(network.snapshots)
     else:
         snapshots = pd.DatetimeIndex(network.snapshots)
+
+    def _to_network_index(series: pd.Series | pd.DataFrame | None) -> pd.Series | None:
+        if series is None:
+            return None
+        if isinstance(series, pd.DataFrame):
+            if series.empty:
+                return None
+            series = series.iloc[:, 0]
+        aligned = series.reindex(snapshots).fillna(0.0)
+        if isinstance(network.snapshots, pd.MultiIndex):
+            return pd.Series(aligned.to_numpy(), index=network.snapshots)
+        return aligned
 
     # Process each storage unit in the network
     for storage_name in network.storage_units.index:
@@ -777,7 +734,10 @@ def add_storage_inflows_csv(
 
             # Apply inflow data to network
             if inflow_data is not None:
-                network.storage_units_t.inflow[storage_name] = inflow_data
+                aligned_inflow = _to_network_index(inflow_data)
+                if aligned_inflow is None:
+                    aligned_inflow = pd.Series(0.0, index=network.snapshots)
+                network.storage_units_t.inflow[storage_name] = aligned_inflow
                 stats["storage_units_with_inflows"] += 1
                 stats["inflow_sources"][inflow_source] += 1
             else:
@@ -787,6 +747,8 @@ def add_storage_inflows_csv(
         except Exception as e:
             logger.warning(f"Error processing inflows for {storage_name}: {e}")
             stats["failed_storage_units"].append(f"{storage_name} ({e})")
+
+    stats["mode"] = "investment_periods" if use_investment_periods else "chronological"
 
     # Log summary
     logger.info(
