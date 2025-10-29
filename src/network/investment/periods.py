@@ -622,23 +622,30 @@ def apply_investment_periods_to_network(
     filtered_labels = [str(label) for label in period_labels if label is not None]
 
     # Determine numeric identifiers for each investment period label
-    start_year_map = {
-        str(period.label): int(period.start_year) for period in investment_periods
-    }
+    period_lookup = {str(period.label): period for period in investment_periods}
+    sequential_counter = 0
     label_to_id: dict[str, int] = {}
     label_mapping: dict[int, str] = {}
     period_ids: list[int] = []
 
     for label in filtered_labels:
-        period_id = start_year_map.get(label)
+        period_id: int | None = None
+        try:
+            period_id = int(label)
+        except (TypeError, ValueError):
+            pass
+
         if period_id is None:
-            try:
-                period_id = int(label)
-            except (TypeError, ValueError):
-                # Fallback to sequential integers in order of appearance
-                if label not in label_to_id:
-                    label_to_id[label] = len(label_to_id)
-                period_id = label_to_id[label]
+            period_obj = period_lookup.get(label)
+            if period_obj is not None:
+                period_id = int(period_obj.start_year)
+
+        if period_id is None:
+            if label not in label_to_id:
+                label_to_id[label] = sequential_counter
+                sequential_counter += 1
+            period_id = label_to_id[label]
+
         period_id = int(period_id)
         period_ids.append(period_id)
         label_mapping.setdefault(period_id, label)
