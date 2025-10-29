@@ -22,8 +22,7 @@ from network.costs_csv import (
 )
 from network.generators_csv import port_generators_csv
 from network.investment import (
-    build_snapshot_multiindex,
-    infer_profile_lengths,
+    configure_investment_periods,
     load_group_profiles,
     load_manifest,
 )
@@ -222,30 +221,25 @@ def setup_network_csv(
         manifest_data = load_manifest(manifest_path_obj)
         manifest_base = manifest_path_obj.parent
 
-        profile_lengths = infer_profile_lengths(manifest_data, manifest_base)
-        snapshots_index, period_weights, snapshot_weights = build_snapshot_multiindex(
-            manifest_data,
-            profile_lengths=profile_lengths,
+        (
+            _,
+            period_weights,
+            _,
+            profile_offsets,
+            period_base_dates,
+        ) = configure_investment_periods(
+            network=network,
+            manifest=manifest_data,
+            base_dir=manifest_base,
         )
-
-        network.set_snapshots(snapshots_index)
-        snapshot_weight_df = network.snapshot_weightings.copy()
-        snapshot_weight_df["objective"] = snapshot_weights.to_numpy()
-        snapshot_weight_df["years"] = snapshot_weights.to_numpy()
-        network.snapshot_weightings = snapshot_weight_df
-
-        period_df = pd.DataFrame(
-            {
-                "objective": period_weights,
-                "years": period_weights,
-            }
-        )
-        period_df.index.name = "period"
-        network.investment_period_weightings = period_df
 
         logger.info("Loading demand profiles from investment manifest...")
         demand_profiles = load_group_profiles(
-            manifest_data, manifest_base, investment_group
+            manifest_data,
+            manifest_base,
+            investment_group,
+            profile_offsets=profile_offsets,
+            period_base_dates=period_base_dates,
         )
         demand_profiles = demand_profiles.reindex(network.snapshots)
         column_mapping = {
