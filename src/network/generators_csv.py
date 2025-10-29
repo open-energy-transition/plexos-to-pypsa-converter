@@ -323,39 +323,18 @@ def _build_generator_p_max_pu_timeseries_csv(
         def build_ts(
             prop_name: str, entries: pd.DataFrame, fallback: float | None = None
         ) -> pd.Series:
-            ts = pd.Series(index=snapshots, dtype=float)
             prop_rows = entries[entries["property"] == prop_name].copy()
+
+            values = np.full(len(snapshots), np.nan, dtype=float)
 
             if prop_rows.empty:
                 if fallback is not None:
-                    ts[:] = fallback
-                return ts
+                    values.fill(fallback)
+                return pd.Series(values, index=snapshots)
 
-            # Sort by from date (NaT values first)
             prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
             prop_rows = prop_rows.sort_values("from_sort", na_position="first")
 
-            # Track which snapshots have been set
-            already_set = pd.Series(False, index=snapshots)
-
-            # Time-specific entries first (these take precedence)
-            for _, row in prop_rows.iterrows():
-                is_time_specific = (
-                    pd.notnull(row.get("from"))
-                    or pd.notnull(row.get("to"))
-                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
-                )
-
-                if is_time_specific:
-                    mask = get_property_active_mask(
-                        row, snapshots, timeslice_activity, dataid_to_timeslice
-                    )
-                    # Only override where not already set, or where overlapping
-                    to_set = mask & (~already_set | mask)
-                    ts.loc[to_set] = row["value"]
-                    already_set |= mask
-
-            # Non-time-specific entries fill remaining unset values
             for _, row in prop_rows.iterrows():
                 is_time_specific = (
                     pd.notnull(row.get("from"))
@@ -364,12 +343,29 @@ def _build_generator_p_max_pu_timeseries_csv(
                 )
 
                 if not is_time_specific:
-                    ts.loc[ts.isnull()] = row["value"]
+                    continue
+
+                mask = get_property_active_mask(
+                    row, snapshots, timeslice_activity, dataid_to_timeslice
+                )
+                values[mask.to_numpy()] = row["value"]
+
+            for _, row in prop_rows.iterrows():
+                is_time_specific = (
+                    pd.notnull(row.get("from"))
+                    or pd.notnull(row.get("to"))
+                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                )
+
+                if is_time_specific:
+                    continue
+                nan_mask = np.isnan(values)
+                values[nan_mask] = row["value"]
 
             if fallback is not None:
-                ts = ts.fillna(fallback)
+                values = np.where(np.isnan(values), fallback, values)
 
-            return ts
+            return pd.Series(values, index=snapshots)
 
         # Get Max Capacity for this generator (from static or time-varying)
         maxcap = None
@@ -2135,8 +2131,8 @@ def build_units_timeseries(
                 f"Could not parse default Units value '{default_value}' for {generator_name}, using {default_units}"
             )
 
-    # Initialize Units time series with default value
-    units_ts = pd.Series(default_units, index=snapshots)
+    values = np.full(len(snapshots), default_units, dtype=float)
+    snap_array = snapshots.values
 
     # Apply chronological changes from dated entries
     if not entries_with_dates.empty:
@@ -2156,24 +2152,23 @@ def build_units_timeseries(
                 )
                 continue
 
-            # Determine time range for this Units value
             if pd.notna(date_from):
                 start_date = pd.Timestamp(date_from)
             else:
-                # No start date, apply from beginning
                 start_date = snapshots[0]
 
             if pd.notna(date_to):
                 end_date = pd.Timestamp(date_to)
             else:
-                # No end date, apply until end of simulation
                 end_date = snapshots[-1]
 
-        # Apply Units value to snapshots in this range
-        mask = (snapshots >= start_date) & (snapshots <= end_date)
-        units_ts.loc[mask] = units_float
+            start_idx = np.searchsorted(
+                snap_array, np.datetime64(start_date), side="left"
+            )
+            end_idx = np.searchsorted(snap_array, np.datetime64(end_date), side="right")
+            values[start_idx:end_idx] = units_float
 
-    return units_ts
+    return pd.Series(values, index=snapshots)
 
 
 def apply_generator_units_timeseries_csv(
