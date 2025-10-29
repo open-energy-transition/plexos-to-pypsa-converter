@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plexos-to-pypsa-converter"
-version = "0.1.0"
+version = "0.0.9"
 description = "PLEXOS-to-PyPSA Converter"
 readme = "README.md"
 classifiers = [
