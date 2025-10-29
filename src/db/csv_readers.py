@@ -1151,9 +1151,14 @@ def _tile_annual_profile_across_years(
     >>> snapshots = pd.date_range('2024-01-01', '2026-12-31', freq='H')
     >>> tiled = _tile_annual_profile_across_years(df, snapshots)
     """
+    if isinstance(snapshots, pd.MultiIndex):
+        snapshot_idx = pd.DatetimeIndex(snapshots.get_level_values(-1))
+    else:
+        snapshot_idx = pd.DatetimeIndex(snapshots)
+
     # Extract year range from snapshots
-    min_year = snapshots.year.min()
-    max_year = snapshots.year.max()
+    min_year = snapshot_idx.year.min()
+    max_year = snapshot_idx.year.max()
 
     # Tile pattern across years
     tiled_dfs = []

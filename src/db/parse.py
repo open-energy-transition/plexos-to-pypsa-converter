@@ -220,6 +220,13 @@ def read_timeslice_activity(
     - If DATETIME/NAME/TIMESLICE columns exist → activity timeseries format
     - If object/Include(text) columns exist → pattern definition format
     """
+    if isinstance(snapshots, pd.MultiIndex):
+        snapshots = pd.DatetimeIndex(snapshots.get_level_values(-1))
+    else:
+        snapshots = pd.DatetimeIndex(snapshots)
+
+    periods_per_day = trading_periods_per_day
+
     df = pd.read_csv(timeslice_csv)
 
     # Detect format based on columns
@@ -235,34 +242,7 @@ def read_timeslice_activity(
 
     # Format 2: Pattern definitions (object, Include(text))
     elif "object" in df.columns and any("include" in col.lower() for col in df.columns):
-        return _read_timeslice_activity_patterns(df, snapshots, trading_periods_per_day)
-
-    else:
-        msg = f"Unknown timeslice CSV format. Columns: {df.columns.tolist()}"
-        raise ValueError(msg)
-
-
-def _read_timeslice_activity_timeseries(
-    df: pd.DataFrame, snapshots: pd.DatetimeIndex
-) -> pd.DataFrame:
-    """Parse timeslice activity timeseries format (AEMO-style).
-
-    Format: DATETIME, NAME, TIMESLICE (-1=active, 0=inactive)
-    """
-    # Detect format based on columns
-    columns_lower = [col.lower() for col in df.columns]
-
-    # Format 1: Activity timeseries (DATETIME, NAME, TIMESLICE)
-    if (
-        "datetime" in columns_lower
-        and "name" in columns_lower
-        and "timeslice" in columns_lower
-    ):
-        return _read_timeslice_activity_timeseries(df, snapshots)
-
-    # Format 2: Pattern definitions (object, Include(text))
-    elif "object" in df.columns and any("include" in col.lower() for col in df.columns):
-        return _read_timeslice_activity_patterns(df, snapshots, trading_periods_per_day)
+        return _read_timeslice_activity_patterns(df, snapshots, periods_per_day)
 
     else:
         msg = f"Unknown timeslice CSV format. Columns: {df.columns.tolist()}"
@@ -340,7 +320,7 @@ def get_dataid_timeslice_map(db: PlexosDB) -> dict[int, list[str]]:
 
 def get_property_active_mask(
     row: pd.Series,
-    snapshots: pd.DatetimeIndex,
+    snapshots: pd.Index,
     timeslice_activity: pd.DataFrame | None = None,
     dataid_to_timeslice: dict[int, list[str]] | None = None,
 ) -> pd.Series:
@@ -358,12 +338,18 @@ def get_property_active_mask(
     -------
         pd.Series of booleans indexed by snapshots, indicating if the property is active based on its date range and optional timeslice activity.
     """
+    if isinstance(snapshots, pd.MultiIndex):
+        time_values = pd.DatetimeIndex(snapshots.get_level_values(-1))
+    else:
+        time_values = pd.DatetimeIndex(snapshots)
+
+    time_series = pd.Series(time_values, index=snapshots)
     mask = pd.Series(True, index=snapshots)
     # Date logic
     if pd.notnull(row.get("from")):
-        mask &= snapshots >= row["from"]
+        mask &= time_series >= row["from"]
     if pd.notnull(row.get("to")):
-        mask &= snapshots <= row["to"]
+        mask &= time_series <= row["to"]
 
     # Timeslice logic
     if (
@@ -376,18 +362,18 @@ def get_property_active_mask(
                 ts_mask = timeslice_activity[ts]
                 # If t_date_from is present, only active after that date
                 if pd.notnull(row.get("from")):
-                    ts_mask = ts_mask & (snapshots >= row["from"])
+                    ts_mask = ts_mask & (time_series >= row["from"])
                 # If t_date_to is present, only active before or at that date
                 if pd.notnull(row.get("to")):
-                    ts_mask = ts_mask & (snapshots <= row["to"])
+                    ts_mask = ts_mask & (time_series <= row["to"])
                 mask &= ts_mask
             elif ts.startswith("M") and ts[1:].isdigit() and 1 <= int(ts[1:]) <= 12:
                 month = int(ts[1:])
-                ts_mask = pd.Series(snapshots.month == month, index=snapshots)
+                ts_mask = pd.Series(time_series.dt.month == month, index=snapshots)
                 if pd.notnull(row.get("from")):
-                    ts_mask = ts_mask & (snapshots >= row["from"])
+                    ts_mask = ts_mask & (time_series >= row["from"])
                 if pd.notnull(row.get("to")):
-                    ts_mask = ts_mask & (snapshots <= row["to"])
+                    ts_mask = ts_mask & (time_series <= row["to"])
                 mask &= ts_mask
             else:
                 mask &= True
