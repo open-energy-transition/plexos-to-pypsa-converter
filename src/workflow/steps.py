@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pypsa
 
 from network.conversion import create_model
@@ -17,6 +18,7 @@ from network.investment import (
     InvestmentPeriod,
     build_day_type_classifier,
     compute_period_statistics,
+    get_snapshot_timestamps,
     load_directory_timeseries,
     write_profile_csv,
 )
@@ -50,6 +52,7 @@ def prepare_investment_periods_step(
     timeslice_csv: str,
     trace_groups: Mapping[str, str],
     periods: Sequence[Mapping[str, int]],
+    unique_day_labels: bool = False,
     network: pypsa.Network | None = None,
     enabled: bool = True,
     group_patterns: Mapping[str, Sequence[str]] | None = None,
@@ -75,11 +78,16 @@ def prepare_investment_periods_step(
     if group_patterns is None or not group_patterns:
         group_patterns = {"base": []}
 
-    classifier = build_day_type_classifier(
-        timeslice_path,
-        group_patterns,
-        default_group=default_group,
-    )
+    if unique_day_labels:
+
+        def classifier(ts: pd.Timestamp) -> str:
+            return ts.strftime("%Y-%m-%d")
+    else:
+        classifier = build_day_type_classifier(
+            timeslice_path,
+            group_patterns,
+            default_group=default_group,
+        )
 
     investment_periods = []
     for period in periods:
@@ -104,6 +112,7 @@ def prepare_investment_periods_step(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     metadata: dict[str, dict[str, list[dict[str, float | str]]]] = {}
+    period_bases: dict[str, str] = {}
     summary_totals: dict[str, dict[str, float]] = {}
 
     for group_label, definition in trace_groups.items():
@@ -126,14 +135,17 @@ def prepare_investment_periods_step(
         except (FileNotFoundError, ValueError) as exc:
             logger.warning("Skipping investment trace group '%s': %s", group_label, exc)
             continue
-        stats = compute_period_statistics(data, investment_periods, classifier)
+        stats, bases = compute_period_statistics(data, investment_periods, classifier)
+        for label, base_ts in bases.items():
+            iso = pd.Timestamp(base_ts).isoformat()
+            period_bases.setdefault(label, iso)
         metadata[group_label] = {}
         summary_totals[group_label] = {}
 
-        for period_label, profiles in stats.items():
+        for period_label, period_profiles in stats.items():
             metadata[group_label][period_label] = []
             total_weight = 0.0
-            for profile in profiles:
+            for profile in period_profiles:
                 filename = f"{group_label}__{period_label}__{profile.name.replace(' ', '_')}.csv"
                 write_profile_csv(profile, output_dir / filename)
                 metadata[group_label][period_label].append(
@@ -141,10 +153,18 @@ def prepare_investment_periods_step(
                         "name": profile.name,
                         "weight_years": profile.weight_years,
                         "csv": filename,
+                        **(
+                            {"base": profile.base_timestamp.isoformat()}
+                            if profile.base_timestamp is not None
+                            else {}
+                        ),
                     }
                 )
                 total_weight += profile.weight_years
-            summary_totals[group_label][period_label] = total_weight
+        summary_totals[group_label][period_label] = total_weight
+
+    if period_bases:
+        metadata.setdefault("_meta", {})["period_bases"] = period_bases
 
     metadata_path = output_dir / metadata_filename
     metadata_path.write_text(json.dumps(metadata, indent=2))
@@ -498,10 +518,11 @@ def optimize_step(
     print(f"Snapshots: {len(network.snapshots)}")
     print("=========================================\n")
 
+    snapshots = network.snapshots
     if year is not None:
-        snapshots = network.snapshots[network.snapshots.year == year]
-    else:
-        snapshots = network.snapshots
+        timestamps = get_snapshot_timestamps(network.snapshots)
+        mask = timestamps.year == year
+        snapshots = network.snapshots[mask]
 
     print(f"Snapshots for optimization: {len(snapshots)}")
     print(f"Year filter: {year}")
