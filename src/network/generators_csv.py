@@ -314,53 +314,85 @@ def _build_generator_p_max_pu_timeseries_csv(
 
         if property_entries:
             prop_df_entries = pd.DataFrame(property_entries)
+            prop_groups = {
+                prop: frame.copy()
+                for prop, frame in prop_df_entries.groupby("property", sort=False)
+            }
+            for frame in prop_groups.values():
+                frame["from"] = pd.to_datetime(frame["from"])
+                frame["to"] = pd.to_datetime(frame["to"])
         else:
             # No time-varying properties for this generator, use default
             gen_series[gen] = pd.Series(1.0, index=snapshots, dtype=float)
             continue
 
-        # Helper to build a time series for a property
+        snap_array = snapshots.values
+
         def build_ts(
-            prop_name: str, entries: pd.DataFrame, fallback: float | None = None
+            prop_rows: pd.DataFrame | None,
+            fallback: float | None = None,
+            snap_arr: np.ndarray = snap_array,
         ) -> pd.Series:
-            prop_rows = entries[entries["property"] == prop_name].copy()
-
-            values = np.full(len(snapshots), np.nan, dtype=float)
-
-            if prop_rows.empty:
-                if fallback is not None:
-                    values.fill(fallback)
+            if prop_rows is None or prop_rows.empty:
+                values = np.full(
+                    len(snapshots),
+                    fallback if fallback is not None else np.nan,
+                    dtype=float,
+                )
                 return pd.Series(values, index=snapshots)
 
-            prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
-            prop_rows = prop_rows.sort_values("from_sort", na_position="first")
+            values = np.full(len(snapshots), np.nan, dtype=float)
+            prop_rows = prop_rows.sort_values("from", na_position="first")
 
             for _, row in prop_rows.iterrows():
+                data_id = row.get("data_id")
                 is_time_specific = (
                     pd.notnull(row.get("from"))
                     or pd.notnull(row.get("to"))
-                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                    or (dataid_to_timeslice and data_id in dataid_to_timeslice)
                 )
 
                 if not is_time_specific:
                     continue
 
-                mask = get_property_active_mask(
-                    row, snapshots, timeslice_activity, dataid_to_timeslice
-                )
-                values[mask.to_numpy()] = row["value"]
-
-            for _, row in prop_rows.iterrows():
-                is_time_specific = (
-                    pd.notnull(row.get("from"))
-                    or pd.notnull(row.get("to"))
-                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                use_mask = not (
+                    timeslice_activity is None
+                    and (not dataid_to_timeslice or data_id not in dataid_to_timeslice)
                 )
 
-                if is_time_specific:
-                    continue
-                nan_mask = np.isnan(values)
-                values[nan_mask] = row["value"]
+                if use_mask:
+                    mask = get_property_active_mask(
+                        row, snapshots, timeslice_activity, dataid_to_timeslice
+                    )
+                    values[mask.to_numpy()] = row["value"]
+                else:
+                    start_dt = (
+                        row["from"] if pd.notnull(row.get("from")) else snapshots[0]
+                    )
+                    end_dt = row["to"] if pd.notnull(row.get("to")) else snapshots[-1]
+                    start_idx = np.searchsorted(
+                        snap_arr, np.datetime64(start_dt.to_datetime64()), side="left"
+                    )
+                    end_idx = np.searchsorted(
+                        snap_arr, np.datetime64(end_dt.to_datetime64()), side="right"
+                    )
+                    values[start_idx:end_idx] = row["value"]
+
+            if np.isnan(values).any():
+                for _, row in prop_rows.iterrows():
+                    data_id = row.get("data_id")
+                    is_time_specific = (
+                        pd.notnull(row.get("from"))
+                        or pd.notnull(row.get("to"))
+                        or (dataid_to_timeslice and data_id in dataid_to_timeslice)
+                    )
+
+                    if is_time_specific:
+                        continue
+                    nan_mask = np.isnan(values)
+                    if not nan_mask.any():
+                        break
+                    values[nan_mask] = row["value"]
 
             if fallback is not None:
                 values = np.where(np.isnan(values), fallback, values)
@@ -377,12 +409,12 @@ def _build_generator_p_max_pu_timeseries_csv(
             maxcap = get_property_from_static_csv(generator_df, gen, "Max Capacity")
 
         # Build time series for Rating and Rating Factor
-        rating_ts = build_ts("Rating", prop_df_entries)
-        rating_factor_ts = build_ts("Rating Factor", prop_df_entries)
+        rating_ts = build_ts(prop_groups.get("Rating"))
+        rating_factor_ts = build_ts(prop_groups.get("Rating Factor"))
 
         # Load Min Stable Level for validation (data quality check)
         # Need to ensure Rating >= Min Stable Level for physical feasibility
-        min_stable_level_ts = build_ts("Min Stable Level", prop_df_entries)
+        min_stable_level_ts = build_ts(prop_groups.get("Min Stable Level"))
 
         # If no time-varying Min Stable Level, check static CSV as fallback
         if min_stable_level_ts.isnull().all():
@@ -505,62 +537,96 @@ def _build_generator_p_min_pu_timeseries_csv(
             prop_df_entries = pd.DataFrame(property_entries)
         else:
             # No time-varying properties - create empty DataFrame
-            # Will check static CSV properties as fallback
             prop_df_entries = pd.DataFrame(
                 columns=["property", "value", "from", "to", "data_id"]
             )
 
+        prop_groups = {
+            prop: frame.copy()
+            for prop, frame in prop_df_entries.groupby("property", sort=False)
+        }
+        for frame in prop_groups.values():
+            frame["from"] = pd.to_datetime(frame["from"])
+            frame["to"] = pd.to_datetime(frame["to"])
+
+        snap_array = snapshots.values
+
         # Helper to build a time series for a property
         def build_ts(
-            prop_name: str, entries: pd.DataFrame, fallback: float | None = None
+            prop_rows: pd.DataFrame | None,
+            fallback: float | None = None,
+            snap_arr: np.ndarray = snap_array,
         ) -> pd.Series:
-            ts = pd.Series(index=snapshots, dtype=float)
-            prop_rows = entries[entries["property"] == prop_name].copy()
-
-            if prop_rows.empty:
-                if fallback is not None:
-                    ts[:] = fallback
-                return ts
-
-            # Sort by from date (NaT values first)
-            prop_rows["from_sort"] = pd.to_datetime(prop_rows["from"])
-            prop_rows = prop_rows.sort_values("from_sort", na_position="first")
-
-            # Track which snapshots have been set
-            already_set = pd.Series(False, index=snapshots)
-
-            # Time-specific entries first (these take precedence)
-            for _, row in prop_rows.iterrows():
-                is_time_specific = (
-                    pd.notnull(row.get("from"))
-                    or pd.notnull(row.get("to"))
-                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+            if prop_rows is None or prop_rows.empty:
+                values = np.full(
+                    len(snapshots),
+                    fallback if fallback is not None else np.nan,
+                    dtype=float,
                 )
+                return pd.Series(values, index=snapshots)
 
-                if is_time_specific:
-                    mask = get_property_active_mask(
-                        row, snapshots, timeslice_activity, dataid_to_timeslice
-                    )
-                    # Only override where not already set, or where overlapping
-                    to_set = mask & (~already_set | mask)
-                    ts.loc[to_set] = row["value"]
-                    already_set |= mask
+            values = np.full(len(snapshots), np.nan, dtype=float)
+            prop_rows = prop_rows.sort_values("from", na_position="first")
 
-            # Non-time-specific entries fill remaining unset values
+            already_set = np.zeros(len(snapshots), dtype=bool)
+
             for _, row in prop_rows.iterrows():
+                data_id = row.get("data_id")
                 is_time_specific = (
                     pd.notnull(row.get("from"))
                     or pd.notnull(row.get("to"))
-                    or (dataid_to_timeslice and row["data_id"] in dataid_to_timeslice)
+                    or (dataid_to_timeslice and data_id in dataid_to_timeslice)
                 )
 
                 if not is_time_specific:
-                    ts.loc[ts.isnull()] = row["value"]
+                    continue
+
+                use_mask = not (
+                    timeslice_activity is None
+                    and (not dataid_to_timeslice or data_id not in dataid_to_timeslice)
+                )
+
+                if use_mask:
+                    mask = get_property_active_mask(
+                        row, snapshots, timeslice_activity, dataid_to_timeslice
+                    )
+                    mask_arr = mask.to_numpy()
+                    values[mask_arr] = row["value"]
+                    already_set |= mask_arr
+                else:
+                    start_dt = (
+                        row["from"] if pd.notnull(row.get("from")) else snapshots[0]
+                    )
+                    end_dt = row["to"] if pd.notnull(row.get("to")) else snapshots[-1]
+                    start_idx = np.searchsorted(
+                        snap_arr, np.datetime64(start_dt.to_datetime64()), side="left"
+                    )
+                    end_idx = np.searchsorted(
+                        snap_arr, np.datetime64(end_dt.to_datetime64()), side="right"
+                    )
+                    values[start_idx:end_idx] = row["value"]
+                    already_set[start_idx:end_idx] = True
+
+            if np.isnan(values).any():
+                for _, row in prop_rows.iterrows():
+                    data_id = row.get("data_id")
+                    is_time_specific = (
+                        pd.notnull(row.get("from"))
+                        or pd.notnull(row.get("to"))
+                        or (dataid_to_timeslice and data_id in dataid_to_timeslice)
+                    )
+
+                    if is_time_specific:
+                        continue
+                    nan_mask = np.isnan(values)
+                    if not nan_mask.any():
+                        break
+                    values[nan_mask] = row["value"]
 
             if fallback is not None:
-                ts = ts.fillna(fallback)
+                values = np.where(np.isnan(values), fallback, values)
 
-            return ts
+            return pd.Series(values, index=snapshots)
 
         # Get Max Capacity for this generator (from static or time-varying)
         maxcap = None
@@ -572,9 +638,9 @@ def _build_generator_p_min_pu_timeseries_csv(
             maxcap = get_property_from_static_csv(generator_df, gen, "Max Capacity")
 
         # Build time series for Min Stable properties
-        min_stable_level_ts = build_ts("Min Stable Level", prop_df_entries)
-        min_stable_factor_ts = build_ts("Min Stable Factor", prop_df_entries)
-        min_pump_load_ts = build_ts("Min Pump Load", prop_df_entries)
+        min_stable_level_ts = build_ts(prop_groups.get("Min Stable Level"))
+        min_stable_factor_ts = build_ts(prop_groups.get("Min Stable Factor"))
+        min_pump_load_ts = build_ts(prop_groups.get("Min Pump Load"))
 
         # If no time-varying data, try static CSV as fallback
         if min_stable_level_ts.isnull().all():
