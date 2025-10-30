@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 
 from analysis.statistics import NetworkStatistics
@@ -59,7 +60,9 @@ def _extract_carrier_name(carrier) -> str:
         return str(carrier).lower()
 
 
-def plot_capacity_mix(stats: NetworkStatistics, save_path: Path | None = None) -> tuple:
+def plot_capacity_mix(
+    stats: NetworkStatistics, save_path: Path | None = None, exclude_slack: bool = True
+) -> tuple:
     """Plot installed capacity by carrier as bar chart.
 
     Parameters
@@ -68,13 +71,15 @@ def plot_capacity_mix(stats: NetworkStatistics, save_path: Path | None = None) -
         Network statistics object
     save_path : Path, optional
         If provided, save figure to this path
+    exclude_slack : bool, default True
+        If True, exclude load shedding/spillage slack generators
 
     Returns
     -------
     tuple
         (fig, ax) matplotlib figure and axes objects
     """
-    capacity = stats.installed_capacity()
+    capacity = stats.installed_capacity(exclude_slack=exclude_slack)
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -99,7 +104,7 @@ def plot_capacity_mix(stats: NetworkStatistics, save_path: Path | None = None) -
 
 
 def plot_generation_mix(
-    stats: NetworkStatistics, save_path: Path | None = None
+    stats: NetworkStatistics, save_path: Path | None = None, exclude_slack: bool = True
 ) -> tuple:
     """Plot energy generation by carrier as bar chart.
 
@@ -109,13 +114,15 @@ def plot_generation_mix(
         Network statistics object
     save_path : Path, optional
         If provided, save figure to this path
+    exclude_slack : bool, default True
+        If True, exclude load shedding/spillage slack generators
 
     Returns
     -------
     tuple
         (fig, ax) matplotlib figure and axes objects
     """
-    generation = stats.energy_supply()
+    generation = stats.energy_supply(exclude_slack=exclude_slack)
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -139,7 +146,7 @@ def plot_generation_mix(
 
 
 def plot_cost_breakdown(
-    stats: NetworkStatistics, save_path: Path | None = None
+    stats: NetworkStatistics, save_path: Path | None = None, exclude_slack: bool = True
 ) -> tuple:
     """Plot CAPEX and OPEX by carrier as stacked bar chart.
 
@@ -149,14 +156,16 @@ def plot_cost_breakdown(
         Network statistics object
     save_path : Path, optional
         If provided, save figure to this path
+    exclude_slack : bool, default True
+        If True, exclude load shedding/spillage slack generators
 
     Returns
     -------
     tuple
         (fig, ax) matplotlib figure and axes objects
     """
-    capex = stats.capex()
-    opex = stats.opex()
+    capex = stats.capex(exclude_slack=exclude_slack)
+    opex = stats.opex(exclude_slack=exclude_slack)
 
     # Align indices
     all_carriers = list(set(capex.index) | set(opex.index))
@@ -188,7 +197,7 @@ def plot_cost_breakdown(
 
 
 def plot_generation_stack(
-    stats: NetworkStatistics, save_path: Path | None = None
+    stats: NetworkStatistics, save_path: Path | None = None, exclude_slack: bool = True
 ) -> tuple:
     """Plot generation dispatch over time as stacked area chart.
 
@@ -198,6 +207,8 @@ def plot_generation_stack(
         Network statistics object
     save_path : Path, optional
         If provided, save figure to this path
+    exclude_slack : bool, default True
+        If True, exclude load shedding/spillage slack generators
 
     Returns
     -------
@@ -210,9 +221,16 @@ def plot_generation_stack(
         msg = "No generation dispatch data found"
         raise ValueError(msg)
 
-    gen_by_carrier = network.generators_t.p.groupby(
-        network.generators.carrier, axis=1
-    ).sum()
+    # Filter slack generators if requested
+    if exclude_slack:
+        slack_gens = stats._get_slack_generators()
+        gen_data = network.generators_t.p.drop(columns=slack_gens, errors="ignore")
+        gen_carriers = network.generators.drop(slack_gens, errors="ignore")
+    else:
+        gen_data = network.generators_t.p
+        gen_carriers = network.generators
+
+    gen_by_carrier = gen_data.groupby(gen_carriers.carrier, axis=1).sum()
 
     fig, ax = plt.subplots(figsize=(16, 8))
 
@@ -237,7 +255,7 @@ def plot_generation_stack(
 
 
 def plot_lcoe_comparison(
-    stats: NetworkStatistics, save_path: Path | None = None
+    stats: NetworkStatistics, save_path: Path | None = None, exclude_slack: bool = True
 ) -> tuple:
     """Plot Levelized Cost of Energy by carrier.
 
@@ -247,13 +265,15 @@ def plot_lcoe_comparison(
         Network statistics object
     save_path : Path, optional
         If provided, save figure to this path
+    exclude_slack : bool, default True
+        If True, exclude load shedding/spillage slack generators
 
     Returns
     -------
     tuple
         (fig, ax) matplotlib figure and axes objects
     """
-    lcoe = stats.lcoe()
+    lcoe = stats.lcoe(exclude_slack=exclude_slack)
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -462,6 +482,218 @@ def plot_validation_dashboard(
     return fig, ax
 
 
+def plot_unserved_energy(
+    stats: NetworkStatistics, save_path: Path | None = None
+) -> tuple | None:
+    """Plot load shedding and load spillage bar chart.
+
+    Parameters
+    ----------
+    stats : NetworkStatistics
+        Network statistics object
+    save_path : Path, optional
+        If provided, save figure to this path
+
+    Returns
+    -------
+    tuple or None
+        (fig, ax) matplotlib figure and axes objects, or None if no slack
+    """
+    slack_data = stats.unserved_energy()
+
+    if slack_data["load_shedding_mwh"] == 0 and slack_data["load_spillage_mwh"] == 0:
+        print("No load shedding or spillage detected")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    categories = [
+        "Load Shedding\n(Unserved Energy)",
+        "Load Spillage\n(Excess Generation)",
+    ]
+    values = [slack_data["load_shedding_mwh"], slack_data["load_spillage_mwh"]]
+    colors = ["#dd2e23", "#df8e23"]  # Red for shedding, orange for spillage
+
+    bars = ax.bar(categories, values, color=colors, edgecolor="black", linewidth=1.5)
+
+    # Add percentage labels on bars
+    for bar, pct in zip(
+        bars, [slack_data["unserved_pct"], slack_data["spillage_pct"]], strict=False
+    ):
+        height = bar.get_height()
+        if height > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{pct:.2f}%",
+                ha="center",
+                va="bottom",
+                fontsize=12,
+                fontweight="bold",
+            )
+
+    ax.set_ylabel("Energy (MWh)", fontsize=12)
+    ax.set_title("Slack Generator Usage", fontsize=14, fontweight="bold")
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax
+
+
+def plot_slack_timeseries(
+    stats: NetworkStatistics, save_path: Path | None = None
+) -> tuple | None:
+    """Plot time series of load shedding and spillage over time.
+
+    Parameters
+    ----------
+    stats : NetworkStatistics
+        Network statistics object
+    save_path : Path, optional
+        If provided, save figure to this path
+
+    Returns
+    -------
+    tuple or None
+        (fig, ax) matplotlib figure and axes objects, or None if no slack
+    """
+    slack_gens = stats._get_slack_generators()
+
+    if not slack_gens or not hasattr(stats.network, "generators_t"):
+        print("No slack generator time series data available")
+        return None
+
+    # Separate shedding and spillage generators
+    shedding_gens = [
+        g
+        for g in slack_gens
+        if stats.network.generators.loc[g, "carrier"] == "load shedding"
+    ]
+    spillage_gens = [
+        g
+        for g in slack_gens
+        if stats.network.generators.loc[g, "carrier"] == "load spillage"
+    ]
+
+    # Get time series data
+    shedding_ts = (
+        stats.network.generators_t.p[shedding_gens].sum(axis=1)
+        if shedding_gens
+        else pd.Series(0, index=stats.network.snapshots)
+    )
+    spillage_ts = (
+        abs(stats.network.generators_t.p[spillage_gens].sum(axis=1))
+        if spillage_gens
+        else pd.Series(0, index=stats.network.snapshots)
+    )
+
+    if shedding_ts.sum() == 0 and spillage_ts.sum() == 0:
+        print("No slack usage detected in time series")
+        return None
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10), sharex=True)
+
+    # Plot load shedding
+    ax1.fill_between(shedding_ts.index, shedding_ts, color="#dd2e23", alpha=0.6)
+    ax1.set_ylabel("Load Shedding (MW)", fontsize=12)
+    ax1.set_title("Load Shedding Over Time", fontsize=14, fontweight="bold")
+    ax1.grid(alpha=0.3)
+
+    # Plot load spillage
+    ax2.fill_between(spillage_ts.index, spillage_ts, color="#df8e23", alpha=0.6)
+    ax2.set_ylabel("Load Spillage (MW)", fontsize=12)
+    ax2.set_xlabel("Time", fontsize=12)
+    ax2.set_title("Load Spillage Over Time", fontsize=14, fontweight="bold")
+    ax2.grid(alpha=0.3)
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax1, ax2
+
+
+def plot_slack_by_bus(
+    stats: NetworkStatistics, save_path: Path | None = None, top_n: int = 10
+) -> tuple | None:
+    """Plot slack generation breakdown by bus/zone.
+
+    Parameters
+    ----------
+    stats : NetworkStatistics
+        Network statistics object
+    save_path : Path, optional
+        If provided, save figure to this path
+    top_n : int, default 10
+        Number of top buses to display
+
+    Returns
+    -------
+    tuple or None
+        (fig, ax) matplotlib figure and axes objects, or None if no slack
+    """
+    slack_data = stats.unserved_energy()
+
+    if not slack_data["slack_by_bus"]:
+        print("No slack usage by bus detected")
+        return None
+
+    # Convert to DataFrame
+    bus_data = pd.DataFrame(slack_data["slack_by_bus"]).T
+    bus_data = bus_data.fillna(0)
+
+    # Sort by total slack and take top N
+    bus_data["total"] = bus_data["shedding"] + bus_data["spillage"]
+    bus_data = bus_data.sort_values("total", ascending=False).head(top_n)
+    bus_data = bus_data.drop("total", axis=1)
+
+    if bus_data.empty:
+        print("No slack usage by bus detected")
+        return None
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    x = np.arange(len(bus_data))
+    width = 0.35
+
+    ax.bar(
+        x - width / 2,
+        bus_data["shedding"],
+        width,
+        label="Load Shedding",
+        color="#dd2e23",
+        edgecolor="black",
+    )
+    ax.bar(
+        x + width / 2,
+        bus_data["spillage"],
+        width,
+        label="Load Spillage",
+        color="#df8e23",
+        edgecolor="black",
+    )
+
+    ax.set_ylabel("Energy (MWh)", fontsize=12)
+    ax.set_xlabel("Bus/Zone", fontsize=12)
+    ax.set_title(
+        f"Slack Usage by Bus (Top {len(bus_data)})", fontsize=14, fontweight="bold"
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels(bus_data.index, rotation=45, ha="right")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax
+
+
 def create_dashboard(
     stats: NetworkStatistics,
     output_dir: str | Path,
@@ -545,6 +777,35 @@ def create_dashboard(
             validation_results, save_path=plots_dir / "validation_dashboard.png"
         )
         saved_files["validation_dashboard"] = plots_dir / "validation_dashboard.png"
+
+    # Slack analysis plots (if slack generators exist)
+    slack_summary = stats.slack_summary()
+    if slack_summary["has_slack"]:
+        print("\nGenerating slack analysis plots...")
+        try:
+            result = plot_unserved_energy(
+                stats, save_path=plots_dir / "unserved_energy.png"
+            )
+            if result is not None:
+                saved_files["unserved_energy"] = plots_dir / "unserved_energy.png"
+        except Exception as e:
+            print(f"Could not generate unserved energy plot: {e}")
+
+        try:
+            result = plot_slack_timeseries(
+                stats, save_path=plots_dir / "slack_timeseries.png"
+            )
+            if result is not None:
+                saved_files["slack_timeseries"] = plots_dir / "slack_timeseries.png"
+        except Exception as e:
+            print(f"Could not generate slack timeseries plot: {e}")
+
+        try:
+            result = plot_slack_by_bus(stats, save_path=plots_dir / "slack_by_bus.png")
+            if result is not None:
+                saved_files["slack_by_bus"] = plots_dir / "slack_by_bus.png"
+        except Exception as e:
+            print(f"Could not generate slack by bus plot: {e}")
 
     print(f"\n✅ Dashboard complete! Plots saved to: {plots_dir}")
     return saved_files

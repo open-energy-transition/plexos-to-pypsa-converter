@@ -4,6 +4,7 @@ This module provides the NetworkStatistics class which wraps PyPSA's statistics 
 to calculate comprehensive metrics for energy system analysis.
 """
 
+import copy
 from pathlib import Path
 
 import pandas as pd
@@ -46,11 +47,56 @@ class NetworkStatistics:
         )
 
     # ========================================================================
+    # Slack Generator Helpers
+    # ========================================================================
+
+    def _get_slack_generators(self) -> list[str]:
+        """Get list of slack generator names.
+
+        Returns
+        -------
+        list[str]
+            Names of slack generators (load shedding and load spillage)
+        """
+        if "carrier" not in self.network.generators.columns:
+            return []
+        slack_carriers = ["load spillage", "load shedding"]
+        return self.network.generators[
+            self.network.generators["carrier"].isin(slack_carriers)
+        ].index.tolist()
+
+    def _get_network_without_slack(self) -> pypsa.Network:
+        """Create a temporary network view with slack generators removed.
+
+        Returns
+        -------
+        pypsa.Network
+            Network with slack generators filtered out
+        """
+        # Create a shallow copy to avoid modifying original
+        n = copy.copy(self.network)
+        slack_gens = self._get_slack_generators()
+
+        if slack_gens:
+            # Filter slack generators from components
+            n.generators = n.generators.drop(slack_gens)
+            # Filter from time-series data if it exists
+            if hasattr(n, "generators_t") and hasattr(n.generators_t, "p"):
+                n.generators_t.p = n.generators_t.p.drop(
+                    columns=slack_gens, errors="ignore"
+                )
+
+        return n
+
+    # ========================================================================
     # Capacity Metrics
     # ========================================================================
 
     def installed_capacity(
-        self, groupby: str = "carrier", nice_names: bool = True
+        self,
+        groupby: str = "carrier",
+        nice_names: bool = True,
+        exclude_slack: bool = True,
     ) -> pd.Series:
         """Get installed capacity by carrier or other grouping.
 
@@ -60,18 +106,24 @@ class NetworkStatistics:
             Grouping for aggregation ("carrier", "bus", "country", etc.)
         nice_names : bool, default True
             Use readable carrier names
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             Installed capacity (MW) grouped by specified dimension
         """
-        return self.network.statistics.installed_capacity(
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.installed_capacity(
             groupby=groupby, nice_names=nice_names
         )
 
     def optimal_capacity(
-        self, groupby: str = "carrier", nice_names: bool = True
+        self,
+        groupby: str = "carrier",
+        nice_names: bool = True,
+        exclude_slack: bool = True,
     ) -> pd.Series:
         """Get optimal capacity (including expansion) by carrier.
 
@@ -81,17 +133,22 @@ class NetworkStatistics:
             Grouping for aggregation
         nice_names : bool, default True
             Use readable carrier names
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             Optimal capacity (MW) grouped by specified dimension
         """
-        return self.network.statistics.optimal_capacity(
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.optimal_capacity(
             groupby=groupby, nice_names=nice_names
         )
 
-    def capacity_factor(self, groupby: str = "carrier") -> pd.Series:
+    def capacity_factor(
+        self, groupby: str = "carrier", exclude_slack: bool = True
+    ) -> pd.Series:
         """Calculate capacity factors by carrier.
 
         Capacity factor = actual generation / (capacity * hours)
@@ -100,20 +157,26 @@ class NetworkStatistics:
         ----------
         groupby : str, default "carrier"
             Grouping for aggregation
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             Capacity factor (0-1) grouped by specified dimension
         """
-        return self.network.statistics.capacity_factor(groupby=groupby)
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.capacity_factor(groupby=groupby)
 
     # ========================================================================
     # Energy Metrics
     # ========================================================================
 
     def energy_supply(
-        self, groupby: str = "carrier", nice_names: bool = True
+        self,
+        groupby: str = "carrier",
+        nice_names: bool = True,
+        exclude_slack: bool = True,
     ) -> pd.Series:
         """Get energy supply (generation) by carrier.
 
@@ -123,13 +186,16 @@ class NetworkStatistics:
             Grouping for aggregation
         nice_names : bool, default True
             Use readable carrier names
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             Energy supply (MWh) grouped by specified dimension
         """
-        return self.network.statistics.supply(groupby=groupby, nice_names=nice_names)
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.supply(groupby=groupby, nice_names=nice_names)
 
     def energy_withdrawal(
         self, groupby: str = "carrier", nice_names: bool = True
@@ -173,7 +239,12 @@ class NetworkStatistics:
     # Financial Metrics
     # ========================================================================
 
-    def capex(self, groupby: str = "carrier", nice_names: bool = True) -> pd.Series:
+    def capex(
+        self,
+        groupby: str = "carrier",
+        nice_names: bool = True,
+        exclude_slack: bool = True,
+    ) -> pd.Series:
         """Get capital expenditure by carrier.
 
         Parameters
@@ -182,15 +253,23 @@ class NetworkStatistics:
             Grouping for aggregation
         nice_names : bool, default True
             Use readable carrier names
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             CAPEX ($M or configured currency) grouped by specified dimension
         """
-        return self.network.statistics.capex(groupby=groupby, nice_names=nice_names)
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.capex(groupby=groupby, nice_names=nice_names)
 
-    def opex(self, groupby: str = "carrier", nice_names: bool = True) -> pd.Series:
+    def opex(
+        self,
+        groupby: str = "carrier",
+        nice_names: bool = True,
+        exclude_slack: bool = True,
+    ) -> pd.Series:
         """Get operational expenditure by carrier.
 
         Parameters
@@ -199,25 +278,38 @@ class NetworkStatistics:
             Grouping for aggregation
         nice_names : bool, default True
             Use readable carrier names
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series
             OPEX ($M/year or configured currency) grouped by specified dimension
         """
-        return self.network.statistics.opex(groupby=groupby, nice_names=nice_names)
+        network = self._get_network_without_slack() if exclude_slack else self.network
+        return network.statistics.opex(groupby=groupby, nice_names=nice_names)
 
-    def total_system_cost(self) -> float:
+    def total_system_cost(self, exclude_slack: bool = True) -> float:
         """Calculate total system cost (CAPEX + OPEX).
+
+        Parameters
+        ----------
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         float
             Total system cost in configured currency
         """
-        return self.capex().sum() + self.opex().sum()
+        return (
+            self.capex(exclude_slack=exclude_slack).sum()
+            + self.opex(exclude_slack=exclude_slack).sum()
+        )
 
-    def lcoe(self, carrier: str | None = None) -> pd.Series | float:
+    def lcoe(
+        self, carrier: str | None = None, exclude_slack: bool = True
+    ) -> pd.Series | float:
         """Calculate Levelized Cost of Energy by carrier.
 
         LCOE = (CAPEX + OPEX) / Energy Generated
@@ -227,15 +319,17 @@ class NetworkStatistics:
         carrier : str, optional
             Specific carrier to calculate LCOE for.
             If None, calculates for all carriers.
+        exclude_slack : bool, default True
+            If True, exclude load shedding/spillage slack generators
 
         Returns
         -------
         pd.Series or float
             LCOE ($/MWh or configured currency/MWh) by carrier
         """
-        capex = self.capex(groupby="carrier")
-        opex = self.opex(groupby="carrier")
-        energy = self.energy_supply(groupby="carrier")
+        capex = self.capex(groupby="carrier", exclude_slack=exclude_slack)
+        opex = self.opex(groupby="carrier", exclude_slack=exclude_slack)
+        energy = self.energy_supply(groupby="carrier", exclude_slack=exclude_slack)
 
         # Avoid division by zero
         lcoe = (capex + opex) / energy.replace(0, float("nan"))
@@ -342,19 +436,133 @@ class NetworkStatistics:
         return df
 
     # ========================================================================
+    # Slack Analysis Metrics
+    # ========================================================================
+
+    def unserved_energy(self) -> dict:
+        """Calculate load shedding (unserved energy) and load spillage metrics.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - load_shedding_mwh: Total unserved energy (MWh)
+            - load_spillage_mwh: Total excess generation absorbed (MWh)
+            - unserved_pct: Percentage of total demand unserved
+            - spillage_pct: Percentage of total generation spilled
+            - slack_by_bus: Dict of slack usage by bus
+        """
+        slack_gens = self._get_slack_generators()
+
+        result = {
+            "load_shedding_mwh": 0.0,
+            "load_spillage_mwh": 0.0,
+            "unserved_pct": 0.0,
+            "spillage_pct": 0.0,
+            "slack_by_bus": {},
+        }
+
+        if not slack_gens or not hasattr(self.network, "generators_t"):
+            return result
+
+        # Calculate load shedding (positive power from "load shedding" generators)
+        shedding_gens = [
+            g
+            for g in slack_gens
+            if self.network.generators.loc[g, "carrier"] == "load shedding"
+        ]
+        for gen in shedding_gens:
+            if gen in self.network.generators_t.p.columns:
+                gen_output = self.network.generators_t.p[gen]
+                shedding = gen_output[gen_output > 0].sum()
+                result["load_shedding_mwh"] += shedding
+                if shedding > 0:
+                    bus = self.network.generators.loc[gen, "bus"]
+                    if bus not in result["slack_by_bus"]:
+                        result["slack_by_bus"][bus] = {"shedding": 0.0, "spillage": 0.0}
+                    result["slack_by_bus"][bus]["shedding"] += shedding
+
+        # Calculate load spillage (negative power from "load spillage" generators)
+        spillage_gens = [
+            g
+            for g in slack_gens
+            if self.network.generators.loc[g, "carrier"] == "load spillage"
+        ]
+        for gen in spillage_gens:
+            if gen in self.network.generators_t.p.columns:
+                gen_output = self.network.generators_t.p[gen]
+                spillage = abs(gen_output[gen_output < 0].sum())
+                result["load_spillage_mwh"] += spillage
+                if spillage > 0:
+                    bus = self.network.generators.loc[gen, "bus"]
+                    if bus not in result["slack_by_bus"]:
+                        result["slack_by_bus"][bus] = {"shedding": 0.0, "spillage": 0.0}
+                    result["slack_by_bus"][bus]["spillage"] += spillage
+
+        # Calculate percentages
+        try:
+            total_demand = self.network.loads_t.p_set.sum().sum()
+            if total_demand > 0:
+                result["unserved_pct"] = (
+                    result["load_shedding_mwh"] / total_demand
+                ) * 100
+
+            total_generation = self.energy_supply(exclude_slack=True).sum()
+            if total_generation > 0:
+                result["spillage_pct"] = (
+                    result["load_spillage_mwh"] / total_generation
+                ) * 100
+        except (AttributeError, KeyError):
+            pass
+
+        return result
+
+    def slack_summary(self) -> dict:
+        """Generate comprehensive slack generator summary.
+
+        Returns
+        -------
+        dict
+            Summary including:
+            - has_slack: Whether network has slack generators
+            - num_slack_gens: Number of slack generators
+            - unserved_energy: Dict from unserved_energy() method
+            - slack_capacity_mw: Total slack capacity
+        """
+        slack_gens = self._get_slack_generators()
+
+        summary = {
+            "has_slack": len(slack_gens) > 0,
+            "num_slack_gens": len(slack_gens),
+            "unserved_energy": self.unserved_energy(),
+            "slack_capacity_mw": 0.0,
+        }
+
+        if slack_gens:
+            summary["slack_capacity_mw"] = self.network.generators.loc[
+                slack_gens, "p_nom"
+            ].sum()
+
+        return summary
+
+    # ========================================================================
     # Summary Methods
     # ========================================================================
 
     def generate_summary(self) -> dict:
         """Generate comprehensive summary dictionary with all metrics.
 
+        Note: All capacity, generation, and cost metrics exclude slack generators
+        (load shedding/spillage) by default. Slack metrics are reported separately.
+
         Returns
         -------
         dict
             Nested dictionary containing:
-            - capacity: installed, optimal, capacity_factor
-            - generation: supply, curtailment
-            - costs: capex, opex, total, lcoe
+            - capacity: installed, optimal, capacity_factor (excludes slack)
+            - generation: supply, curtailment (excludes slack)
+            - costs: capex, opex, total, lcoe (excludes slack)
+            - slack: unserved energy and slack generator metrics
             - network_info: basic network information
         """
         return {
@@ -372,6 +580,7 @@ class NetworkStatistics:
                 "total": self.total_system_cost(),
                 "lcoe": self.lcoe().to_dict(),
             },
+            "slack": self.slack_summary(),
             "network_info": {
                 "buses": len(self.network.buses),
                 "generators": len(self.network.generators),
