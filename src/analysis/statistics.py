@@ -114,10 +114,19 @@ class NetworkStatistics:
         pd.Series
             Installed capacity (MW) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.installed_capacity(
+        # Get capacity from original network (avoid deep copy issues)
+        result = self.network.statistics.installed_capacity(
             groupby=groupby, nice_names=nice_names
         )
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            slack_carriers = ["load spillage", "load shedding"]
+            if nice_names:
+                slack_carriers = ["Load spillage", "Load shedding"]
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     def optimal_capacity(
         self,
@@ -141,10 +150,19 @@ class NetworkStatistics:
         pd.Series
             Optimal capacity (MW) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.optimal_capacity(
+        # Get capacity from original network (avoid deep copy issues)
+        result = self.network.statistics.optimal_capacity(
             groupby=groupby, nice_names=nice_names
         )
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            slack_carriers = ["load spillage", "load shedding"]
+            if nice_names:
+                slack_carriers = ["Load spillage", "Load shedding"]
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     def capacity_factor(
         self, groupby: str = "carrier", exclude_slack: bool = True
@@ -165,8 +183,16 @@ class NetworkStatistics:
         pd.Series
             Capacity factor (0-1) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.capacity_factor(groupby=groupby)
+        # Get capacity factor from original network (avoid deep copy issues)
+        result = self.network.statistics.capacity_factor(groupby=groupby)
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            # Capacity factor doesn't have nice_names parameter, use lowercase
+            slack_carriers = ["load spillage", "load shedding"]
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     # ========================================================================
     # Energy Metrics
@@ -194,8 +220,18 @@ class NetworkStatistics:
         pd.Series
             Energy supply (MWh) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.supply(groupby=groupby, nice_names=nice_names)
+        # Get supply from original network (avoid deep copy issues)
+        result = self.network.statistics.supply(groupby=groupby, nice_names=nice_names)
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            slack_carriers = ["load spillage", "load shedding"]
+            if nice_names:
+                slack_carriers = ["Load spillage", "Load shedding"]
+            # Filter out slack carriers from result
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     def energy_withdrawal(
         self, groupby: str = "carrier", nice_names: bool = True
@@ -261,8 +297,17 @@ class NetworkStatistics:
         pd.Series
             CAPEX ($M or configured currency) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.capex(groupby=groupby, nice_names=nice_names)
+        # Get CAPEX from original network (avoid deep copy issues)
+        result = self.network.statistics.capex(groupby=groupby, nice_names=nice_names)
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            slack_carriers = ["load spillage", "load shedding"]
+            if nice_names:
+                slack_carriers = ["Load spillage", "Load shedding"]
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     def opex(
         self,
@@ -286,8 +331,17 @@ class NetworkStatistics:
         pd.Series
             OPEX ($M/year or configured currency) grouped by specified dimension
         """
-        network = self._get_network_without_slack() if exclude_slack else self.network
-        return network.statistics.opex(groupby=groupby, nice_names=nice_names)
+        # Get OPEX from original network (avoid deep copy issues)
+        result = self.network.statistics.opex(groupby=groupby, nice_names=nice_names)
+
+        # Filter slack carriers if requested and groupby is "carrier"
+        if exclude_slack and groupby == "carrier":
+            slack_carriers = ["load spillage", "load shedding"]
+            if nice_names:
+                slack_carriers = ["Load spillage", "Load shedding"]
+            result = result[~result.index.isin(slack_carriers, level="carrier")]
+
+        return result
 
     def total_system_cost(self, exclude_slack: bool = True) -> float:
         """Calculate total system cost (CAPEX + OPEX).
