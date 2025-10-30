@@ -125,7 +125,7 @@ MODEL_REGISTRY = {
                 },
                 {
                     "name": "optimize",
-                    "params": {"year": 2025},
+                    "params": {"year": 2025, "period": 2030},
                 },
                 {
                     "name": "save_network",
@@ -278,7 +278,7 @@ MODEL_REGISTRY = {
                     "name": "create_model",
                     "params": {
                         "use_csv": True,
-                        "use_investment_periods": True,
+                        "use_investment_periods": False,
                         "investment_periods": [
                             {"label": 2025, "start_year": 2024, "end_year": 2029},
                             {"label": 2030, "start_year": 2030, "end_year": 2034},
@@ -529,7 +529,7 @@ MODEL_REGISTRY = {
                 },
                 {
                     "name": "optimize",
-                    "params": {"year": 2025},
+                    "params": {"year": 2025, "period": 2030},
                 },
                 {
                     "name": "save_network",

@@ -19,7 +19,9 @@ from workflow import run_model_workflow
 if __name__ == "__main__":
     # Execute standard workflow from registry
     network, summary = run_model_workflow(
-        "aemo-2024-isp-progressive-change", use_investment_periods=False
+        "aemo-2024-isp-progressive-change",
+        use_investment_periods=True,
+        optimization_period=2030,
     )
 
     print("\n" + "=" * 60)

@@ -55,6 +55,8 @@ def run_model_workflow(
             if "__" in key:
                 step, param = key.split("__", 1)
                 parsed.setdefault(step, {})[param] = value
+            else:
+                parsed.setdefault("create_model", {})[key] = value
         return parsed
 
     parsed_overrides = parse_step_overrides(step_overrides)
@@ -65,6 +67,9 @@ def run_model_workflow(
     print(
         f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
     )
+    # Track global flags for context injection
+    context["use_investment_periods"] = False
+
     for step_idx, step_def in enumerate(steps, 1):
         step_name = step_def["name"]
         step_params = step_def.get("params", {}).copy()
@@ -86,6 +91,14 @@ def run_model_workflow(
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
                 aggregated_summary.update(step_summary)
+                used_flag = step_params.get("use_investment_periods")
+                create_summary = step_summary.get("create_model", {})
+                if used_flag is None:
+                    used_flag = create_summary.get("use_investment_periods")
+                context["use_investment_periods"] = bool(used_flag)
+                context["investment_periods"] = step_params.get(
+                    "investment_periods", create_summary.get("investment_periods")
+                )
             elif step_name == "optimize":
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")
@@ -138,6 +151,8 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
         "profiles_path",
         "inflow_path",
         "units_out_dir",
+        "use_investment_periods",
+        "investment_periods",
     ]
 
     for key in context_vars:

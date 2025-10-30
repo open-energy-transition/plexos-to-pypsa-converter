@@ -759,6 +759,7 @@ def optimize_step(
     network: pypsa.Network,
     year: int | None = None,
     period: int | str | None = None,
+    use_investment_periods: bool | None = None,
     solver_config: dict | None = None,
 ) -> dict:
     """Step: Run PyPSA network optimization."""
@@ -783,40 +784,43 @@ def optimize_step(
     period_filter: int | None = None
     if period is not None:
         label_map = getattr(network, "investment_period_label_map", {})
-        if isinstance(period, str):
-            for pid, label in label_map.items():
-                if str(label) == period:
-                    period_filter = int(pid)
-                    break
-            else:
-                try:
-                    period_filter = int(period)
-                except ValueError as exc:
-                    msg = (
-                        f"Period '{period}' not recognised. Available labels: "
-                        f"{sorted(str(label) for label in label_map.values())}"
-                    )
-                    raise ValueError(msg) from exc
-        else:
-            period_filter = int(period)
-
-        if not isinstance(network.snapshots, pd.MultiIndex) or (
-            "period" not in network.snapshots.names
+        if (
+            not use_investment_periods
+            or not label_map
+            or not isinstance(network.snapshots, pd.MultiIndex)
+            or "period" not in network.snapshots.names
         ):
-            msg = (
-                "Period filtering requested but network snapshots do not have a '",
-                "period' level. Ensure investment periods are enabled during create_model.",
+            logger.info(
+                "Ignoring period filter %s; investment periods disabled or unavailable.",
+                period,
             )
-            raise ValueError("".join(msg))
+        else:
+            if isinstance(period, str):
+                for pid, label in label_map.items():
+                    if str(label) == period:
+                        period_filter = int(pid)
+                        break
+                else:
+                    try:
+                        period_filter = int(period)
+                    except ValueError as exc:
+                        msg = (
+                            f"Period '{period}' not recognised. Available labels: "
+                            f"{sorted(str(label) for label in label_map.values())}"
+                        )
+                        raise ValueError(msg) from exc
+            else:
+                period_filter = int(period)
 
-        period_levels = network.snapshots.get_level_values("period")
-        if period_filter not in set(period_levels):
-            msg = (
-                f"Period '{period_filter}' not present in network snapshots. "
-                f"Available: {sorted(set(period_levels))}"
-            )
-            raise ValueError(msg)
-        snapshots = network.snapshots[period_levels == period_filter]
+            if period_filter is not None:
+                period_levels = network.snapshots.get_level_values("period")
+                if period_filter not in set(period_levels):
+                    msg = (
+                        f"Period '{period_filter}' not present in network snapshots. "
+                        f"Available: {sorted(set(period_levels))}"
+                    )
+                    raise ValueError(msg)
+                snapshots = network.snapshots[period_levels == period_filter]
 
     logger.info(
         "Snapshots selected for optimisation: %d (year filter=%s, period filter=%s)",
