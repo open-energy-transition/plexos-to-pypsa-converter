@@ -651,7 +651,7 @@ def apply_investment_periods_to_network(
         label_mapping.setdefault(period_id, label)
 
     multi_index = pd.MultiIndex.from_arrays(
-        [period_ids, filtered_snapshots], names=["period", "timestamp"]
+        [period_ids, filtered_snapshots], names=["period", "timestep"]
     )
 
     # Capture existing time-series data indexed by snapshots
@@ -692,7 +692,14 @@ def apply_investment_periods_to_network(
     # Restore time-series tables with MultiIndex snapshots
     for panel, key, df in dynamic_tables:
         if len(df.index) != len(multi_index):
-            df = df.reindex(filtered_snapshots).fillna(0.0)
+            if isinstance(di := df.index, pd.MultiIndex):
+                print("di:", di.names, Counter(di.get_level_values(0)))
+                df = df.reindex(multi_index).fillna(0.0)
+            else:
+                df = df.reindex(filtered_snapshots).fillna(0.0)
+                df.index = multi_index
+                panel[key] = df
+                continue
         df.index = multi_index
         panel[key] = df
 
@@ -730,7 +737,7 @@ def apply_investment_periods_to_network(
     network.investment_period_weightings.index = pd.Index(
         period_weights.index, dtype=int
     )
-    network.investment_periods = pd.Index(period_weights.index.astype(int), dtype=int)
+    network.investment_periods = pd.Index(sorted(label_mapping.keys()), dtype=int)
 
     return {
         "applied": True,
