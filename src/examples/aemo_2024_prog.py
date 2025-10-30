@@ -18,7 +18,9 @@ from workflow import run_model_workflow
 
 if __name__ == "__main__":
     # Execute standard workflow from registry
-    network, summary = run_model_workflow("aemo-2024-isp-progressive-change")
+    network, summary = run_model_workflow(
+        "aemo-2024-isp-progressive-change", use_investment_periods=False
+    )
 
     print("\n" + "=" * 60)
     print("AEMO 2024 ISP Progressive Change Workflow Complete")
@@ -27,5 +29,11 @@ if __name__ == "__main__":
         f"\nNetwork: {len(network.buses)} buses, {len(network.generators)} generators"
     )
     print(f"Snapshots: {len(network.snapshots)}")
+    opt_summary = summary.get("optimize", {})
+    period_filter = opt_summary.get("period_filter")
+    label_map = getattr(network, "investment_period_label_map", {})
+    if period_filter is not None:
+        label = label_map.get(int(period_filter), str(period_filter))
+        print(f"Optimisation period: {label} (idx {period_filter})")
     print(f"\nOptimization status: {network.results.status}")
     print(f"Objective value: {network.objective:,.0f}")

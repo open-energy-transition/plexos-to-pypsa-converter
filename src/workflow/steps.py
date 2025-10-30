@@ -758,20 +758,21 @@ def load_monthly_outages_step(
 def optimize_step(
     network: pypsa.Network,
     year: int | None = None,
+    period: int | str | None = None,
     solver_config: dict | None = None,
 ) -> dict:
     """Step: Run PyPSA network optimization."""
     network.consistency_check()
 
-    # Debug: Print network state
-    print("\n=== Network State Before Optimization ===")
-    print(f"Buses: {len(network.buses)}")
-    print(f"Generators: {len(network.generators)}")
-    print(f"Loads: {len(network.loads)}")
-    print(f"Links: {len(network.links)}")
-    print(f"Storage Units: {len(network.storage_units)}")
-    print(f"Snapshots: {len(network.snapshots)}")
-    print("=========================================\n")
+    logger.info(
+        "Optimisation setup: %d buses, %d generators, %d loads, %d links, %d storage units, %d snapshots",
+        len(network.buses),
+        len(network.generators),
+        len(network.loads),
+        len(network.links),
+        len(network.storage_units),
+        len(network.snapshots),
+    )
 
     snapshots = network.snapshots
     if year is not None:
@@ -779,8 +780,59 @@ def optimize_step(
         mask = timestamps.year == year
         snapshots = network.snapshots[mask]
 
-    print(f"Snapshots for optimization: {len(snapshots)}")
-    print(f"Year filter: {year}")
+    period_filter: int | None = None
+    if period is not None:
+        label_map = getattr(network, "investment_period_label_map", {})
+        if isinstance(period, str):
+            for pid, label in label_map.items():
+                if str(label) == period:
+                    period_filter = int(pid)
+                    break
+            else:
+                try:
+                    period_filter = int(period)
+                except ValueError as exc:
+                    msg = (
+                        f"Period '{period}' not recognised. Available labels: "
+                        f"{sorted(str(label) for label in label_map.values())}"
+                    )
+                    raise ValueError(msg) from exc
+        else:
+            period_filter = int(period)
+
+        if not isinstance(network.snapshots, pd.MultiIndex) or (
+            "period" not in network.snapshots.names
+        ):
+            msg = (
+                "Period filtering requested but network snapshots do not have a '",
+                "period' level. Ensure investment periods are enabled during create_model.",
+            )
+            raise ValueError("".join(msg))
+
+        period_levels = network.snapshots.get_level_values("period")
+        if period_filter not in set(period_levels):
+            msg = (
+                f"Period '{period_filter}' not present in network snapshots. "
+                f"Available: {sorted(set(period_levels))}"
+            )
+            raise ValueError(msg)
+        snapshots = network.snapshots[period_levels == period_filter]
+
+    logger.info(
+        "Snapshots selected for optimisation: %d (year filter=%s, period filter=%s)",
+        len(snapshots),
+        year,
+        period_filter,
+    )
+
+    class NoSnapshotsSelectedError(ValueError):
+        def __init__(self):
+            msg = "No snapshots selected for optimisation; check filters."
+            super().__init__(msg)
+
+    if len(snapshots) == 0:
+        msg = "No snapshots selected for optimisation; check filters."
+        raise NoSnapshotsSelectedError()
 
     if solver_config is None:
         solver_config = {
@@ -797,8 +849,8 @@ def optimize_step(
             },
         }
 
-    print(f"Solver config: {solver_config}")
-    print(f"Calling network.optimize with {len(snapshots)} snapshots...\n")
+    logger.info("Solver config: %s", solver_config)
+    logger.info("Calling network.optimize ...")
 
     res = network.optimize(snapshots=snapshots, **solver_config)
     return {
@@ -807,6 +859,7 @@ def optimize_step(
             "status": res[1],
             "snapshots_count": len(snapshots),
             "year_filter": year,
+            "period_filter": period_filter,
         }
     }
 

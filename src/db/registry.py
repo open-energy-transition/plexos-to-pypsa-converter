@@ -83,18 +83,7 @@ MODEL_REGISTRY = {
             "steps": [
                 {
                     "name": "create_model",
-                    "params": {
-                        "use_csv": True,
-                        "use_investment_periods": True,
-                        "investment_periods": [
-                            {"label": "2025", "start_year": 2024, "end_year": 2029},
-                            {"label": "2030", "start_year": 2030, "end_year": 2034},
-                            {"label": "2035", "start_year": 2035, "end_year": 2039},
-                            {"label": "2040", "start_year": 2040, "end_year": 2044},
-                            {"label": "2045", "start_year": 2045, "end_year": 2049},
-                            {"label": "2050", "start_year": 2050, "end_year": 2053},
-                        ],
-                    },
+                    "params": {"use_csv": True},
                 },
                 {
                     "name": "load_vre_profiles",
@@ -290,13 +279,13 @@ MODEL_REGISTRY = {
                     "params": {
                         "use_csv": True,
                         "use_investment_periods": True,
-                        "periods": [
-                            {"label": "2025", "start_year": 2024, "end_year": 2029},
-                            {"label": "2030", "start_year": 2030, "end_year": 2034},
-                            {"label": "2035", "start_year": 2035, "end_year": 2039},
-                            {"label": "2040", "start_year": 2040, "end_year": 2044},
-                            {"label": "2045", "start_year": 2045, "end_year": 2049},
-                            {"label": "2050", "start_year": 2050, "end_year": 2053},
+                        "investment_periods": [
+                            {"label": 2025, "start_year": 2024, "end_year": 2029},
+                            {"label": 2030, "start_year": 2030, "end_year": 2034},
+                            {"label": 2035, "start_year": 2035, "end_year": 2039},
+                            {"label": 2040, "start_year": 2040, "end_year": 2044},
+                            {"label": 2045, "start_year": 2045, "end_year": 2049},
+                            {"label": 2050, "start_year": 2050, "end_year": 2053},
                         ],
                     },
                 },
@@ -321,6 +310,7 @@ MODEL_REGISTRY = {
                     "params": {
                         "csv_dir": None,
                         "inflow_path": None,
+                        "use_investment_periods": True,
                     },
                 },
                 {
@@ -340,7 +330,7 @@ MODEL_REGISTRY = {
                 },
                 {
                     "name": "optimize",
-                    "params": {"year": 2025},
+                    "params": {"period": 2030, "year": 2025},
                 },
                 {
                     "name": "save_network",

@@ -739,6 +739,8 @@ def apply_investment_periods_to_network(
     )
     network.investment_periods = pd.Index(sorted(label_mapping.keys()), dtype=int)
 
+    network.investment_period_label_map = label_mapping
+
     return {
         "applied": True,
         "period_weights": period_weights.to_dict(),
