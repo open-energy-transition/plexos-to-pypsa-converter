@@ -49,6 +49,8 @@ def generate_markdown_report(stats: NetworkStatistics, output_path: str | Path) 
 
 ## Capacity Summary
 
+*Note: All capacity, generation, and cost metrics exclude slack generators (load shedding/spillage). See Slack Analysis section below for unserved energy metrics.*
+
 ### Installed Capacity (MW)
 
 | Carrier | Capacity (MW) |
@@ -133,6 +135,32 @@ def generate_markdown_report(stats: NetworkStatistics, output_path: str | Path) 
     for carrier, lcoe in summary["costs"]["lcoe"].items():
         md_content += f"| {carrier} | ${lcoe:,.2f} |\n"
 
+    # Add slack analysis section if slack generators exist
+    if summary["slack"]["has_slack"]:
+        unserved = summary["slack"]["unserved_energy"]
+        md_content += f"""
+## Slack Analysis
+
+### Unserved Energy Summary
+
+- **Load Shedding (Unserved Energy)**: {unserved["load_shedding_mwh"]:,.2f} MWh ({unserved["unserved_pct"]:.2f}% of demand)
+- **Load Spillage (Excess Generation)**: {unserved["load_spillage_mwh"]:,.2f} MWh ({unserved["spillage_pct"]:.2f}% of generation)
+- **Number of Slack Generators**: {summary["slack"]["num_slack_gens"]}
+- **Total Slack Capacity**: {summary["slack"]["slack_capacity_mw"]:,.1f} MW
+
+"""
+        # Add slack by bus table if available
+        if unserved["slack_by_bus"]:
+            md_content += """### Slack Usage by Bus/Zone
+
+| Bus/Zone | Load Shedding (MWh) | Load Spillage (MWh) |
+|----------|---------------------|---------------------|
+"""
+            for bus, values in unserved["slack_by_bus"].items():
+                shedding = values.get("shedding", 0)
+                spillage = values.get("spillage", 0)
+                md_content += f"| {bus} | {shedding:,.2f} | {spillage:,.2f} |\n"
+
     md_content += """
 ## Visualizations
 
@@ -151,6 +179,18 @@ def generate_markdown_report(stats: NetworkStatistics, output_path: str | Path) 
     if summary["network_info"]["has_periods"]:
         md_content += """
 ![Capacity Evolution](plots/capacity_evolution.png)
+"""
+
+    # Add slack visualization plots if slack generators exist
+    if summary["slack"]["has_slack"]:
+        md_content += """
+### Slack Analysis Plots
+
+![Unserved Energy](plots/unserved_energy.png)
+
+![Slack Time Series](plots/slack_timeseries.png)
+
+![Slack by Bus](plots/slack_by_bus.png)
 """
 
     # Write to file
@@ -237,14 +277,46 @@ def export_to_excel(stats: NetworkStatistics, output_path: str | Path) -> None:
         }
         pd.DataFrame(summary_data).to_excel(writer, sheet_name="Summary", index=False)
 
-        # Sheet 8: Multi-period data (if applicable)
-        try:
-            capacity_by_period = stats.capacity_by_period()
-            capacity_by_period.to_excel(writer, sheet_name="Capacity by Period")
-        except Exception:
-            logging.exception(
-                "Exception occurred while exporting capacity by period to Excel"
+        # Sheet 8: Slack Analysis (if applicable)
+        if summary["slack"]["has_slack"]:
+            unserved = summary["slack"]["unserved_energy"]
+            slack_summary_data = {
+                "Metric": [
+                    "Load Shedding (MWh)",
+                    "Load Spillage (MWh)",
+                    "Unserved Energy (%)",
+                    "Spillage (%)",
+                    "Number of Slack Generators",
+                    "Total Slack Capacity (MW)",
+                ],
+                "Value": [
+                    unserved["load_shedding_mwh"],
+                    unserved["load_spillage_mwh"],
+                    unserved["unserved_pct"],
+                    unserved["spillage_pct"],
+                    summary["slack"]["num_slack_gens"],
+                    summary["slack"]["slack_capacity_mw"],
+                ],
+            }
+            pd.DataFrame(slack_summary_data).to_excel(
+                writer, sheet_name="Slack Analysis", index=False
             )
+
+            # Add slack by bus breakdown if available
+            if unserved["slack_by_bus"]:
+                slack_by_bus = pd.DataFrame(unserved["slack_by_bus"]).T
+                slack_by_bus.columns = ["Load Shedding (MWh)", "Load Spillage (MWh)"]
+                slack_by_bus.to_excel(writer, sheet_name="Slack by Bus")
+
+        # Sheet 9/10: Multi-period data (if applicable)
+        if stats.has_periods:
+            try:
+                capacity_by_period = stats.capacity_by_period()
+                capacity_by_period.to_excel(writer, sheet_name="Capacity by Period")
+            except Exception:
+                logging.exception(
+                    "Exception occurred while exporting capacity by period to Excel"
+                )
 
     print(f"✅ Excel report saved to: {output_path}")
 

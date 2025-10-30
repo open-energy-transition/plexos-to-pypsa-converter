@@ -73,8 +73,8 @@ class NetworkStatistics:
         pypsa.Network
             Network with slack generators filtered out
         """
-        # Create a shallow copy to avoid modifying original
-        n = copy.copy(self.network)
+        # Create a deep copy to avoid modifying original
+        n = copy.deepcopy(self.network)
         slack_gens = self._get_slack_generators()
 
         if slack_gens:
