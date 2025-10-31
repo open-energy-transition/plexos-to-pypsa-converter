@@ -1,77 +1,152 @@
-# PLEXOS-to-PyPSA converter
+# PLEXOS-to-PyPSA Converter
 
-A Python tool for converting PLEXOS input XML files and their associated data to create equivalent PyPSA networks.
+Convert PLEXOS input models to PyPSA networks for optimization and analysis.
+
+This tool converts PLEXOS input XML files and their associated data into PyPSA networks that you can solve, analyze, and visualize.
 
 ![Milestones chart](doc/visualization/image/milestones.png)
 
+## Key Features
+
+- **Automated workflow** - One-line conversion from PLEXOS XML to solved PyPSA network
+- **Flexible demand strategies** - Per-node, aggregate, or target node assignment
+- **Rich analysis tools** - Built-in `NetworkAnalyzer` with generation, capacity, and energy balance plots
+- **Interactive notebooks** - Example Jupyter notebooks
+
+## Requirements
+
+- **Python**: 3.11 or 3.12
+- **PyPSA**: Version <1.0 (specifically >=0.34, <1.0)
 
 ## Installation
 
+### Install from PyPI
+
 ```bash
-# Clone the repository
+pip install plexos-to-pypsa-converter
+```
+
+### Development Install
+
+```bash
 git clone https://github.com/open-energy-transition/plexos-to-pypsa-converter.git
 cd plexos-to-pypsa-converter
-
-# Install the package
 pip install -e .
 ```
 
-### System Dependencies
+### Optional: System Dependencies
 
-Some models use RAR archives and require the `unrar` or `unar` command-line tool to be installed:
+Some models use RAR archives and require `unrar`:
 
-**macOS:**
 ```bash
+# macOS
 brew install rar
 ```
 
-**Note:** This is only required for models that use RAR archives (e.g., `plexos-world-spatial`). If you only work with ZIP-based models, this dependency is not needed.
+This is only needed for RAR-based models like `plexos-world-spatial`.
 
-## Converted Features
+## Usage
 
-The converter ports the following PLEXOS components to PyPSA:
+### Quick Start with Example Models
 
-### Core Network Components
-- **Buses/Nodes** - Network topology and zonal structure
-- **Snapshots** - Time index for optimization periods
-- **Carriers** - Energy types (electricity, gas, hydrogen, etc.)
-- **Loads** - Demand assignment with flexible strategies
+The easiest way to get started is with the high-level workflow API:
 
-### Generation Assets
-- **Conventional Generators** - Thermal, nuclear, hydro plants
-  - Capacity ratings and availability
-  - Efficiency curves and heat rates
-  - Capital and marginal costs
-  - Fuel constraints and emissions
-- **Renewable Generators** - Solar, wind, other VRE
-  - Capacity factors from VRE profiles
-  - Technology-specific parameters
+```python
+from workflow import run_model_workflow
 
-### Network Infrastructure
-- **Transmission Lines** - AC lines with flow limits
-- **Links** - DC connections and cross-sector links
-- **Transformers** - Voltage level connections
+# Run a complete workflow: load → convert → optimize → save
+network, setup_summary = run_model_workflow("caiso-irp23")
 
-### Storage Systems
-- **Battery Storage** - Electrochemical storage
-- **Pumped Hydro Storage** - Pumped storage plants
-- **Generic Storage** - Other storage technologies
-  - Charging/discharging efficiencies
-  - Energy and power constraints
+# Solve for specific year (multi-period models)
+network, setup_summary = run_model_workflow(
+    "aemo-2024-isp-progressive-change",
+    optimize__year=2025
+)
+```
 
-### Multi-Sector Components
-- **Gas Network** - Gas buses, pipelines, and storage
-- **Hydrogen Systems** - H2 production, storage, and demand
-- **Transport Sector** - Electric vehicle integration
+This automatically:
+1. Downloads the model data (if the data does not exist locally)
+2. Converts PLEXOS XML to CSV files (using `plexos-coad`)
+3. Creates PyPSA network with proper topology and components
+4. Adds other features, such as renewable profiles, retirements, generator outages, and slack generators
+5. Solves the optimization problem
+6. Saves results to NetCDF format
 
-### System Constraints
-- **Generation Constraints** - Unit commitment constraints
-- **Transmission Constraints** - Flow and capacity limits
-- **Policy Constraints** - Renewable targets, emissions limits
+### Interactive Notebooks
 
-## Supported PLEXOS Models
+For interactive analysis and visualization, check out the example notebooks:
 
-The following table lists PLEXOS XML models that are being converted or will be converted to PyPSA networks:
+- **CAISO IRP23**:
+  - `src/examples/caiso_irp23/caiso_solve.ipynb` - Model conversion and solve
+  - `src/examples/caiso_irp23/caiso_analysis.ipynb` - Analysis and plots
+
+- **AEMO 2024 Progressive Change**:
+  - `src/examples/aemo_2024_prog/aemo_solve.ipynb` - Model conversion and solve
+  - `src/examples/aemo_2024_prog/aemo_analysis.ipynb` - Analysis and plots
+
+These notebooks show how to:
+- Convert and solve PLEXOS models
+- Generate network statistics
+- Create plots for simple analysis and validation
+- Export results for further analysis
+
+Note that you have to run the `{}_solve.ipynb` notebooks before you are able to run the `{}_analysis.ipynb` notebooks.
+
+### Network Analysis
+
+Analyze solved networks using the `NetworkAnalyzer`:
+
+```python
+from analysis.core import NetworkAnalyzer
+
+# Load a solved network
+analyzer = NetworkAnalyzer.from_netcdf("solved_network.nc")
+
+# Generate plots
+analyzer.plot_generation_by_carrier()
+analyzer.plot_installed_capacity()
+analyzer.plot_capacity_factors()
+analyzer.plot_energy_balance()
+
+# Create comprehensive dashboard
+analyzer.plot_dashboard()
+
+# Get network statistics
+stats = analyzer.info()
+print(f"Buses: {stats['buses']}, Generators: {stats['generators']}")
+```
+
+### Advanced: Custom Workflows
+
+The default workflow steps for each model is specified in `src/db/registry.py`.
+However, you can customize the workflow steps to skip some steps. For example, to skip saving the network and to save under a custom filename:
+
+```python
+from db.registry import MODEL_REGISTRY
+from workflow import run_model_workflow
+
+# Modify workflow (e.g., skip automatic save)
+default_workflow = MODEL_REGISTRY["caiso-irp23"]["processing_workflow"]
+custom_workflow = default_workflow.copy()
+custom_workflow["steps"] = [
+    step for step in default_workflow["steps"]
+    if step["name"] != "save_network"
+]
+
+# Run with custom workflow
+network, setup_summary = run_model_workflow(
+    "caiso-irp23",
+    workflow_overrides=custom_workflow,
+    demand_assignment_strategy="aggregate_node"
+)
+
+# Save with custom filename
+network.export_to_netcdf("my_custom_output.nc")
+```
+
+## Supported Models
+
+The following PLEXOS models are supported or in development:
 
 | Model Name | Source | Status | Download |
 |------------|--------|--------|----------|
@@ -92,77 +167,37 @@ The following table lists PLEXOS XML models that are being converted or will be 
 - 🟡 **In-progress** - Conversion currently underway
 - 🔴 **Not yet converted** - Planned for future conversion
 
-### Model × Feature Coverage Matrix
+### Model × Feature Coverage
 
 ![Model Coverage Heatmap](doc/visualization/image/coverage_heatmap.png)
 
-The heatmap above shows the conversion status of different features across all models. Each cell represents the implementation status for a specific model-feature combination.
+The heatmap shows conversion status of different features across all models.
 
-## Input Files & Data Structure
+## What Gets Converted
 
-### Required Files
+The converter handles these PLEXOS components:
 
-**PLEXOS XML File**
-- Main model structure containing system topology, generators, buses, lines
-- Contains object definitions and property mappings
+**Core Components:**
+- Buses/nodes and network topology
+- Generators (thermal, hydro, renewables)
+- Loads with flexible assignment strategies
+- Transmission lines and links
+- Storage units (batteries, pumped hydro)
 
-**CSV Data Files**
+**Advanced Features:**
+- Forced retirements and capacity additions
+- Generator outages and maintenance schedules
 
-Different data sources provide input CSV files in various formats, so we have built this converter to try and detect as many possible types/formats as possible, but note some customization might be needed.
+## Architecture
 
-The converter supports multiple CSV formats for time-series data:
+The converter uses a CSV-based approach to take the PLEXOS model properties and turn them into PyPSA networks:
 
-#### Demand Data
-1. **Directory Format** (AEMO-style):
-   ```
-   demand/
-   ├── Bus_001.csv
-   ├── Bus_002.csv
-   └── Bus_003.csv
-   ```
-   Each file contains time-series demand for one bus.
+1. **Download** - Automatically fetch model data from source URLs
+2. **CSV Export** - Convert PLEXOS XML to structured CSV files using COAD
+3. **Network Creation** - Build PyPSA network from CSV data; Add outages, add slack generators, validate constraints
+4. **Optimization** - Solve using PyPSA's optimization
+5. **Analysis** - Generate plots and statistics with NetworkAnalyzer
 
-2. **Single CSV Format** (CAISO/SEM-style):
-   ```
-   demand.csv:
-   Datetime,1,2,3,Iteration
-   2024-01-01 00:00,100,150,200,1
-   2024-01-01 01:00,110,160,210,1
-   ```
-   Single file with columns for each zone/bus, supports iterations for stochastic modeling.
+## Contribute
 
-#### VRE Profiles
-```
-vre_profiles/
-├── solar_zone1.csv
-├── wind_zone1.csv
-└── wind_offshore.csv
-```
-Renewable generation capacity factors (0-1) by technology and location.
-
-#### Timeslice Data
-```
-timeslice.csv:
-Timeslice,Property,Value
-1,Peak_Hour,1
-2,Off_Peak,0.8
-```
-Maps time-dependent properties for generators and other assets.
-
-
-## Quick Start
-
-### Basic XML Conversion
-
-```python
-from src.network.electricity_sector import create_model_from_xml
-
-# Convert a PLEXOS model with automatic data discovery
-network = create_model_from_xml(
-    xml_file_path="path/to/your/model.xml",
-    demand_assignment_strategy="per_node"  # or "target_node", "aggregate_node"
-)
-
-# Save the PyPSA network
-network.export_to_netcdf("output_model.nc")
-```
+Report bugs on [GitHub Issues](https://github.com/open-energy-transition/plexos-to-pypsa-converter/issues).
