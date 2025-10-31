@@ -26,10 +26,12 @@ dependencies = [
     "netcdf4>=1.7",
     "linopy>=0.5.5",
     "matplotlib>=3.10",
+    "seaborn>=0.13",
     "geopandas>=1.0",
     "networkx>=3.4",
     "pyyaml>=6.0",
     "openpyxl>=3.1",
+    "tabulate>=0.9",
     "deprecation",
     "validators",
     "plexosdb",
@@ -164,6 +166,7 @@ ignore = [
     'ANN',   # flake8-annotations (tests don't need strict typing)
     'PERF',  # perflint (performance optimizations not critical in tests)
 ]
+"**/*.ipynb" = ["ALL"]
 
 # Gradual adoption - relaxed rules for existing code
 "src/**" = [
