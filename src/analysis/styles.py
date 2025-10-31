@@ -72,6 +72,245 @@ BUS_CARRIER_COLORS = {
 }
 
 # =============================================================================
+# Additional Color Palettes for Automatic Assignment
+# =============================================================================
+
+# Vibrant, aesthetically pleasing palettes for unknown carriers
+AVAILABLE_PALETTES = {
+    # Retro Metro - Vibrant and eye-catching (9 colors)
+    "retro_metro": [
+        "#ea5545",  # Vibrant Red
+        "#f46a9b",  # Hot Pink
+        "#ef9b20",  # Orange
+        "#edbf33",  # Gold
+        "#ede15b",  # Yellow
+        "#bdcf32",  # Lime
+        "#87bc45",  # Green
+        "#27aeef",  # Blue
+        "#b33dc6",  # Purple
+    ],
+    # Material Design - Modern Google palette (12 colors)
+    "material": [
+        "#f44336",  # Red
+        "#e91e63",  # Pink
+        "#9c27b0",  # Purple
+        "#3f51b5",  # Indigo
+        "#2196f3",  # Blue
+        "#00bcd4",  # Cyan
+        "#009688",  # Teal
+        "#4caf50",  # Green
+        "#cddc39",  # Lime
+        "#ffc107",  # Amber
+        "#ff9800",  # Orange
+        "#ff5722",  # Deep Orange
+    ],
+    # Seaborn Deep - Moderated, aesthetically pleasing (10 colors)
+    "seaborn_deep": [
+        "#4C72B0",  # Blue
+        "#DD8452",  # Orange
+        "#55A868",  # Green
+        "#C44E52",  # Red
+        "#8172B3",  # Purple
+        "#937860",  # Brown
+        "#DA8BC3",  # Pink
+        "#8C8C8C",  # Grey
+        "#CCB974",  # Yellow
+        "#64B5CD",  # Cyan
+    ],
+    # Seaborn Bright - Distinct, vibrant hues (10 colors)
+    "seaborn_bright": [
+        "#023EFF",  # Blue
+        "#FF7C00",  # Orange
+        "#1AC938",  # Green
+        "#E8000B",  # Red
+        "#8B2BE2",  # Purple
+        "#9F4800",  # Brown
+        "#F14CC1",  # Pink
+        "#A3A3A3",  # Grey
+        "#FFC400",  # Yellow
+        "#00D7FF",  # Cyan
+    ],
+    # Tableau 10 - Industry standard, balanced (10 colors)
+    "tableau10": [
+        "#4E79A7",  # Blue
+        "#F28E2B",  # Orange
+        "#E15759",  # Red
+        "#76B7B2",  # Teal
+        "#59A14F",  # Green
+        "#EDC948",  # Yellow
+        "#B07AA1",  # Purple
+        "#FF9DA7",  # Pink
+        "#9C755F",  # Brown
+        "#BAB0AC",  # Grey
+    ],
+}
+
+
+# =============================================================================
+# Smart Color Management
+# =============================================================================
+
+
+class ColorManager:
+    """Smart color assignment for carriers with fallback palettes.
+
+    This class handles automatic color assignment for carriers, with priority:
+    1. Predefined colors (CARRIER_COLORS)
+    2. User overrides
+    3. Fallback palette (avoiding duplicates)
+
+    Parameters
+    ----------
+    predefined_colors : dict, optional
+        Predefined carrier->color mappings (defaults to CARRIER_COLORS)
+    fallback_palette : str, default "retro_metro"
+        Name of palette to use for unknown carriers
+
+    Examples
+    --------
+    >>> cm = ColorManager(fallback_palette="material")
+    >>> colors = cm.get_colors(["wind", "solar", "biomass", "new_tech"])
+    >>> # wind/solar use CARRIER_COLORS, biomass/new_tech use material palette
+    """
+
+    def __init__(
+        self,
+        predefined_colors: dict[str, str] | None = None,
+        fallback_palette: str = "retro_metro",
+    ):
+        """Initialize ColorManager."""
+        self.predefined = predefined_colors or CARRIER_COLORS
+        self.fallback_palette = fallback_palette
+
+        # Validate palette name
+        if fallback_palette not in AVAILABLE_PALETTES:
+            msg = f"Unknown palette: {fallback_palette}. Available: {list(AVAILABLE_PALETTES.keys())}"
+            raise ValueError(msg)
+
+    def get_colors(
+        self,
+        carriers: list[str],
+        user_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Get colors for list of carriers.
+
+        Parameters
+        ----------
+        carriers : list[str]
+            List of carrier names
+        user_overrides : dict, optional
+            User-specified carrier->color mappings
+
+        Returns
+        -------
+        dict
+            Mapping of carrier -> hex color
+        """
+        user_overrides = user_overrides or {}
+        colors = {}
+        used_colors = set()
+
+        # Get fallback palette
+        palette = AVAILABLE_PALETTES[self.fallback_palette].copy()
+
+        for carrier in carriers:
+            # Extract carrier name if it's a tuple (from MultiIndex)
+            carrier_name = carrier[-1] if isinstance(carrier, tuple) else carrier
+            carrier_lower = str(carrier_name).lower()
+
+            # Priority 1: User overrides
+            if carrier in user_overrides:
+                color = user_overrides[carrier]
+            # Priority 2: Predefined colors (check lowercase)
+            elif carrier_lower in self.predefined:
+                color = self.predefined[carrier_lower]
+            # Priority 3: Assign from fallback palette
+            else:
+                # Filter out already-used colors
+                available = [c for c in palette if c not in used_colors]
+
+                if available:
+                    color = available[0]
+                    # Remove from palette for next carrier
+                    palette.remove(color)
+                else:
+                    # Palette exhausted - cycle through with alpha variation
+                    # Just cycle through the original palette
+                    idx = len(colors) % len(AVAILABLE_PALETTES[self.fallback_palette])
+                    color = AVAILABLE_PALETTES[self.fallback_palette][idx]
+
+            colors[carrier] = color
+            used_colors.add(color)
+
+        return colors
+
+
+def assign_colors_to_carriers(
+    carriers: list[str],
+    user_overrides: dict[str, str] | None = None,
+    palette: str = "retro_metro",
+    predefined: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Assign colors to carriers with smart fallback.
+
+    Main public API for color assignment. Handles priority:
+    1. Predefined colors (CARRIER_COLORS by default)
+    2. User overrides
+    3. Fallback palette
+
+    Parameters
+    ----------
+    carriers : list[str]
+        List of carrier names
+    user_overrides : dict, optional
+        User-specified carrier->color mappings
+    palette : str, default "retro_metro"
+        Fallback palette name for unknown carriers
+    predefined : dict, optional
+        Predefined colors (defaults to CARRIER_COLORS)
+
+    Returns
+    -------
+    dict
+        Carrier -> color mapping
+
+    Examples
+    --------
+    >>> colors = assign_colors_to_carriers(
+    ...     ["wind", "solar", "biomass", "new_tech"],
+    ...     user_overrides={"new_tech": "#FF00FF"},
+    ...     palette="material"
+    ... )
+    """
+    cm = ColorManager(predefined_colors=predefined, fallback_palette=palette)
+    return cm.get_colors(carriers, user_overrides=user_overrides)
+
+
+def get_palette_colors(palette_name: str) -> list[str]:
+    """Get colors from a named palette.
+
+    Parameters
+    ----------
+    palette_name : str
+        Name of palette ("retro_metro", "material", "seaborn_deep", etc.)
+
+    Returns
+    -------
+    list[str]
+        List of hex color codes
+
+    Raises
+    ------
+    ValueError
+        If palette_name is not recognized
+    """
+    if palette_name not in AVAILABLE_PALETTES:
+        msg = f"Unknown palette: {palette_name}. Available: {list(AVAILABLE_PALETTES.keys())}"
+        raise ValueError(msg)
+    return AVAILABLE_PALETTES[palette_name].copy()
+
+
+# =============================================================================
 # Matplotlib Style Configuration
 # =============================================================================
 

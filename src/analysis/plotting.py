@@ -24,10 +24,9 @@ from analysis.metrics import (
 )
 from analysis.styles import (
     apply_default_style,
+    assign_colors_to_carriers,
     format_axis_labels,
     format_legend,
-    get_carrier_color,
-    get_colors_for_carriers,
     style_capacity_plot,
     style_cost_plot,
     style_energy_balance_plot,
@@ -76,6 +75,8 @@ def plot_energy_balance_timeseries(
     max_points: int = 5000,
     figsize: tuple[float, float] = (14, 7),
     ax: plt.Axes | None = None,
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> plt.Axes:
     """Plot energy balance time series as stacked area chart.
@@ -98,6 +99,10 @@ def plot_energy_balance_timeseries(
         Figure size if creating new figure
     ax : plt.Axes, optional
         Existing axes to plot on
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments passed to ax.stackplot
 
@@ -151,7 +156,12 @@ def plot_energy_balance_timeseries(
     # Plot supply (positive)
     if len(supply_carriers) > 0:
         supply_data = balance_pivot[supply_carriers].clip(lower=0)
-        colors = get_colors_for_carriers(supply_carriers.tolist())
+        colors_dict = assign_colors_to_carriers(
+            supply_carriers.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in supply_carriers]
         ax.stackplot(
             balance_pivot.index,
             supply_data.T,
@@ -164,7 +174,12 @@ def plot_energy_balance_timeseries(
     # Plot withdrawal (negative) - flip to negative
     if len(withdrawal_carriers) > 0:
         withdrawal_data = balance_pivot[withdrawal_carriers].clip(upper=0)
-        colors = get_colors_for_carriers(withdrawal_carriers.tolist())
+        colors_dict = assign_colors_to_carriers(
+            withdrawal_carriers.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in withdrawal_carriers]
         ax.stackplot(
             balance_pivot.index,
             withdrawal_data.T,
@@ -195,6 +210,8 @@ def plot_energy_balance_totals(
     ax: plt.Axes | None = None,
     save_path: str | Path | None = None,
     dpi: int = 150,
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> plt.Axes:
     """Plot aggregated energy balance as horizontal bar chart.
@@ -219,6 +236,10 @@ def plot_energy_balance_totals(
         Path to save the figure
     dpi : int, default 150
         Resolution for saved figure
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments passed to ax.barh
 
@@ -260,7 +281,12 @@ def plot_energy_balance_totals(
 
     # Combine for plotting
     all_carriers = pd.concat([withdrawal, supply])
-    colors = [get_carrier_color(c) for c in all_carriers.index]
+    colors_dict = assign_colors_to_carriers(
+        all_carriers.index.tolist(),
+        user_overrides=color_overrides,
+        palette=color_palette,
+    )
+    colors = [colors_dict[c] for c in all_carriers.index]
 
     # Plot horizontal bars
     y_pos = np.arange(len(all_carriers))
@@ -298,6 +324,8 @@ def plot_capacity_overview(
     ax: plt.Axes | None = None,
     save_path: str | Path | None = None,
     dpi: int = 150,
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> plt.Axes:
     """Plot capacity overview by carrier/component/bus.
@@ -322,6 +350,10 @@ def plot_capacity_overview(
         Path to save the figure
     dpi : int, default 150
         Resolution for saved figure
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments passed to ax.bar
 
@@ -370,7 +402,12 @@ def plot_capacity_overview(
 
     # Get colors based on groupby
     if groupby == "carrier":
-        colors = [get_carrier_color(c) for c in capacity.index]
+        colors_dict = assign_colors_to_carriers(
+            capacity.index.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in capacity.index]
     else:
         colors = plt.cm.tab20(np.linspace(0, 1, len(capacity)))
 
@@ -402,6 +439,8 @@ def plot_capacity_factors(
     ax: plt.Axes | None = None,
     save_path: str | Path | None = None,
     dpi: int = 150,
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> plt.Axes:
     """Plot capacity factors by carrier/component/bus.
@@ -424,6 +463,10 @@ def plot_capacity_factors(
         Path to save the figure
     dpi : int, default 150
         Resolution for saved figure
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments passed to ax.bar
 
@@ -459,7 +502,12 @@ def plot_capacity_factors(
 
     # Get colors
     if groupby == "carrier":
-        colors = [get_carrier_color(c) for c in cf.index]
+        colors_dict = assign_colors_to_carriers(
+            cf.index.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in cf.index]
     else:
         colors = plt.cm.tab20(np.linspace(0, 1, len(cf)))
 
@@ -601,6 +649,8 @@ def plot_cost_comparison(
     buses: list[str] | None = None,
     exclude_slack: bool = True,
     figsize: tuple[float, float] = (12, 6),
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
     """Plot side-by-side comparison of CAPEX and OPEX.
@@ -617,6 +667,10 @@ def plot_cost_comparison(
         Exclude slack generators
     figsize : tuple, default (12, 6)
         Figure size
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments passed to plotting functions
 
@@ -641,7 +695,12 @@ def plot_cost_comparison(
     capex = costs["capex"].sort_values(ascending=False)
     if not capex.empty:
         if groupby == "carrier":
-            colors = [get_carrier_color(c) for c in capex.index]
+            colors_dict = assign_colors_to_carriers(
+                capex.index.tolist(),
+                user_overrides=color_overrides,
+                palette=color_palette,
+            )
+            colors = [colors_dict[c] for c in capex.index]
         else:
             colors = plt.cm.tab20(np.linspace(0, 1, len(capex)))
 
@@ -656,7 +715,12 @@ def plot_cost_comparison(
     opex = costs["opex"].sort_values(ascending=False)
     if not opex.empty:
         if groupby == "carrier":
-            colors = [get_carrier_color(c) for c in opex.index]
+            colors_dict = assign_colors_to_carriers(
+                opex.index.tolist(),
+                user_overrides=color_overrides,
+                palette=color_palette,
+            )
+            colors = [colors_dict[c] for c in opex.index]
         else:
             colors = plt.cm.tab20(np.linspace(0, 1, len(opex)))
 
@@ -845,6 +909,8 @@ def plot_generation_mix(
     buses: list[str] | None = None,
     exclude_slack: bool = True,
     figsize: tuple[float, float] = (12, 5),
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
     **kwargs,
 ) -> tuple[plt.Figure, tuple[plt.Axes, plt.Axes]]:
     """Plot generation mix: supply totals and capacity.
@@ -859,6 +925,10 @@ def plot_generation_mix(
         Exclude slack generators
     figsize : tuple, default (12, 5)
         Figure size
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
     **kwargs
         Additional arguments
 
@@ -879,7 +949,12 @@ def plot_generation_mix(
     ).sort_values(ascending=False)
 
     if not supply.empty:
-        colors = [get_carrier_color(c) for c in supply.index]
+        colors_dict = assign_colors_to_carriers(
+            supply.index.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in supply.index]
         x_pos = np.arange(len(supply))
         ax1.bar(x_pos, supply.values, color=colors, alpha=0.8)
         ax1.set_xticks(x_pos)
@@ -897,7 +972,12 @@ def plot_generation_mix(
     ).sort_values(ascending=False)
 
     if not capacity.empty:
-        colors = [get_carrier_color(c) for c in capacity.index]
+        colors_dict = assign_colors_to_carriers(
+            capacity.index.tolist(),
+            user_overrides=color_overrides,
+            palette=color_palette,
+        )
+        colors = [colors_dict[c] for c in capacity.index]
         x_pos = np.arange(len(capacity))
         ax2.bar(x_pos, capacity.values, color=colors, alpha=0.8)
         ax2.set_xticks(x_pos)
@@ -918,6 +998,8 @@ def create_summary_dashboard(
     figsize: tuple[float, float] = (16, 10),
     save_path: str | Path | None = None,
     dpi: int = 150,
+    color_overrides: dict[str, str] | None = None,
+    color_palette: str = "retro_metro",
 ) -> plt.Figure:
     """Create comprehensive summary dashboard with multiple plots.
 
@@ -935,6 +1017,10 @@ def create_summary_dashboard(
         Path to save the figure
     dpi : int, default 150
         Resolution for saved figure
+    color_overrides : dict, optional
+        Manual color assignments for specific carriers
+    color_palette : str, default "retro_metro"
+        Fallback palette for unknown carriers
 
     Returns
     -------
@@ -948,12 +1034,24 @@ def create_summary_dashboard(
     # Energy balance totals
     ax1 = fig.add_subplot(gs[0, 0])
     plot_energy_balance_totals(
-        network, buses=buses, exclude_slack=exclude_slack, ax=ax1
+        network,
+        buses=buses,
+        exclude_slack=exclude_slack,
+        ax=ax1,
+        color_overrides=color_overrides,
+        color_palette=color_palette,
     )
 
     # Capacity overview
     ax2 = fig.add_subplot(gs[0, 1])
-    plot_capacity_overview(network, buses=buses, exclude_slack=exclude_slack, ax=ax2)
+    plot_capacity_overview(
+        network,
+        buses=buses,
+        exclude_slack=exclude_slack,
+        ax=ax2,
+        color_overrides=color_overrides,
+        color_palette=color_palette,
+    )
 
     # Cost breakdown
     ax3 = fig.add_subplot(gs[1, 0])
@@ -961,7 +1059,14 @@ def create_summary_dashboard(
 
     # Capacity factors
     ax4 = fig.add_subplot(gs[1, 1])
-    plot_capacity_factors(network, buses=buses, exclude_slack=exclude_slack, ax=ax4)
+    plot_capacity_factors(
+        network,
+        buses=buses,
+        exclude_slack=exclude_slack,
+        ax=ax4,
+        color_overrides=color_overrides,
+        color_palette=color_palette,
+    )
 
     fig.suptitle("Network Analysis Summary", fontsize=16, fontweight="bold", y=0.995)
 

@@ -72,6 +72,10 @@ class NetworkAnalyzer:
         List of identified slack generator names
     multi_period : bool
         Whether network has investment periods
+    color_overrides : dict | None
+        Manual color assignments for specific carriers
+    color_palette : str
+        Fallback palette for unknown carriers
 
     Examples
     --------
@@ -102,6 +106,8 @@ class NetworkAnalyzer:
         network: pypsa.Network,
         exclude_slack_default: bool = True,
         nice_names_default: bool = True,
+        color_overrides: dict[str, str] | None = None,
+        color_palette: str = "retro_metro",
     ):
         """Initialize NetworkAnalyzer with a PyPSA network.
 
@@ -113,10 +119,16 @@ class NetworkAnalyzer:
             Default setting for excluding slack generators
         nice_names_default : bool, default True
             Default setting for using readable carrier names
+        color_overrides : dict, optional
+            Manual color assignments for specific carriers
+        color_palette : str, default "retro_metro"
+            Fallback palette for unknown carriers
         """
         self.network = network
         self.exclude_slack_default = exclude_slack_default
         self.nice_names_default = nice_names_default
+        self.color_overrides = color_overrides
+        self.color_palette = color_palette
 
         # Cache network characteristics
         self.spatial_resolution = detect_spatial_resolution(network)
@@ -593,6 +605,8 @@ class NetworkAnalyzer:
             max_points=max_points,
             figsize=figsize,
             ax=ax,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -646,6 +660,8 @@ class NetworkAnalyzer:
             ax=ax,
             save_path=save_path,
             dpi=dpi,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -703,6 +719,8 @@ class NetworkAnalyzer:
             ax=ax,
             save_path=save_path,
             dpi=dpi,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -756,6 +774,8 @@ class NetworkAnalyzer:
             ax=ax,
             save_path=save_path,
             dpi=dpi,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -850,6 +870,8 @@ class NetworkAnalyzer:
             buses=buses,
             exclude_slack=exclude_slack,
             figsize=figsize,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -887,6 +909,8 @@ class NetworkAnalyzer:
             buses=buses,
             exclude_slack=exclude_slack,
             figsize=figsize,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
             **kwargs,
         )
 
@@ -1002,4 +1026,6 @@ class NetworkAnalyzer:
             figsize=figsize,
             save_path=save_path,
             dpi=dpi,
+            color_overrides=self.color_overrides,
+            color_palette=self.color_palette,
         )
