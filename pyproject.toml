@@ -166,6 +166,7 @@ ignore = [
     'ANN',   # flake8-annotations (tests don't need strict typing)
     'PERF',  # perflint (performance optimizations not critical in tests)
 ]
+"**/*.ipynb" = ["ALL"]
 
 # Gradual adoption - relaxed rules for existing code
 "src/**" = [

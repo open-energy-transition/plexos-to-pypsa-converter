@@ -23,9 +23,3 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("AEMO 2024 ISP Progressive Change Workflow Complete")
     print("=" * 60)
-    print(
-        f"\nNetwork: {len(network.buses)} buses, {len(network.generators)} generators"
-    )
-    print(f"Snapshots: {len(network.snapshots)}")
-    print(f"\nOptimization status: {network.results.status}")
-    print(f"Objective value: {network.objective:,.0f}")

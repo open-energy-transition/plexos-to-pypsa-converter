@@ -154,6 +154,11 @@ class NetworkAnalyzer:
         dict
             Dictionary with network characteristics
         """
+        # Get investment periods (0 if not multi-period)
+        investment_periods = (
+            len(self.network.investment_periods) if self.multi_period else 0
+        )
+
         return {
             "buses": len(self.network.buses),
             "generators": len(self.network.generators),
@@ -163,11 +168,16 @@ class NetworkAnalyzer:
             "links": len(self.network.links),
             "lines": len(self.network.lines),
             "snapshots": len(self.network.snapshots),
+            "investment_periods": investment_periods,
+            "carriers": len(self.network.carriers),
             "spatial_resolution": self.spatial_resolution,
             "multi_period": self.multi_period,
             "bus_carriers": self.bus_carriers,
             "slack_generators": len(self.slack_generators),
             "has_time_series": self._has_time_series,
+            "has_storage": self._has_storage,
+            "has_stores": self._has_stores,
+            "has_links": self._has_links,
         }
 
     def print_info(self) -> None:

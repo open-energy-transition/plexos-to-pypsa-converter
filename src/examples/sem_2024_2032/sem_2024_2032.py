@@ -28,6 +28,3 @@ if __name__ == "__main__":
     print(
         f"\nNetwork: {len(network.buses)} buses, {len(network.generators)} generators"
     )
-    print(f"Snapshots: {len(network.snapshots)}")
-    print(f"\nOptimization status: {network.results.status}")
-    print(f"Objective value: {network.objective:,.0f}")
