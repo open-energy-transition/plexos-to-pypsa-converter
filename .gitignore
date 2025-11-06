@@ -189,16 +189,19 @@ doc/visualization/html/
 
 # example data
 src/examples/data/
+src/plexos_to_pypsa_converter/examples/data/
 
 # solved networks
 src/examples/results/
+src/plexos_to_pypsa_converter/examples/results/
 
 # claude
-CLAUDE.mdsrc/
-
+CLAUDE.md
+.claude/
 # scratch
 scratch/
 
 # archive directory for legacy code
 archive/
 src/examples/archive/
+src/plexos_to_pypsa_converter/examples/archive/

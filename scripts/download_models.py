@@ -13,9 +13,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from db.registry import MODEL_REGISTRY
-from utils.model_paths import get_model_directory
-from utils.recipe_executor import RecipeExecutor
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.utils.model_paths import get_model_directory
+from plexos_to_pypsa_converter.utils.recipe_executor import RecipeExecutor
 
 
 def is_model_complete(model_id: str) -> bool:

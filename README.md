@@ -52,7 +52,7 @@ This is only needed for RAR-based models like `plexos-world-spatial`.
 The easiest way to get started is with the high-level workflow API:
 
 ```python
-from workflow import run_model_workflow
+from plexos_to_pypsa_converter.workflow import run_model_workflow
 
 # Run a complete workflow: load → convert → optimize → save
 network, setup_summary = run_model_workflow("caiso-irp23")
@@ -97,7 +97,7 @@ Note that you have to run the `{}_solve.ipynb` notebooks before you are able to 
 Analyze solved networks using the `NetworkAnalyzer`:
 
 ```python
-from analysis.core import NetworkAnalyzer
+from plexos_to_pypsa_converter.analysis.core import NetworkAnalyzer
 
 # Load a solved network
 analyzer = NetworkAnalyzer.from_netcdf("solved_network.nc")
@@ -122,8 +122,8 @@ The default workflow steps for each model is specified in `src/db/registry.py`.
 However, you can customize the workflow steps to skip some steps. For example, to skip saving the network and to save under a custom filename:
 
 ```python
-from db.registry import MODEL_REGISTRY
-from workflow import run_model_workflow
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.workflow import run_model_workflow
 
 # Modify workflow (e.g., skip automatic save)
 default_workflow = MODEL_REGISTRY["caiso-irp23"]["processing_workflow"]

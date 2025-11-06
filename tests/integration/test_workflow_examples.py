@@ -11,7 +11,7 @@ pytest_plugins = []
 
 # Try to import workflow executor
 try:
-    from workflow.executor import run_model_workflow
+    from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
 
     WORKFLOW_AVAILABLE = True
 except ImportError:

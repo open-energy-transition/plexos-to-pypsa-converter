@@ -1,6 +1,6 @@
 """Unit tests for CSV reading utilities."""
 
-from db.csv_readers import parse_numeric_value
+from plexos_to_pypsa_converter.db.csv_readers import parse_numeric_value
 
 
 class TestParseNumericValue:
