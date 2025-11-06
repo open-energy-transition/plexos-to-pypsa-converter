@@ -23,8 +23,8 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from db.registry import MODEL_REGISTRY
-from workflow.executor import run_model_workflow
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
 
 EXCLUDED_STEPS: set[str] = {"optimize", "save_network"}
 

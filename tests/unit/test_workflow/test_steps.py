@@ -2,7 +2,10 @@
 
 import pytest
 
-from workflow.steps import add_curtailment_link_step, scale_p_min_pu_step
+from plexos_to_pypsa_converter.workflow.steps import (
+    add_curtailment_link_step,
+    scale_p_min_pu_step,
+)
 
 
 class TestScalePMinPuStep:

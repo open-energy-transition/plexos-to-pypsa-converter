@@ -2,11 +2,11 @@
 
 import pytest
 
-from workflow.executor import (
+from plexos_to_pypsa_converter.workflow.executor import (
     _evaluate_condition,
     _inject_context,
 )
-from workflow.steps import STEP_REGISTRY
+from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
 class TestInjectContext:
