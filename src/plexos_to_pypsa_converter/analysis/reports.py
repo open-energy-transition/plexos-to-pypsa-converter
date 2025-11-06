@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .statistics import NetworkStatistics
+from plexos_to_pypsa_converter.analysis.statistics import NetworkStatistics
 
 
 def generate_markdown_report(stats: NetworkStatistics, output_path: str | Path) -> None:

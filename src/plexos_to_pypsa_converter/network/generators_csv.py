@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from pypsa import Network
 
-from ..db.csv_readers import (
+from plexos_to_pypsa_converter.db.csv_readers import (
     ensure_datetime,
     find_bus_for_object_csv,
     find_fuel_for_generator_csv,
@@ -26,10 +26,17 @@ from ..db.csv_readers import (
     parse_numeric_value,
     read_plexos_input_csv,
 )
-from ..db.parse import get_property_active_mask, read_timeslice_activity
-from ..utils.paths import contains_path_pattern, extract_filename, safe_join
-from .carriers_csv import parse_fuel_prices_csv
-from .costs_csv import set_capital_costs_generic_csv
+from plexos_to_pypsa_converter.db.parse import (
+    get_property_active_mask,
+    read_timeslice_activity,
+)
+from plexos_to_pypsa_converter.network.carriers_csv import parse_fuel_prices_csv
+from plexos_to_pypsa_converter.network.costs_csv import set_capital_costs_generic_csv
+from plexos_to_pypsa_converter.utils.paths import (
+    contains_path_pattern,
+    extract_filename,
+    safe_join,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from .statistics import NetworkStatistics
+from plexos_to_pypsa_converter.analysis.statistics import NetworkStatistics
 
 # Set plotting style
 sns.set_style("whitegrid")

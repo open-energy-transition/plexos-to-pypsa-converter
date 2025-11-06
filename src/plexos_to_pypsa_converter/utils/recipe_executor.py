@@ -11,7 +11,7 @@ import rarfile
 import requests
 from tqdm import tqdm
 
-from ..db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
 
 # Constants
 SEPARATOR_LINE = "=" * 70

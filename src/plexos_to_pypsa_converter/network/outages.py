@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 from pypsa import Network
 
-from ..db.csv_readers import (
+from plexos_to_pypsa_converter.db.csv_readers import (
     ensure_datetime,
     get_property_from_static_csv,
     load_static_properties,

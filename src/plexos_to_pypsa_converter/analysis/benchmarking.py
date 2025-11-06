@@ -9,7 +9,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from .statistics import NetworkStatistics
+from plexos_to_pypsa_converter.analysis.statistics import NetworkStatistics
 
 
 class ModelBenchmark:

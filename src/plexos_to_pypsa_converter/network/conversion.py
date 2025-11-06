@@ -12,11 +12,17 @@ import pandas as pd
 import pypsa
 from plexosdb import PlexosDB
 
-from ..db.registry import MODEL_REGISTRY
-from ..utils.csv_export import check_csv_export_exists, export_csvs_from_xml
-from ..utils.model_paths import get_model_directory, get_model_xml_path
-from .core import setup_network
-from .core_csv import setup_network_csv
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.network.core import setup_network
+from plexos_to_pypsa_converter.network.core_csv import setup_network_csv
+from plexos_to_pypsa_converter.utils.csv_export import (
+    check_csv_export_exists,
+    export_csvs_from_xml,
+)
+from plexos_to_pypsa_converter.utils.model_paths import (
+    get_model_directory,
+    get_model_xml_path,
+)
 
 
 def _merge_configs(default_config: dict, overrides: dict) -> dict:

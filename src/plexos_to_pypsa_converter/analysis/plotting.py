@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pypsa
 
-from .metrics import (
+from plexos_to_pypsa_converter.analysis.metrics import (
     calculate_capacity_factor,
     calculate_costs,
     calculate_energy_balance,
@@ -22,7 +22,7 @@ from .metrics import (
     calculate_supply,
     calculate_transmission_flows,
 )
-from .styles import (
+from plexos_to_pypsa_converter.analysis.styles import (
     apply_default_style,
     assign_colors_to_carriers,
     format_axis_labels,
@@ -31,7 +31,7 @@ from .styles import (
     style_cost_plot,
     style_energy_balance_plot,
 )
-from .utils import (
+from plexos_to_pypsa_converter.analysis.utils import (
     sample_timeseries,
 )
 

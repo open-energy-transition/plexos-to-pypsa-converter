@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 import pypsa
 
-from ..db.csv_readers import (
+from plexos_to_pypsa_converter.db.csv_readers import (
     ensure_datetime,
     get_dataid_timeslice_map_csv,
     get_numeric_property_from_static_csv,
@@ -31,7 +31,10 @@ from ..db.csv_readers import (
     load_static_properties,
     load_time_varying_properties,
 )
-from ..db.parse import get_property_active_mask, read_timeslice_activity
+from plexos_to_pypsa_converter.db.parse import (
+    get_property_active_mask,
+    read_timeslice_activity,
+)
 
 logger = logging.getLogger(__name__)
 

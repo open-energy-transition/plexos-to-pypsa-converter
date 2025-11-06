@@ -11,7 +11,7 @@ from typing import Any
 from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 
-from ..utils.paths import resolve_relative_path
+from plexos_to_pypsa_converter.utils.paths import resolve_relative_path
 
 
 @dataclass

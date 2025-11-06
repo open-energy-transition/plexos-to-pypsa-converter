@@ -10,15 +10,17 @@ from pathlib import Path
 import pandas as pd
 import pypsa
 
-from ..db.csv_readers import (
+from plexos_to_pypsa_converter.db.csv_readers import (
     find_bus_for_object_csv,
     find_bus_for_storage_via_generators_csv,
     get_property_from_static_csv,
     load_static_properties,
     parse_numeric_value,
 )
-from ..utils.paths import safe_join
-from .generators_csv import _discover_datafile_mappings
+from plexos_to_pypsa_converter.network.generators_csv import (
+    _discover_datafile_mappings,
+)
+from plexos_to_pypsa_converter.utils.paths import safe_join
 
 logger = logging.getLogger(__name__)
 

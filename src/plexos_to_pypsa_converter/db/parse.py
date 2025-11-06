@@ -4,7 +4,9 @@ import pandas as pd
 from plexosdb import PlexosDB
 from plexosdb.enums import ClassEnum
 
-from .timeslice_parser import load_and_parse_timeslice_patterns
+from plexos_to_pypsa_converter.db.timeslice_parser import (
+    load_and_parse_timeslice_patterns,
+)
 
 
 def find_bus_for_object(

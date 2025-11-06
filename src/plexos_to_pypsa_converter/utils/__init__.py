@@ -1,6 +1,6 @@
 """Utility modules for PLEXOS-PyPSA."""
 
-from .paths import (
+from plexos_to_pypsa_converter.utils.paths import (
     contains_path_pattern,
     extract_filename,
     get_parent_directory,

@@ -382,8 +382,12 @@ def add_gas_pipelines_csv(network: Network, csv_path: str) -> int:
                                         carrier="Gas",
                                     )
                                     pipelines_added += 1
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(
+                            "Skipping gas pipeline %s due to error: %s",
+                            pipeline_name,
+                            exc,
+                        )
 
     except Exception as e:
         logger.warning(f"Failed to add gas pipelines: {e}")
@@ -582,8 +586,12 @@ def add_gas_electric_coupling_csv(network: Network, csv_path: str) -> dict[str, 
                                     carrier="Gas2Electric",
                                 )
                                 coupling_stats["gas_generators"] += 1
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug(
+                                "Skipping gas generator %s due to error: %s",
+                                gen_name,
+                                exc,
+                            )
 
             # Calculate efficiency range
             if efficiency_values:
@@ -754,8 +762,12 @@ def add_flow_paths_csv(network: Network, csv_path: str) -> dict[str, int]:
                                         efficiency=eff,
                                     )
                                     paths[link_type] += 1
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(
+                            "Skipping flow path %s due to error: %s",
+                            path_name,
+                            exc,
+                        )
 
     except Exception as e:
         logger.warning(f"Failed to add flow paths: {e}")

@@ -7,7 +7,7 @@ statistics API, adapted from PyPSA-Explorer patterns for static analysis.
 import pandas as pd
 import pypsa
 
-from .utils import (
+from plexos_to_pypsa_converter.analysis.utils import (
     filter_by_buses,
     filter_slack_generators,
     identify_slack_generators,

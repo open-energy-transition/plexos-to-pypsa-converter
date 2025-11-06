@@ -8,7 +8,10 @@ from pathlib import Path
 import pandas as pd
 import pypsa
 
-from ..db.csv_readers import get_property_from_static_csv, load_static_properties
+from plexos_to_pypsa_converter.db.csv_readers import (
+    get_property_from_static_csv,
+    load_static_properties,
+)
 
 
 def set_capital_costs_generic_csv(

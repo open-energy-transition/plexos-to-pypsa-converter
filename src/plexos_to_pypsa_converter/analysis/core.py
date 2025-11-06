@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pypsa
 
-from .metrics import (
+from plexos_to_pypsa_converter.analysis.metrics import (
     calculate_capacity_factor,
     calculate_costs,
     calculate_curtailment,
@@ -23,7 +23,7 @@ from .metrics import (
     calculate_transmission_flows,
     calculate_withdrawal,
 )
-from .plotting import (
+from plexos_to_pypsa_converter.analysis.plotting import (
     create_summary_dashboard,
     plot_capacity_factors,
     plot_capacity_overview,
@@ -35,7 +35,7 @@ from .plotting import (
     plot_storage_state_of_charge,
     plot_transmission_flows,
 )
-from .utils import (
+from plexos_to_pypsa_converter.analysis.utils import (
     detect_spatial_resolution,
     get_bus_carriers,
     has_links,

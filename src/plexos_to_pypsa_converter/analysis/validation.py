@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 import pypsa
 
-from .statistics import NetworkStatistics
+from plexos_to_pypsa_converter.analysis.statistics import NetworkStatistics
 
 
 class NetworkValidator:

@@ -8,9 +8,9 @@ import inspect
 
 import pypsa
 
-from ..db.registry import MODEL_REGISTRY
-from ..utils.model_paths import get_model_directory
-from .steps import STEP_REGISTRY
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.utils.model_paths import get_model_directory
+from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
 def run_model_workflow(
