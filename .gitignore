@@ -195,7 +195,7 @@ src/examples/results/
 
 # claude
 CLAUDE.mdsrc/
-
+.claude
 # scratch
 scratch/
 
