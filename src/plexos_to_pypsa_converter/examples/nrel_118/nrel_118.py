@@ -10,7 +10,7 @@ from plexos_to_pypsa_converter.workflow import run_model_workflow
 
 if __name__ == "__main__":
     # Execute standard workflow from registry
-    network, summary = run_model_workflow("nrel-118")
+    network, summary = run_model_workflow("nrel-118", solve=True)
 
     print("\n" + "=" * 60)
     print("NREL Extended IEEE 118-bus Workflow Complete")
