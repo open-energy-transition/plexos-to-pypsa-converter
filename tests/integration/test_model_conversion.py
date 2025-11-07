@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
 from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
 
-EXCLUDED_STEPS: set[str] = {"optimize", "save_network"}
+EXCLUDED_STEPS: set[str] = {"save_network"}
 
 
 def _build_conversion_workflow(workflow: dict, excluded_steps: Iterable[str]) -> dict:
@@ -92,8 +92,9 @@ def test_sem_conversion(args):
     - Bus creation
     - Optional consistency check
 
-    Note: Optimization and save_network steps are removed unless --run-solve
-    is supplied.
+    Note: The workflow skips the ``save_network`` step for speed. Optimization
+    is always disabled here; optional solves are run separately on a limited
+    snapshot set.
 
     Args:
         args: Command-line arguments
@@ -106,23 +107,20 @@ def test_sem_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize/save steps
+        # Get workflow from registry and filter out save_network
         model_config = MODEL_REGISTRY["sem-2024-2032"]
         workflow = model_config["processing_workflow"]
-        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
+        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        print("Running workflow (optimize/save steps excluded for faster testing)...")
+        print("Running workflow (save_network step excluded for faster testing)...")
         network, summary = run_model_workflow(
-            "sem-2024-2032", workflow_overrides=workflow_no_optimize
-        )
-
-        # Verify optimize step did NOT run
-        assert "optimize" not in summary, (
-            "Optimization should not run in conversion test"
+            "sem-2024-2032",
+            workflow_overrides=workflow_no_save,
+            solve=False,
         )
 
         # Show workflow steps that were completed
-        print("\nWorkflow steps completed (optimize excluded):")
+        print("\nWorkflow steps completed:")
         for step_name in summary.keys():
             print(f"  - {step_name}")
 
@@ -210,23 +208,20 @@ def test_aemo_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize/save steps
+        # Get workflow from registry and filter out save_network
         model_config = MODEL_REGISTRY["aemo-2024-isp-progressive-change"]
         workflow = model_config["processing_workflow"]
-        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
+        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        print("Running workflow (optimize/save steps excluded for faster testing)...")
+        print("Running workflow (save_network step excluded for faster testing)...")
         network, summary = run_model_workflow(
-            "aemo-2024-isp-progressive-change", workflow_overrides=workflow_no_optimize
-        )
-
-        # Verify optimize step did NOT run
-        assert "optimize" not in summary, (
-            "Optimization should not run in conversion test"
+            "aemo-2024-isp-progressive-change",
+            workflow_overrides=workflow_no_save,
+            solve=False,
         )
 
         # Show workflow steps that were completed
-        print("\nWorkflow steps completed (optimize excluded):")
+        print("\nWorkflow steps completed:")
         for step_name in summary.keys():
             print(f"  - {step_name}")
 
@@ -316,23 +311,20 @@ def test_caiso_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out optimize/save steps
+        # Get workflow from registry and filter out save_network
         model_config = MODEL_REGISTRY["caiso-irp23"]
         workflow = model_config["processing_workflow"]
-        workflow_no_optimize = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
+        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
 
-        print("Running workflow (optimize/save steps excluded for faster testing)...")
+        print("Running workflow (save_network step excluded for faster testing)...")
         network, summary = run_model_workflow(
-            "caiso-irp23", workflow_overrides=workflow_no_optimize
-        )
-
-        # Verify optimize step did NOT run
-        assert "optimize" not in summary, (
-            "Optimization should not run in conversion test"
+            "caiso-irp23",
+            workflow_overrides=workflow_no_save,
+            solve=False,
         )
 
         # Show workflow steps that were completed
-        print("\nWorkflow steps completed (optimize excluded):")
+        print("\nWorkflow steps completed:")
         for step_name in summary.keys():
             print(f"  - {step_name}")
 
