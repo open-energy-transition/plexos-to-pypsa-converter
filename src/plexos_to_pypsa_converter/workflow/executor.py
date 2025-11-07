@@ -16,11 +16,16 @@ from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 def run_model_workflow(
     model_id: str,
     workflow_overrides: dict | None = None,
+    *,
+    solve: bool = False,
     **step_overrides,
 ) -> tuple[pypsa.Network, dict]:
     """Execute model processing workflow from registry definition.
 
-    This function orchestrates the execution of a multi-step workflow defined in the model registry, handling parameter injection, path resolution, and summary aggregation.
+    This function orchestrates the execution of a multi-step workflow defined in
+    the model registry, handling parameter injection, path resolution, and
+    summary aggregation. By default it runs only the conversion steps. Pass
+    ``solve=True`` to allow the ``optimize`` step to execute.
     """
     if model_id not in MODEL_REGISTRY:
         msg = f"Model '{model_id}' not found in registry. Available models: {list(MODEL_REGISTRY.keys())}"
@@ -62,6 +67,8 @@ def run_model_workflow(
     network: pypsa.Network | None = None
     aggregated_summary: dict = {}
     steps = workflow.get("steps", [])
+    if not solve:
+        steps = [step for step in steps if step.get("name") != "optimize"]
     print(
         f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
     )
