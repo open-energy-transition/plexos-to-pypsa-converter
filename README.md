@@ -84,13 +84,16 @@ By running `run_model_workflow(), this automatically:
 
 For interactive analysis and visualization, check out the example notebooks:
 
+You can view a version of the results analysis for the `caiso-irp23` model [here](https://github.com/open-energy-transition/plexos-to-pypsa-converter/blob/master/src/). 
+
+The current existing notebooks are: 
 - **CAISO IRP23**:
-  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_solve.ipynb`
-  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_analysis.ipynb`
+  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_solve.ipynb` (to convert and solve the `caiso-irp23` model)
+  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_analysis.ipynb` (to visualize the `caiso-irp23` model's results after solving)
 
 - **AEMO 2024 Progressive Change**:
-  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_solve.ipynb`
-  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_analysis.ipynb`
+  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_solve.ipynb` (to convert and solve the `aemo-2024-isp-progressive-change` model)
+  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_analysis.ipynb` (to visualize the `aemo-2024-isp-progressive-change` model's results after solving)
 
 These notebooks show how to:
 - Convert and solve PLEXOS models
