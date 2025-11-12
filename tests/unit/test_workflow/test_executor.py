@@ -5,6 +5,7 @@ import pytest
 from plexos_to_pypsa_converter.workflow.executor import (
     _evaluate_condition,
     _inject_context,
+    _resolve_csv_dir_path,
     run_model_workflow,
 )
 from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
@@ -210,6 +211,52 @@ class TestRunModelWorkflowCustomPaths:
 
         assert network is None
         assert summary == {}
+
+
+class TestResolveCsvDirPath:
+    """Tests for CSV directory resolution helper."""
+
+    def test_uses_descriptor_override(self, tmp_path):
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+        override = tmp_path / "custom_csv"
+        override.mkdir()
+
+        result = _resolve_csv_dir_path(
+            model_dir,
+            workflow={},
+            descriptor={"csv_dir": str(override)},
+        )
+
+        assert result == override
+
+    def test_auto_selects_single_subdir(self, tmp_path):
+        model_dir = tmp_path / "model"
+        csv_root = model_dir / "csvs_from_xml"
+        nested = csv_root / "export_one"
+        nested.mkdir(parents=True)
+        (nested / "Generator.csv").write_text("header\n")
+
+        result = _resolve_csv_dir_path(
+            model_dir,
+            workflow={"csv_dir_pattern": "csvs_from_xml"},
+            descriptor={},
+        )
+
+        assert result == nested
+
+    def test_returns_pattern_when_path_missing(self, tmp_path):
+        model_dir = tmp_path / "model"
+        model_dir.mkdir()
+
+        result = _resolve_csv_dir_path(
+            model_dir,
+            workflow={"csv_dir_pattern": "csvs_from_xml"},
+            descriptor={},
+        )
+
+        expected = (model_dir / "csvs_from_xml").resolve()
+        assert result == expected
 
     def test_model_dir_override_is_used_in_output(self, tmp_path, capsys):
         """Providing model_dir_override should replace the registry location."""
