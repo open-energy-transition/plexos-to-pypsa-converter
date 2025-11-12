@@ -5,6 +5,7 @@ import pytest
 from plexos_to_pypsa_converter.workflow.executor import (
     _evaluate_condition,
     _inject_context,
+    run_model_workflow,
 )
 from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
@@ -94,6 +95,21 @@ class TestInjectContext:
         assert "profiles_path" not in injected
         assert "model_id" not in injected
 
+    def test_inject_context_injects_registry_model_id(self):
+        """registry_model_id should be injected when available."""
+
+        def dummy_step(**kwargs):
+            return kwargs
+
+        context = {
+            "model_id": "custom-model",
+            "registry_model_id": "aemo-2024-isp-progressive-change",
+        }
+
+        injected = _inject_context({}, context, dummy_step)
+
+        assert injected["registry_model_id"] == "aemo-2024-isp-progressive-change"
+
 
 class TestEvaluateCondition:
     """Test condition evaluation."""
@@ -175,3 +191,46 @@ class TestWorkflowRegistry:
 
 # Note: Full workflow execution tests (run_model_workflow) are in integration tests
 # because they require real model data and full CSV parsing infrastructure.
+
+
+class TestRunModelWorkflowCustomPaths:
+    """Tests for custom model descriptors and path overrides."""
+
+    def test_model_descriptor_without_registry_entry(self, tmp_path):
+        """run_model_workflow should accept an explicit descriptor even if the model_id isn't in the registry."""
+        descriptor = {
+            "model_dir": str(tmp_path),
+            "processing_workflow": {"steps": []},
+        }
+
+        network, summary = run_model_workflow(
+            "custom-model",
+            model_descriptor=descriptor,
+        )
+
+        assert network is None
+        assert summary == {}
+
+    def test_model_dir_override_is_used_in_output(self, tmp_path, capsys):
+        """Providing model_dir_override should replace the registry location."""
+        run_model_workflow(
+            "sem-2024-2032",
+            workflow_overrides={"steps": []},
+            model_dir_override=tmp_path,
+        )
+
+        output = capsys.readouterr().out
+        assert f"Model directory: {tmp_path}" in output
+
+    def test_workflow_override_without_registry_entry(self, tmp_path):
+        """Custom workflow overrides plus model_dir_override should allow non-registry runs."""
+        workflow = {"steps": []}
+
+        network, summary = run_model_workflow(
+            "custom-model",
+            workflow_overrides=workflow,
+            model_dir_override=tmp_path,
+        )
+
+        assert network is None
+        assert summary == {}
