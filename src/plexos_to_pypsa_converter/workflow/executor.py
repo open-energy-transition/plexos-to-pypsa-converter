@@ -5,6 +5,7 @@ a declarative workflow defined in the registry.
 """
 
 import inspect
+from pathlib import Path
 
 import pypsa
 
@@ -17,6 +18,9 @@ def run_model_workflow(
     model_id: str,
     workflow_overrides: dict | None = None,
     *,
+    model_descriptor: dict | None = None,
+    model_dir_override: str | Path | None = None,
+    registry_model_id: str | None = None,
     solve: bool = False,
     **step_overrides,
 ) -> tuple[pypsa.Network, dict]:
@@ -27,32 +31,82 @@ def run_model_workflow(
     summary aggregation. By default it runs only the conversion steps. Pass
     ``solve=True`` to allow the ``optimize`` step to execute.
     """
-    if model_id not in MODEL_REGISTRY:
-        msg = f"Model '{model_id}' not found in registry. Available models: {list(MODEL_REGISTRY.keys())}"
-        raise ValueError(msg)
-    model_meta = MODEL_REGISTRY[model_id]
-    if "processing_workflow" not in model_meta:
-        msg = f"Model '{model_id}' does not have a processing_workflow defined. This model may not support the workflow system yet."
-        raise ValueError(msg)
-    workflow = workflow_overrides or model_meta["processing_workflow"]
-    model_dir = get_model_directory(model_id)
-    csv_dir_pattern = workflow.get("csv_dir_pattern", "csvs_from_xml")
-    csv_dir = model_dir / csv_dir_pattern
+    descriptor = model_descriptor or MODEL_REGISTRY.get(model_id)
+    if descriptor is None:
+        if workflow_overrides is None:
+            available = ", ".join(MODEL_REGISTRY.keys())
+            msg = (
+                f"Model '{model_id}' not found in registry and no workflow overrides were provided. "
+                "Pass `workflow_overrides` or `model_descriptor` for custom models. "
+                f"Available registry models: [{available}]"
+            )
+            raise ValueError(msg)
+        descriptor = {"processing_workflow": workflow_overrides}
 
-    # Build units_out_dir if pattern is specified
-    units_out_dir_pattern = workflow.get("units_out_dir_pattern")
-    units_out_dir = (
-        model_dir / units_out_dir_pattern if units_out_dir_pattern else model_dir
+    processing_workflow = descriptor.get("processing_workflow")
+    if processing_workflow is None:
+        msg = (
+            f"Model '{model_id}' does not have a processing_workflow defined. "
+            "Provide one via the registry or the model_descriptor argument."
+        )
+        raise ValueError(msg)
+
+    workflow = workflow_overrides or processing_workflow
+
+    effective_registry_model_id = registry_model_id or descriptor.get(
+        "registry_model_id"
     )
+
+    # Resolve base directories (allow descriptor / override to set custom paths)
+    if model_dir_override is not None:
+        model_dir = Path(model_dir_override)
+    elif descriptor.get("model_dir"):
+        model_dir = Path(descriptor["model_dir"])
+    else:
+        try:
+            model_dir = get_model_directory(model_id)
+        except FileNotFoundError as exc:
+            msg = (
+                f"Model directory for '{model_id}' could not be resolved. "
+                "Provide `model_dir_override` or include `model_dir` in the model descriptor."
+            )
+            raise FileNotFoundError(msg) from exc
+
+    csv_dir: Path
+    csv_dir_override = descriptor.get("csv_dir")
+    if csv_dir_override:
+        csv_dir = Path(csv_dir_override)
+    else:
+        csv_dir_pattern = workflow.get("csv_dir_pattern", "csvs_from_xml")
+        csv_dir = Path(model_dir) / csv_dir_pattern
+
+    profiles_path = Path(
+        descriptor.get("profiles_path", model_dir),
+    )
+    inflow_path = Path(descriptor.get("inflow_path", model_dir))
+
+    # Build units_out_dir if pattern or explicit path is specified
+    units_out_dir_override = descriptor.get("units_out_dir")
+    if units_out_dir_override:
+        units_out_dir = Path(units_out_dir_override)
+    else:
+        units_out_dir_pattern = workflow.get("units_out_dir_pattern")
+        units_out_dir = (
+            Path(model_dir) / units_out_dir_pattern
+            if units_out_dir_pattern
+            else Path(model_dir)
+        )
 
     context = {
         "model_id": model_id,
         "model_dir": str(model_dir),
         "csv_dir": str(csv_dir),
-        "profiles_path": str(model_dir),
-        "inflow_path": str(model_dir),
+        "profiles_path": str(profiles_path),
+        "inflow_path": str(inflow_path),
         "units_out_dir": str(units_out_dir),
     }
+    if effective_registry_model_id:
+        context["registry_model_id"] = effective_registry_model_id
 
     def parse_step_overrides(step_overrides: dict) -> dict[str, dict]:
         parsed = {}
@@ -145,6 +199,7 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
         "profiles_path",
         "inflow_path",
         "units_out_dir",
+        "registry_model_id",
     ]
 
     for key in context_vars:
