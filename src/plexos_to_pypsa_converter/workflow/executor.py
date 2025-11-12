@@ -14,6 +14,48 @@ from plexos_to_pypsa_converter.utils.model_paths import get_model_directory
 from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
+def _auto_select_csv_dir(base_path: Path) -> Path | None:
+    """Recursively select a CSV directory when only a single subdirectory exists."""
+    if not base_path.exists() or not base_path.is_dir():
+        return None
+
+    if any(base_path.glob("*.csv")):
+        return base_path
+
+    subdirs = [p for p in base_path.iterdir() if p.is_dir()]
+    if len(subdirs) == 1:
+        nested = _auto_select_csv_dir(subdirs[0])
+        return nested or subdirs[0]
+
+    return None
+
+
+def _resolve_csv_dir_path(
+    model_dir: Path,
+    workflow: dict,
+    descriptor: dict,
+) -> Path:
+    """Determine the CSV directory for workflow steps."""
+    csv_dir_override = descriptor.get("csv_dir")
+    if csv_dir_override:
+        return Path(csv_dir_override)
+
+    csv_dir_pattern = workflow.get("csv_dir_pattern") or "csvs_from_xml"
+    pattern_path = Path(csv_dir_pattern)
+
+    if pattern_path.is_absolute():
+        candidate = pattern_path
+    else:
+        candidate = (model_dir / pattern_path).resolve()
+
+    if candidate.exists() and candidate.is_dir():
+        auto_selected = _auto_select_csv_dir(candidate)
+        if auto_selected:
+            return auto_selected
+
+    return candidate
+
+
 def run_model_workflow(
     model_id: str,
     workflow_overrides: dict | None = None,
@@ -72,13 +114,7 @@ def run_model_workflow(
             )
             raise FileNotFoundError(msg) from exc
 
-    csv_dir: Path
-    csv_dir_override = descriptor.get("csv_dir")
-    if csv_dir_override:
-        csv_dir = Path(csv_dir_override)
-    else:
-        csv_dir_pattern = workflow.get("csv_dir_pattern", "csvs_from_xml")
-        csv_dir = Path(model_dir) / csv_dir_pattern
+    csv_dir: Path = _resolve_csv_dir_path(model_dir, workflow, descriptor)
 
     profiles_path = Path(
         descriptor.get("profiles_path", model_dir),
