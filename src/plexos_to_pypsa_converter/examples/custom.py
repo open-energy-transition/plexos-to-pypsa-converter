@@ -67,7 +67,6 @@ WORKFLOW_STEPS = [
 ]
 
 WORKFLOW_OVERRIDE = {
-    "csv_dir_pattern": "csvs_from_xml/NEM",
     "steps": WORKFLOW_STEPS,
 }
 
