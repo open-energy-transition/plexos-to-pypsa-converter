@@ -66,7 +66,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "csv_dir_pattern": "csvs_from_xml",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
@@ -259,7 +259,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "csv_dir_pattern": "csvs_from_xml",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
@@ -447,7 +447,7 @@ MODEL_REGISTRY = {
             "demand_assignment_strategy": "per_node",
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/NEM",
+            "csv_dir_pattern": "csvs_from_xml",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
@@ -638,7 +638,7 @@ MODEL_REGISTRY = {
             },
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/WECC",
+            "csv_dir_pattern": "csvs_from_xml",
             "units_out_dir_pattern": "Units Out",
             "solver_config": {
                 "solver_name": "gurobi",
@@ -788,7 +788,7 @@ MODEL_REGISTRY = {
             "demand_file": "Input files/DA/Load/LoadR1DA.csv",
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/System",
+            "csv_dir_pattern": "csvs_from_xml",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
@@ -945,7 +945,7 @@ MODEL_REGISTRY = {
             },
         },
         "processing_workflow": {
-            "csv_dir_pattern": "csvs_from_xml/SEM Forecast model",
+            "csv_dir_pattern": "csvs_from_xml",
             "solver_config": {
                 "solver_name": "gurobi",
                 "solver_options": {
