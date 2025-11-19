@@ -11,7 +11,7 @@ pytest_plugins = []
 
 # Try to import workflow executor
 try:
-    from workflow.executor import run_model_workflow
+    from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
 
     WORKFLOW_AVAILABLE = True
 except ImportError:
@@ -26,7 +26,7 @@ class TestSEMWorkflow:
     @pytest.mark.slow
     def test_sem_workflow_executes_all_steps(self, sem_model_id):
         """Test that SEM workflow executes all expected steps."""
-        network, summary = run_model_workflow(sem_model_id)
+        network, summary = run_model_workflow(sem_model_id, solve=True)
 
         # Verify all expected steps ran
         expected_steps = [
@@ -51,7 +51,7 @@ class TestSEMWorkflow:
     @pytest.mark.slow
     def test_sem_workflow_creates_valid_network(self, sem_model_id):
         """Test that SEM workflow creates a valid PyPSA network."""
-        network, summary = run_model_workflow(sem_model_id)
+        network, summary = run_model_workflow(sem_model_id, solve=True)
 
         # Check basic network structure
         assert hasattr(network, "buses")
@@ -69,6 +69,7 @@ class TestSEMWorkflow:
         """Test that workflow step overrides work correctly."""
         network, summary = run_model_workflow(
             sem_model_id,
+            solve=True,
             scale_p_min_pu__scaling_factor=0.5,  # Override default 0.7
         )
 
@@ -85,7 +86,7 @@ class TestAEMOWorkflow:
     @pytest.mark.slow
     def test_aemo_workflow_executes_all_steps(self, aemo_model_id):
         """Test that AEMO workflow executes all expected steps."""
-        network, summary = run_model_workflow(aemo_model_id)
+        network, summary = run_model_workflow(aemo_model_id, solve=True)
 
         # Verify core steps ran
         expected_steps = [
@@ -108,7 +109,7 @@ class TestAEMOWorkflow:
     @pytest.mark.slow
     def test_aemo_workflow_creates_valid_network(self, aemo_model_id):
         """Test that AEMO workflow creates a valid PyPSA network."""
-        network, summary = run_model_workflow(aemo_model_id)
+        network, summary = run_model_workflow(aemo_model_id, solve=True)
 
         # Check basic network structure
         assert hasattr(network, "buses")
@@ -124,7 +125,7 @@ class TestAEMOWorkflow:
     @pytest.mark.slow
     def test_aemo_workflow_vre_profiles_loaded(self, aemo_model_id):
         """Test that VRE profiles are loaded correctly."""
-        network, summary = run_model_workflow(aemo_model_id)
+        network, summary = run_model_workflow(aemo_model_id, solve=True)
 
         # Check that VRE profile loading step ran
         assert "load_vre_profiles" in summary

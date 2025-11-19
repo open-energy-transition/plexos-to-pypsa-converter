@@ -47,42 +47,53 @@ This is only needed for RAR-based models like `plexos-world-spatial`.
 
 ## Usage
 
+Once installed (whether from PyPI or this repository), the converter is
+available as the `plexos_to_pypsa_converter` package. You can call it from any
+location.
+
 ### Quick Start with Example Models
 
 The easiest way to get started is with the high-level workflow API:
 
 ```python
-from workflow import run_model_workflow
+from plexos_to_pypsa_converter.workflow import run_model_workflow
 
-# Run a complete workflow: load → convert → optimize → save
+# Run the workflow: download → convert → save
 network, setup_summary = run_model_workflow("caiso-irp23")
 
-# Solve for specific year (multi-period models)
+# Solve a specific year (multi-period models)
 network, setup_summary = run_model_workflow(
     "aemo-2024-isp-progressive-change",
+    solve=True,
     optimize__year=2025
 )
+
+# Also add the solve/optimize step
+network, setup_summary = run_model_workflow("caiso-irp23", solve=True)
 ```
 
-This automatically:
+By running `run_model_workflow(), this automatically:
 1. Downloads the model data (if the data does not exist locally)
 2. Converts PLEXOS XML to CSV files (using `plexos-coad`)
-3. Creates PyPSA network with proper topology and components
+3. Creates the PyPSA network with topology/components
 4. Adds other features, such as renewable profiles, retirements, generator outages, and slack generators
-5. Solves the optimization problem
+5. Optionally solves the optimization problem (when `solve=True`)
 6. Saves results to NetCDF format
 
 ### Interactive Notebooks
 
 For interactive analysis and visualization, check out the example notebooks:
 
+You can view a version of the results analysis for the `caiso-irp23` model [here](https://github.com/open-energy-transition/plexos-to-pypsa-converter/blob/master/src/). 
+
+The current existing notebooks are: 
 - **CAISO IRP23**:
-  - `src/examples/caiso_irp23/caiso_solve.ipynb` - Model conversion and solve
-  - `src/examples/caiso_irp23/caiso_analysis.ipynb` - Analysis and plots
+  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_solve.ipynb` (to convert and solve the `caiso-irp23` model)
+  - `src/plexos_to_pypsa_converter/examples/caiso_irp23/caiso_analysis.ipynb` (to visualize the `caiso-irp23` model's results after solving)
 
 - **AEMO 2024 Progressive Change**:
-  - `src/examples/aemo_2024_prog/aemo_solve.ipynb` - Model conversion and solve
-  - `src/examples/aemo_2024_prog/aemo_analysis.ipynb` - Analysis and plots
+  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_solve.ipynb` (to convert and solve the `aemo-2024-isp-progressive-change` model)
+  - `src/plexos_to_pypsa_converter/examples/aemo_2024_prog/aemo_analysis.ipynb` (to visualize the `aemo-2024-isp-progressive-change` model's results after solving)
 
 These notebooks show how to:
 - Convert and solve PLEXOS models
@@ -92,38 +103,14 @@ These notebooks show how to:
 
 Note that you have to run the `{}_solve.ipynb` notebooks before you are able to run the `{}_analysis.ipynb` notebooks.
 
-### Network Analysis
-
-Analyze solved networks using the `NetworkAnalyzer`:
-
-```python
-from analysis.core import NetworkAnalyzer
-
-# Load a solved network
-analyzer = NetworkAnalyzer.from_netcdf("solved_network.nc")
-
-# Generate plots
-analyzer.plot_generation_by_carrier()
-analyzer.plot_installed_capacity()
-analyzer.plot_capacity_factors()
-analyzer.plot_energy_balance()
-
-# Create comprehensive dashboard
-analyzer.plot_dashboard()
-
-# Get network statistics
-stats = analyzer.info()
-print(f"Buses: {stats['buses']}, Generators: {stats['generators']}")
-```
-
 ### Advanced: Custom Workflows
 
 The default workflow steps for each model is specified in `src/db/registry.py`.
 However, you can customize the workflow steps to skip some steps. For example, to skip saving the network and to save under a custom filename:
 
 ```python
-from db.registry import MODEL_REGISTRY
-from workflow import run_model_workflow
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.workflow import run_model_workflow
 
 # Modify workflow (e.g., skip automatic save)
 default_workflow = MODEL_REGISTRY["caiso-irp23"]["processing_workflow"]

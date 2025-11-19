@@ -2,7 +2,10 @@
 
 import pytest
 
-from workflow.filters import FILTER_PRESETS, resolve_filter_preset
+from plexos_to_pypsa_converter.workflow.filters import (
+    FILTER_PRESETS,
+    resolve_filter_preset,
+)
 
 
 class TestFilterPresets:

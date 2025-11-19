@@ -1,7 +1,7 @@
 """Unit tests for model registry."""
 
-from db.registry import MODEL_REGISTRY
-from workflow.steps import STEP_REGISTRY
+from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
+from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
 class TestModelRegistry:

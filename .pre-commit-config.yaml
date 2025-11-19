@@ -26,12 +26,17 @@ repos:
     types_or: [python, rst, markdown]
     files: ^src/
 
-# Remove output from Jupyter notebooks
-- repo: https://github.com/aflc/pre-commit-jupyter
-  rev: v1.2.1
+# Lint notebooks without stripping outputs
+- repo: https://github.com/nbQA-dev/nbQA
+  rev: 1.9.0
   hooks:
-  - id: jupyter-notebook-cleanup
-    args: ['--remove-kernel-metadata']
+  - id: nbqa-ruff
+    additional_dependencies: ["ruff==0.12.2"]
+    args: ["--fix"]
+    files: ^src/plexos_to_pypsa_converter/examples/.*\.ipynb$
+  - id: nbqa-black
+    additional_dependencies: ["black==24.8.0"]
+    files: ^src/plexos_to_pypsa_converter/examples/.*\.ipynb$
 
 # Do YAML formatting (before the linter checks it for misses)
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
