@@ -32,6 +32,7 @@ from plexos_to_pypsa_converter.db.parse import (
 )
 from plexos_to_pypsa_converter.network.carriers_csv import parse_fuel_prices_csv
 from plexos_to_pypsa_converter.network.costs_csv import set_capital_costs_generic_csv
+from plexos_to_pypsa_converter.network.outages import apply_outage_schedule
 from plexos_to_pypsa_converter.utils.paths import (
     contains_path_pattern,
     extract_filename,
@@ -2173,6 +2174,7 @@ def apply_generator_units_timeseries_csv(
     """
     csv_dir = Path(csv_dir)
     snapshots = network.snapshots
+    units_schedule_data: dict[str, pd.Series] = {}
 
     logger.info(
         "Applying generator Units time series for capacity scaling and retirements..."
@@ -2250,6 +2252,7 @@ def apply_generator_units_timeseries_csv(
 
         # Calculate units multiplier (relative to max)
         units_multiplier = units_ts / max_units
+        units_schedule_data[gen] = units_multiplier
 
         # Apply to p_max_pu
         if gen in network.generators_t.p_max_pu.columns:
@@ -2331,6 +2334,11 @@ def apply_generator_units_timeseries_csv(
                 f"{gen}: Time-varying operation (Units: {min_units} -> {max_units})"
             )
 
+    units_schedule = pd.DataFrame(units_schedule_data, index=snapshots)
+    ramp_summary = _apply_units_ramp_smoothing(network, units_schedule)
+    if ramp_summary:
+        stats["units_ramp_smoothing"] = ramp_summary
+
     # Log summary
     logger.info("Generator Units processing complete:")
     logger.info(f"  Total generators: {stats['total_generators']}")
@@ -2347,8 +2355,49 @@ def apply_generator_units_timeseries_csv(
     logger.info(
         f"  p_min_pu time series adjusted: {stats['p_min_pu_adjusted']} generators"
     )
+    if ramp_summary:
+        logger.info(
+            "  Units ramp smoothing applied: "
+            f"{ramp_summary['ramped_generators']} generators"
+        )
 
     return stats
+
+
+def _apply_units_ramp_smoothing(
+    network: Network, units_schedule: pd.DataFrame
+) -> dict | None:
+    """Lower p_min ahead of retirements/builds so ramp limits stay feasible."""
+    if units_schedule.empty:
+        return None
+
+    valid_generators = [
+        gen
+        for gen in units_schedule.columns
+        if gen in network.generators_t.p_min_pu.columns
+        and gen in network.generators_t.p_max_pu.columns
+    ]
+
+    if not valid_generators:
+        return None
+
+    ramp_schedule = pd.DataFrame(
+        1.0, index=units_schedule.index, columns=valid_generators
+    )
+
+    summary = apply_outage_schedule(
+        network,
+        outage_schedule=ramp_schedule,
+        apply_to_p_max=True,
+        apply_to_p_min=True,
+        ramp_aware=True,
+    )
+
+    return {
+        "ramped_generators": summary.get("ramped_generators", 0),
+        "avg_startup_steps": summary.get("avg_startup_steps", 0.0),
+        "avg_shutdown_steps": summary.get("avg_shutdown_steps", 0.0),
+    }
 
 
 def set_capital_costs_csv(network: Network, csv_dir: str | Path):

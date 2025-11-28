@@ -17,25 +17,12 @@ Usage:
 
 import argparse
 import sys
-from collections.abc import Iterable
 from pathlib import Path
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
 from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
-
-EXCLUDED_STEPS: set[str] = {"save_network"}
-
-
-def _build_conversion_workflow(workflow: dict, excluded_steps: Iterable[str]) -> dict:
-    """Return a shallow copy of the workflow without excluded steps."""
-    workflow_copy = dict(workflow)
-    workflow_copy["steps"] = [
-        step for step in workflow["steps"] if step["name"] not in excluded_steps
-    ]
-    return workflow_copy
 
 
 def _run_optional_consistency_check(network, skip_check: bool) -> None:
@@ -107,15 +94,11 @@ def test_sem_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out save_network
-        model_config = MODEL_REGISTRY["sem-2024-2032"]
-        workflow = model_config["processing_workflow"]
-        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
-
-        print("Running workflow (save_network step excluded for faster testing)...")
+        print("Running workflow (save_network step disabled for faster testing)...")
         network, summary = run_model_workflow(
             "sem-2024-2032",
-            workflow_overrides=workflow_no_save,
+            auto_workflow=True,
+            enable_save=False,
             solve=False,
         )
 
@@ -208,15 +191,11 @@ def test_aemo_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out save_network
-        model_config = MODEL_REGISTRY["aemo-2024-isp-progressive-change"]
-        workflow = model_config["processing_workflow"]
-        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
-
-        print("Running workflow (save_network step excluded for faster testing)...")
+        print("Running workflow (save_network step disabled for faster testing)...")
         network, summary = run_model_workflow(
             "aemo-2024-isp-progressive-change",
-            workflow_overrides=workflow_no_save,
+            auto_workflow=True,
+            enable_save=False,
             solve=False,
         )
 
@@ -311,15 +290,11 @@ def test_caiso_conversion(args):
     print(f"{'=' * 60}\n")
 
     try:
-        # Get workflow from registry and filter out save_network
-        model_config = MODEL_REGISTRY["caiso-irp23"]
-        workflow = model_config["processing_workflow"]
-        workflow_no_save = _build_conversion_workflow(workflow, EXCLUDED_STEPS)
-
-        print("Running workflow (save_network step excluded for faster testing)...")
+        print("Running workflow (save_network step disabled for faster testing)...")
         network, summary = run_model_workflow(
             "caiso-irp23",
-            workflow_overrides=workflow_no_save,
+            auto_workflow=True,
+            enable_save=False,
             solve=False,
         )
 

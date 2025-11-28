@@ -918,7 +918,6 @@ def add_loads_flexible(
     demand_source,
     bus_mapping=None,
     target_node=None,
-    aggregate_node_name=None,
     load_scenario=None,
 ):
     """Flexible function to add loads to the PyPSA network from various demand data formats.
@@ -934,9 +933,6 @@ def add_loads_flexible(
     target_node : str, optional
         If specified, all demand will be assigned to this existing node.
         Example: "SEM" to assign all demand to the SEM node.
-    aggregate_node_name : str, optional
-        If specified, creates a new node with this name and assigns all demand to it.
-        Example: "Load_Aggregate" to create an aggregate load node.
     load_scenario : str, optional
         For demand data with multiple scenarios (iterations), specify which scenario
         to use. If None, defaults to first scenario. Example: "iteration_1"
@@ -953,9 +949,6 @@ def add_loads_flexible(
     # Assign all demand to specific existing node
     >>> add_loads_flexible(network, "/path/to/demand.csv", target_node="SEM")
 
-    # Aggregate all demand to new node
-    >>> add_loads_flexible(network, "/path/to/demand.csv",
-    ...                    aggregate_node_name="Load_Aggregate")
     """
     print("Parsing demand data...")
     demand_df = parse_demand_data(demand_source, bus_mapping)
@@ -965,16 +958,11 @@ def add_loads_flexible(
 
     # Handle different demand assignment modes
     if target_node is not None:
-        # Mode 1: Assign all demand to a specific existing node
+        # Assign all demand to a specific existing node
         return _add_loads_to_target_node(network, demand_df, target_node, load_scenario)
-    elif aggregate_node_name is not None:
-        # Mode 2: Create new aggregate node and assign all demand to it
-        return _add_loads_to_aggregate_node(
-            network, demand_df, aggregate_node_name, load_scenario
-        )
-    else:
-        # Mode 3: Default per-node assignment
-        return _add_loads_per_node(network, demand_df, load_scenario)
+
+    # Default per-node assignment
+    return _add_loads_per_node(network, demand_df, load_scenario)
 
 
 def port_core_network(
@@ -984,7 +972,6 @@ def port_core_network(
     demand_source,
     demand_bus_mapping=None,
     target_node=None,
-    aggregate_node_name=None,
     model_name=None,
     load_scenario=None,
     demand_target_node=None,
@@ -1012,9 +999,6 @@ def port_core_network(
     target_node : str, optional
         If specified, all demand will be assigned to this existing node.
         Example: "SEM" to assign all demand to the SEM node.
-    aggregate_node_name : str, optional
-        If specified, creates a new node with this name and assigns all demand to it.
-        Example: "Load_Aggregate" to create an aggregate load node.
     model_name : str, optional
         Name of the specific model to use when multiple models exist in the XML file.
         If None and multiple models exist, an error will be raised.
@@ -1047,11 +1031,6 @@ def port_core_network(
     ...                   demand_source="/path/to/demand.csv",
     ...                   target_node="SEM")
 
-    # Aggregate all demand to new node (CAISO example)
-    >>> port_core_network(network, db,
-    ...                   snapshots_source="/path/to/demand.csv",
-    ...                   demand_source="/path/to/demand.csv",
-    ...                   aggregate_node_name="CAISO_Load")
     """
     print("Setting up core network infrastructure...")
 
@@ -1093,16 +1072,11 @@ def port_core_network(
 
     # Step 4: Add loads with flexible parsing
     print("4. Adding loads...")
-    # Determine demand target: demand_target_node takes precedence
-    effective_target = demand_target_node if demand_target_node else target_node
-    effective_aggregate = None if demand_target_node else aggregate_node_name
-
     load_summary = add_loads_flexible(
         network,
         demand_source,
         demand_bus_mapping,
-        effective_target,
-        effective_aggregate,
+        demand_target_node if demand_target_node else target_node,
         load_scenario,
     )
 
@@ -1620,128 +1594,6 @@ def _add_loads_to_target_node(
         }
 
 
-def _add_loads_to_aggregate_node(
-    network: Network,
-    demand_df: pd.DataFrame,
-    aggregate_node_name: str,
-    load_scenario: str | None = None,
-):
-    """Create a new aggregate node and assign all demand to it.
-
-    For iteration-based formats with load_scenario specified or defaulted, creates single load
-    For zone-based formats, creates a single aggregated load
-
-    Parameters
-    ----------
-    network : Network
-        The PyPSA network object.
-    demand_df : DataFrame
-        DataFrame with demand time series for each load zone/iteration.
-    aggregate_node_name : str
-        Name for the new aggregate node.
-    load_scenario : str, optional
-        For iteration-based formats, specify which scenario to use. If None, defaults to first scenario.
-
-    Returns
-    -------
-    dict
-        Summary information about the load assignment.
-    """
-    # Check if aggregate node already exists
-    if aggregate_node_name in network.buses.index:
-        logger.warning(
-            f"Aggregate node '{aggregate_node_name}' already exists. Using existing node."
-        )
-    else:
-        # Create new aggregate bus
-        network.add("Bus", name=aggregate_node_name, carrier="AC")
-        print(f"Created new aggregate bus: {aggregate_node_name}")
-
-    print(f"Assigning all demand to aggregate node: {aggregate_node_name}")
-
-    # Check if this is an iteration-based format
-    is_iteration_format = getattr(demand_df, "_format_type", None) == "iteration"
-
-    if is_iteration_format:
-        # Count actual iteration columns (handle both prefixed and non-prefixed)
-        iteration_cols = [col for col in demand_df.columns if "iteration_" in col]
-        actual_iterations = len(iteration_cols)
-
-        print(f"Processing iteration-based format with {actual_iterations} iterations")
-
-        # Scenario selection logic
-        if load_scenario is None:
-            # Default to first scenario
-            selected_scenario = iteration_cols[0]
-            # Extract numeric part for user-friendly message
-            first_num = iteration_cols[0].replace("iteration_", "")
-            print(f"  - Multiple load scenarios detected: {iteration_cols}")
-            print(
-                f"  - No load_scenario specified, defaulting to first scenario: {selected_scenario}"
-            )
-            print(
-                f"  - To select a different scenario, use load_scenario parameter (e.g., load_scenario='{first_num}')"
-            )
-        else:
-            # Normalize user input to match column names
-            selected_scenario = _normalize_scenario_name(load_scenario, iteration_cols)
-            if selected_scenario is None:
-                msg = f"Specified load_scenario '{load_scenario}' not found. Available scenarios: {iteration_cols}"
-                raise ValueError(msg)
-            print(f"  - Multiple load scenarios detected: {iteration_cols}")
-            print(f"  - Using user-specified scenario: {selected_scenario}")
-
-        # Create single load with selected scenario
-        load_name = f"Load_{aggregate_node_name}"
-        network.add("Load", name=load_name, bus=aggregate_node_name)
-
-        # Add the load time series (align with network snapshots)
-        load_series = demand_df[selected_scenario].reindex(network.snapshots).fillna(0)
-        network.loads_t.p_set.loc[:, load_name] = load_series
-
-        peak_demand = load_series.max()
-
-        print(f"  - Added load {load_name} using scenario {selected_scenario}")
-        print(f"  - Peak demand: {peak_demand:.2f} MW")
-
-        return {
-            "mode": "aggregate_node",
-            "format_type": "iteration",
-            "aggregate_node": aggregate_node_name,
-            "load_name": load_name,
-            "scenario_selected": selected_scenario,
-            "scenarios_available": iteration_cols,
-            "peak_demand": peak_demand,
-        }
-
-    else:
-        print("Processing zone-based format - creating single aggregated load")
-
-        # Sum all demand across zones to create aggregate demand
-        total_demand = demand_df.sum(axis=1)
-
-        # Add single aggregate load to the new node
-        load_name = "Load_Aggregate"
-        network.add("Load", name=load_name, bus=aggregate_node_name)
-
-        # Add the aggregated load time series
-        load_series = total_demand.reindex(network.snapshots).fillna(0)
-        network.loads_t.p_set.loc[:, load_name] = load_series
-
-        print(f"  - Added aggregated load {load_name} to bus {aggregate_node_name}")
-        print(f"  - Total demand: {len(demand_df.columns)} zones aggregated")
-        print(f"  - Peak demand: {total_demand.max():.2f} MW")
-
-        return {
-            "mode": "aggregate_node",
-            "format_type": "zone",
-            "aggregate_node": aggregate_node_name,
-            "load_name": load_name,
-            "zones_aggregated": len(demand_df.columns),
-            "peak_demand": total_demand.max(),
-        }
-
-
 def _add_loads_with_participation_factors(
     network: Network,
     demand_df: pd.DataFrame,
@@ -1881,29 +1733,37 @@ def _distribute_system_load_to_regions(
         )
 
     # Get regions with participation factors
-    regions_with_load = region_df[region_df["Load"].notna()].copy()
+    load_col = "Load" if "Load" in region_df.columns else None
+    if load_col is None and "Load.Variable" in region_df.columns:
+        load_col = "Load.Variable"
+
+    if load_col is None:
+        msg = "Region.csv missing Load/Load.Variable columns required for participation factors"
+        raise ValueError(msg)
+
+    regions_with_load = region_df[region_df[load_col].notna()].copy()
 
     if regions_with_load.empty:
         msg = "No regions found with Load participation factors in Region.csv"
         raise ValueError(msg)
 
     # Validate factors sum to approximately 1.0
-    total_factor = regions_with_load["Load"].astype(float).sum()
+    total_factor = regions_with_load[load_col].astype(float).sum()
     if not (0.99 <= total_factor <= 1.01):
         logger.warning(
             f"Region load participation factors sum to {total_factor:.6f}, expected ~1.0. "
             f"Normalizing factors."
         )
         # Normalize
-        regions_with_load["Load"] = (
-            regions_with_load["Load"].astype(float) / total_factor
+        regions_with_load[load_col] = (
+            regions_with_load[load_col].astype(float) / total_factor
         )
 
     loads_added = 0
     peak_demand_total = 0
 
     for region_name, region_row in regions_with_load.iterrows():
-        factor = float(region_row["Load"])
+        factor = float(region_row[load_col])
 
         # Find node for this region (expect 1:1 mapping)
         nodes_in_region = node_df[node_df["Region"] == region_name]
@@ -2232,7 +2092,6 @@ def setup_network(
     snapshots_source,
     demand_source,
     target_node=None,
-    aggregate_node_name=None,
     demand_bus_mapping=None,
     timeslice_csv=None,
     vre_profiles_path=None,
@@ -2244,10 +2103,9 @@ def setup_network(
 ):
     """Unified network setup function that automatically detects the appropriate mode.
 
-    This function intelligently chooses between three setup modes based on parameters:
-    1. Per-node mode: Neither target_node nor aggregate_node_name specified (AEMO scenario)
+    This function intelligently chooses between:
+    1. Per-node mode: target_node not specified (AEMO scenario)
     2. Target node mode: target_node specified (SEM scenario - loads to target, generators/links keep original assignments)
-    3. Aggregation mode: aggregate_node_name specified (CAISO scenario - everything reassigned to aggregate node)
 
     Parameters
     ----------
@@ -2262,9 +2120,6 @@ def setup_network(
     target_node : str, optional
         If specified, all demand will be assigned to this existing node.
         Example: "SEM" to assign all demand to the SEM node.
-    aggregate_node_name : str, optional
-        If specified, creates a new node with this name and assigns all demand,
-        generators, and links to it. Example: "CAISO_Load_Aggregate".
     demand_bus_mapping : dict, optional
         Mapping from demand data column names to network bus names.
     timeslice_csv : str, optional
@@ -2293,11 +2148,6 @@ def setup_network(
     dict
         Summary information about the network setup including mode and statistics.
 
-    Raises
-    ------
-    ValueError
-        If both target_node and aggregate_node_name are specified.
-
     Examples
     --------
     # Per-node mode (traditional AEMO)
@@ -2307,24 +2157,9 @@ def setup_network(
     >>> setup_network(network, db, snapshots_source=path, demand_source=path,
     ...               target_node="SEM")
 
-    # Aggregation mode (CAISO scenario)
-    >>> setup_network(network, db, snapshots_source=path, demand_source=path,
-    ...               aggregate_node_name="CAISO_Load_Aggregate")
     """
-    # Validate parameter combinations
-    if target_node is not None and aggregate_node_name is not None:
-        msg = (
-            "Cannot specify both target_node and aggregate_node_name. Choose one mode."
-        )
-        raise ValueError(msg)
-
     # Detect mode and print status
-    if aggregate_node_name is not None:
-        mode = "aggregation"
-        print(
-            f"Setting up network with demand aggregation to new node: {aggregate_node_name}"
-        )
-    elif target_node is not None:
+    if target_node is not None:
         mode = "target_node"
         print(
             f"Setting up network with all demand assigned to target node: {target_node}"
@@ -2368,7 +2203,6 @@ def setup_network(
         demand_source=demand_source,
         demand_bus_mapping=demand_bus_mapping,
         target_node=target_node,
-        aggregate_node_name=aggregate_node_name,
         model_name=model_name,
         load_scenario=load_scenario,
         demand_target_node=demand_target_node,
@@ -2379,12 +2213,6 @@ def setup_network(
     print("STEP 2: Adding storage units")
     print("=" * 60)
     add_storage(network, db, timeslice_csv)
-
-    # For aggregation mode, reassign all storage units to the aggregate node
-    if mode == "aggregation":
-        print(f"Reassigning all storage units to aggregate node: {aggregate_node_name}")
-        for storage_name in network.storage_units.index:
-            network.storage_units.loc[storage_name, "bus"] = aggregate_node_name
 
     # Step 2b: Add hydro inflows if path provided
     if inflow_path and Path(inflow_path).exists():
@@ -2408,12 +2236,6 @@ def setup_network(
         network, db, timeslice_csv=timeslice_csv, vre_profiles_path=vre_profiles_path
     )
 
-    # For aggregation mode, reassign all generators to the aggregate node
-    generator_summary = None
-    if mode == "aggregation":
-        print(f"Reassigning all generators to aggregate node: {aggregate_node_name}")
-        generator_summary = reassign_generators_to_node(network, aggregate_node_name)
-
     # Step 4: Add transmission (lines or links)
     print("\n" + "=" * 60)
     if transmission_as_lines:
@@ -2421,26 +2243,12 @@ def setup_network(
         print("=" * 60)
         port_lines(network, db, timeslice_csv=timeslice_csv)
 
-        # Note: Lines don't need reassignment - they maintain physical connections
-        # even in aggregation mode (self-loops on aggregate node are handled in optimization)
-        link_summary = None
-        if mode == "aggregation":
-            print(
-                f"Note: Lines maintain original bus connections for {aggregate_node_name} aggregation"
-            )
     else:
         print("STEP 4: Adding transmission links (legacy mode)")
         print("=" * 60)
         port_links(network, db)
 
         # For aggregation mode, reassign all links to/from the aggregate node
-        link_summary = None
-        if mode == "aggregation":
-            print(
-                f"Reassigning all links to/from aggregate node: {aggregate_node_name}"
-            )
-            link_summary = reassign_links_to_node(network, aggregate_node_name)
-
     # Add constraints as final step
     print("\n" + "=" * 60)
     print("STEP 5: Adding PLEXOS constraints")
@@ -2474,11 +2282,7 @@ def setup_network(
     # Add mode information to summary
     load_summary["mode"] = mode
     load_summary["constraint_results"] = constraint_results
-    if mode == "aggregation":
-        load_summary["aggregate_node_name"] = aggregate_node_name
-        load_summary["generator_summary"] = generator_summary
-        load_summary["link_summary"] = link_summary
-    elif mode == "target_node":
+    if mode == "target_node":
         load_summary["target_node"] = target_node
 
     return load_summary

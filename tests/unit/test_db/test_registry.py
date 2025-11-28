@@ -81,14 +81,7 @@ class TestWorkflowDefinitions:
         assert "processing_workflow" in sem_config
         workflow = sem_config["processing_workflow"]
 
-        assert "steps" in workflow
-        assert len(workflow["steps"]) > 0
-
-        # Check for key steps
-        step_names = [step["name"] for step in workflow["steps"]]
-        assert "create_model" in step_names
-        assert "load_vre_profiles" in step_names
-        assert "optimize" in step_names
+        assert "csv_dir_pattern" in workflow
 
     def test_aemo_workflow_definition(self):
         """Test AEMO workflow definition is complete."""
@@ -97,14 +90,7 @@ class TestWorkflowDefinitions:
         assert "processing_workflow" in aemo_config
         workflow = aemo_config["processing_workflow"]
 
-        assert "steps" in workflow
-        assert len(workflow["steps"]) > 0
-
-        # Check for key steps
-        step_names = [step["name"] for step in workflow["steps"]]
-        assert "create_model" in step_names
-        assert "load_vre_profiles" in step_names
-        assert "optimize" in step_names
+        assert "csv_dir_pattern" in workflow
 
 
 class TestDefaultConfigurations:

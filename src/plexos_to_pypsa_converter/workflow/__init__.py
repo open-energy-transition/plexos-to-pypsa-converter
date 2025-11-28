@@ -12,6 +12,11 @@ Example:
     >>> network, summary = run_model_workflow("sem-2024-2032")
 """
 
+from plexos_to_pypsa_converter.workflow.builder import build_workflow_steps
+from plexos_to_pypsa_converter.workflow.detection import (
+    ModelFeatures,
+    detect_model_features,
+)
 from plexos_to_pypsa_converter.workflow.executor import run_model_workflow
 from plexos_to_pypsa_converter.workflow.filters import (
     FILTER_PRESETS,
@@ -22,6 +27,9 @@ from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 __all__ = [
     "run_model_workflow",
     "STEP_REGISTRY",
+    "ModelFeatures",
+    "detect_model_features",
+    "build_workflow_steps",
     "FILTER_PRESETS",
     "resolve_filter_preset",
 ]

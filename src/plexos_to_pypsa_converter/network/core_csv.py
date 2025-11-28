@@ -115,7 +115,6 @@ def setup_network_csv(
     model_name: str | None = None,
     inflow_path: str | None = None,
     target_node: str | None = None,
-    aggregate_node_name: str | None = None,
     demand_assignment_strategy: str = "per_node",
     demand_target_node: str | None = None,
     transmission_as_lines: bool = False,
@@ -148,10 +147,8 @@ def setup_network_csv(
         Path to hydro inflow data
     target_node : str, optional
         Target node for generator reassignment (target_node strategy)
-    aggregate_node_name : str, optional
-        Aggregate node name (aggregate_node strategy)
     demand_assignment_strategy : str, default "per_node"
-        Strategy for generator/component assignment: "per_node", "target_node", or "aggregate_node"
+        Strategy for generator/component assignment: "per_node", "target_node", or "participation_factors"
     demand_target_node : str, optional
         Specific node to assign ALL demand to, regardless of demand_assignment_strategy.
         This allows keeping generators on their original nodes (per_node) while
@@ -209,9 +206,8 @@ def setup_network_csv(
         else:
             # Use standard add_loads_flexible for other strategies
             # Determine which node to assign demand to
-            # Priority: demand_target_node > strategy-based target_node/aggregate_node_name
+            # Priority: demand_target_node > strategy-based target_node
             demand_node = None
-            demand_aggregate = None
 
             if demand_target_node:
                 # Explicit demand target node - overrides strategy
@@ -219,14 +215,11 @@ def setup_network_csv(
                 logger.info(f"  Assigning all demand to node: {demand_target_node}")
             elif demand_assignment_strategy == "target_node":
                 demand_node = target_node
-            elif demand_assignment_strategy == "aggregate_node":
-                demand_aggregate = aggregate_node_name
 
             add_loads_flexible(
                 network=network,
                 demand_source=demand_source,
                 target_node=demand_node,
-                aggregate_node_name=demand_aggregate,
                 load_scenario=load_scenario,
             )
     # 4. Add generators
@@ -315,8 +308,6 @@ def setup_network_csv(
 
     if target_node:
         summary["target_node"] = target_node
-    if aggregate_node_name:
-        summary["aggregate_node"] = aggregate_node_name
 
     logger.info("CSV-based network setup complete")
     logger.info(f"  Buses: {num_buses}")
