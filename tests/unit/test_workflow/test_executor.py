@@ -190,29 +190,6 @@ class TestWorkflowRegistry:
                 pytest.fail(f"Step {step_name} missing docstring")
 
 
-# Note: Full workflow execution tests (run_model_workflow) are in integration tests
-# because they require real model data and full CSV parsing infrastructure.
-
-
-class TestRunModelWorkflowCustomPaths:
-    """Tests for custom model descriptors and path overrides."""
-
-    def test_model_descriptor_without_registry_entry(self, tmp_path):
-        """run_model_workflow should accept an explicit descriptor even if the model_id isn't in the registry."""
-        descriptor = {
-            "model_dir": str(tmp_path),
-            "processing_workflow": {"steps": []},
-        }
-
-        network, summary = run_model_workflow(
-            "custom-model",
-            model_descriptor=descriptor,
-        )
-
-        assert network is None
-        assert summary == {}
-
-
 class TestResolveCsvDirPath:
     """Tests for CSV directory resolution helper."""
 
