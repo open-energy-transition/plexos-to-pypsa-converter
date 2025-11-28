@@ -156,7 +156,6 @@ def _create_electricity_model(
             model_name=config.get("model_name"),
             inflow_path=config.get("inflow_path"),
             target_node=config.get("target_node"),
-            aggregate_node_name=config.get("aggregate_node_name"),
             demand_assignment_strategy=config.get(
                 "demand_assignment_strategy", "per_node"
             ),
@@ -249,9 +248,6 @@ def _create_electricity_model(
     # Add strategy-specific arguments
     if strategy == "target_node":
         setup_args["target_node"] = config.get("target_node")
-    elif strategy == "aggregate_node":
-        setup_args["aggregate_node_name"] = config.get("aggregate_node_name")
-
     # Add demand-specific target node (independent of strategy)
     if "demand_target_node" in config:
         setup_args["demand_target_node"] = config.get("demand_target_node")
@@ -300,11 +296,9 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
         - use_csv : bool
             Enable CSV-based conversion (auto-generates CSVs from XML if needed)
         - demand_assignment_strategy : str
-            "per_node", "target_node", or "aggregate_node"
+            "per_node", "target_node", or "participation_factors"
         - target_node : str
             Target node name for target_node strategy
-        - aggregate_node_name : str
-            Aggregate node name for aggregate_node strategy
         - model_name : str
             PLEXOS model name to use
         - snapshots_source : str
@@ -363,7 +357,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     Create AEMO model with defaults:
     >>> network, summary = create_model("aemo-2024-isp-progressive-change")
 
-    Create CAISO model (uses default aggregate_node strategy):
+    Create CAISO model (uses participation factors strategy):
     >>> network, summary = create_model("caiso-irp23")
 
     Create SEM model with custom target node:
