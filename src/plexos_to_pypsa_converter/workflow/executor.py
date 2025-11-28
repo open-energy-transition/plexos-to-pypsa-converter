@@ -11,6 +11,8 @@ import pypsa
 
 from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
 from plexos_to_pypsa_converter.utils.model_paths import get_model_directory
+from plexos_to_pypsa_converter.workflow.builder import build_workflow_steps
+from plexos_to_pypsa_converter.workflow.detection import detect_model_features
 from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
@@ -79,6 +81,19 @@ def run_model_workflow(
     model_dir_override: str | Path | None = None,
     registry_model_id: str | None = None,
     solve: bool = False,
+    optimize: bool | None = None,
+    optimize_year: int | None = None,
+    enable_vre: bool = True,
+    enable_hydro_dispatch: bool = True,
+    enable_hydro_inflows: bool = True,
+    enable_units: bool = True,
+    enable_outages: bool = True,
+    enable_slack_generators: bool = True,
+    enable_save: bool = True,
+    force_demand_strategy: str | None = None,
+    solver_name: str = "highs",
+    solver_options: dict | None = None,
+    auto_workflow: bool = True,
     **step_overrides,
 ) -> tuple[pypsa.Network, dict]:
     """Execute model processing workflow from registry definition.
@@ -101,14 +116,14 @@ def run_model_workflow(
         descriptor = {"processing_workflow": workflow_overrides}
 
     processing_workflow = descriptor.get("processing_workflow")
-    if processing_workflow is None:
+    if processing_workflow is None and workflow_overrides is None and not auto_workflow:
         msg = (
             f"Model '{model_id}' does not have a processing_workflow defined. "
             "Provide one via the registry or the model_descriptor argument."
         )
         raise ValueError(msg)
 
-    workflow = workflow_overrides or processing_workflow
+    workflow = workflow_overrides or processing_workflow or {}
 
     effective_registry_model_id = registry_model_id or descriptor.get(
         "registry_model_id"
@@ -158,6 +173,8 @@ def run_model_workflow(
     }
     if effective_registry_model_id:
         context["registry_model_id"] = effective_registry_model_id
+    if force_demand_strategy:
+        context["force_demand_strategy"] = force_demand_strategy
 
     def parse_step_overrides(step_overrides: dict) -> dict[str, dict]:
         parsed = {}
@@ -169,10 +186,47 @@ def run_model_workflow(
 
     parsed_overrides = parse_step_overrides(step_overrides)
 
+    # Build workflow steps automatically when requested or when registry steps are absent
+    # Only auto-build when no processing_workflow was supplied
+    if (
+        auto_workflow
+        and workflow_overrides is None
+        and descriptor.get("processing_workflow") is None
+    ):
+        features = detect_model_features(model_dir, csv_dir)
+        effective_optimize = optimize if optimize is not None else solve
+        solver_config = {"solver_name": solver_name}
+        if solver_options:
+            solver_config["solver_options"] = solver_options
+        workflow_steps = build_workflow_steps(
+            model_id=model_id,
+            features=features,
+            enable_vre=enable_vre,
+            enable_hydro_dispatch=enable_hydro_dispatch,
+            enable_hydro_inflows=enable_hydro_inflows,
+            enable_units=enable_units,
+            enable_outages=enable_outages,
+            enable_slack_generators=enable_slack_generators,
+            enable_save=enable_save,
+            optimize=effective_optimize,
+            optimize_year=optimize_year,
+            solver_config=solver_config,
+        )
+        workflow = {"steps": workflow_steps, "solver_config": solver_config}
+
     network: pypsa.Network | None = None
     aggregated_summary: dict = {}
     steps = workflow.get("steps", [])
-    if not solve:
+    effective_optimize = optimize if optimize is not None else solve
+    if force_demand_strategy:
+        for step in steps:
+            if step.get("name") == "create_model":
+                step.setdefault("params", {})["demand_assignment_strategy"] = (
+                    force_demand_strategy
+                )
+                break
+
+    if not effective_optimize:
         steps = [step for step in steps if step.get("name") != "optimize"]
     print(
         f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
