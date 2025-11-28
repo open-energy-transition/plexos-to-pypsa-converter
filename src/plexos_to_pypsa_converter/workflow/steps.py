@@ -98,6 +98,9 @@ def load_vre_profiles_step(
     manual_mappings: dict | None = None,
 ) -> dict:
     """Step: Load VRE generation profiles from CSV Data Files."""
+    print(
+        f"[debug] load_vre_profiles_step: csv_dir={csv_dir}, profiles_path={profiles_path}"
+    )
     filter_fn = resolve_filter_preset(generator_filter, network)
     summary = load_data_file_profiles_csv(
         network=network,
@@ -154,6 +157,9 @@ def load_hydro_dispatch_step(
     dict
         Summary with processed/skipped/failed generator counts for each property
     """
+    print(
+        f"[debug] load_hydro_dispatch_step: csv_dir={csv_dir}, profiles_path={profiles_path}"
+    )
     summary = {}
     filter_fn = resolve_filter_preset(generator_filter, network)
 
@@ -197,6 +203,9 @@ def add_storage_inflows_step(
     inflow_path: str | Path,
 ) -> dict:
     """Step: Add natural inflow time series to storage units (hydro)."""
+    print(
+        f"[debug] add_storage_inflows_step: csv_dir={csv_dir}, inflow_path={inflow_path}"
+    )
     summary = add_storage_inflows_csv(
         network=network,
         csv_dir=csv_dir,
