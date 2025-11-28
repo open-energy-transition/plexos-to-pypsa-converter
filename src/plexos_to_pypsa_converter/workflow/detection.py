@@ -17,7 +17,7 @@ import pandas as pd
 from plexos_to_pypsa_converter.db.csv_readers import load_static_properties
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable as CollectionsIterable
+    from collections.abc import Iterable
     from pathlib import Path
 
 
@@ -61,9 +61,7 @@ def _collect_filename(row: pd.Series) -> str | None:
     return None
 
 
-def _maybe_extend(
-    paths: list[Path], candidates: CollectionsIterable[str], base_dir: Path
-) -> None:
+def _maybe_extend(paths: list[Path], candidates: Iterable[str], base_dir: Path) -> None:
     for cand in candidates:
         if not cand:
             continue

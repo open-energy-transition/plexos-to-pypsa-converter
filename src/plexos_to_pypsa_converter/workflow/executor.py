@@ -103,17 +103,15 @@ def run_model_workflow(
     summary aggregation. By default it runs only the conversion steps. Pass
     ``solve=True`` to allow the ``optimize`` step to execute.
     """
-    descriptor = model_descriptor or MODEL_REGISTRY.get(model_id)
-    if descriptor is None:
-        if workflow_overrides is None:
-            available = ", ".join(MODEL_REGISTRY.keys())
-            msg = (
-                f"Model '{model_id}' not found in registry and no workflow overrides were provided. "
-                "Pass `workflow_overrides` or `model_descriptor` for custom models. "
-                f"Available registry models: [{available}]"
-            )
-            raise ValueError(msg)
-        descriptor = {"processing_workflow": workflow_overrides}
+    descriptor = model_descriptor or MODEL_REGISTRY.get(model_id) or {}
+    if not descriptor and workflow_overrides is None and not auto_workflow:
+        available = ", ".join(MODEL_REGISTRY.keys())
+        msg = (
+            f"Model '{model_id}' not found in registry and no workflow overrides were provided. "
+            "Pass `workflow_overrides` or `model_descriptor` for custom models. "
+            f"Available registry models: [{available}]"
+        )
+        raise ValueError(msg)
 
     processing_workflow = descriptor.get("processing_workflow")
     if processing_workflow is None and workflow_overrides is None and not auto_workflow:
@@ -306,6 +304,7 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
     # Standard context variables that might be injected
     context_vars = [
         "model_id",
+        "model_dir",
         "csv_dir",
         "profiles_path",
         "inflow_path",
