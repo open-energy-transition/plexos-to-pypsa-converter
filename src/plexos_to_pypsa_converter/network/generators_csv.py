@@ -32,6 +32,7 @@ from plexos_to_pypsa_converter.db.parse import (
 )
 from plexos_to_pypsa_converter.network.carriers_csv import parse_fuel_prices_csv
 from plexos_to_pypsa_converter.network.costs_csv import set_capital_costs_generic_csv
+from plexos_to_pypsa_converter.network.outages import apply_outage_schedule
 from plexos_to_pypsa_converter.utils.paths import (
     contains_path_pattern,
     extract_filename,
@@ -1072,6 +1073,7 @@ def validate_and_fix_generator_constraints(
       (Generators cannot meet min stable level at reduced capacity)
     """
     fixed_generators = []
+    cleared_ramp_generators = []
 
     for gen in network.generators.index:
         if gen not in network.generators_t.p_max_pu.columns:
@@ -1099,13 +1101,139 @@ def validate_and_fix_generator_constraints(
             network.generators_t.p_min_pu.loc[infeasible_mask, gen] = 0.0
             fixed_generators.append(gen)
 
+        # If generator is strictly fixed-dispatch (p_min == p_max everywhere),
+        # disable ramp constraints to avoid artificial infeasibility.
+        is_fixed_dispatch = (p_min == p_max).all()
+        if is_fixed_dispatch:
+            if "ramp_limit_up" in network.generators.columns:
+                network.generators.at[gen, "ramp_limit_up"] = np.nan
+            if "ramp_limit_down" in network.generators.columns:
+                network.generators.at[gen, "ramp_limit_down"] = np.nan
+            cleared_ramp_generators.append(gen)
+
     if verbose and fixed_generators:
         print(
             f"Fixed {len(fixed_generators)} generators with p_min_pu > p_max_pu constraints"
         )
         print("  (Generators cannot meet min stable level at reduced capacity)")
 
-    return {"fixed_generators": fixed_generators}
+    if verbose and cleared_ramp_generators:
+        print(
+            f"Cleared ramp limits for {len(cleared_ramp_generators)} fixed-dispatch generators "
+            "(p_min == p_max across all snapshots)"
+        )
+
+    return {
+        "fixed_generators": fixed_generators,
+        "cleared_ramp_generators": cleared_ramp_generators,
+    }
+
+
+def _ensure_default_ramp_limits(
+    network: Network, default_limit: float = 1.0
+) -> dict | None:
+    """Fill ramp limits for generators missing explicit data with a permissive default.
+
+    For generators that are fixed-dispatch (p_min == p_max across all snapshots),
+    ramp limits are set to a very large value to effectively disable the constraint
+    (PyPSA fills NaN ramp limits with 1.0, which would still bind).
+    """
+    if (
+        "ramp_limit_up" not in network.generators.columns
+        and "ramp_limit_down" not in network.generators.columns
+    ):
+        return None
+
+    summary = {
+        "filled_generators": 0,
+        "filled_ramp_limit_up": 0,
+        "filled_ramp_limit_down": 0,
+        "fixed_dispatch_cleared": 0,
+    }
+
+    fill_value = default_limit
+
+    # Identify fixed-dispatch generators (p_min == p_max across snapshots)
+    fixed_dispatch_gens: set[str] = set()
+    p_min_df = network.generators_t.p_min_pu
+    p_max_df = network.generators_t.p_max_pu
+    if not p_min_df.empty and not p_max_df.empty:
+        common = set(p_min_df.columns) & set(p_max_df.columns)
+        for gen in common:
+            col_min = p_min_df[gen]
+            col_max = p_max_df[gen]
+            if col_min.equals(col_max):
+                fixed_dispatch_gens.add(gen)
+
+    def _coerce_numeric(column: str) -> None:
+        if column in network.generators.columns:
+            network.generators[column] = pd.to_numeric(
+                network.generators[column], errors="coerce"
+            )
+
+    # Use very large ramp limits for fixed-dispatch generators
+    very_large_ramp = 1e10
+    if fixed_dispatch_gens:
+        if "ramp_limit_up" in network.generators.columns:
+            network.generators.loc[list(fixed_dispatch_gens), "ramp_limit_up"] = (
+                very_large_ramp
+            )
+        if "ramp_limit_down" in network.generators.columns:
+            network.generators.loc[list(fixed_dispatch_gens), "ramp_limit_down"] = (
+                very_large_ramp
+            )
+        summary["fixed_dispatch_cleared"] = len(fixed_dispatch_gens)
+
+    def _coerce_numeric(column: str) -> None:
+        if column in network.generators.columns:
+            network.generators[column] = pd.to_numeric(
+                network.generators[column], errors="coerce"
+            )
+
+    mask_up = None
+    if "ramp_limit_up" in network.generators.columns:
+        _coerce_numeric("ramp_limit_up")
+        mask_up = network.generators["ramp_limit_up"].isna() | (
+            network.generators["ramp_limit_up"] == 0
+        )
+        if fixed_dispatch_gens:
+            mask_up &= ~network.generators.index.isin(fixed_dispatch_gens)
+        up_count = int(mask_up.sum())
+        if up_count:
+            network.generators.loc[mask_up, "ramp_limit_up"] = fill_value
+            summary["filled_ramp_limit_up"] = up_count
+
+    mask_down = None
+    if "ramp_limit_down" in network.generators.columns:
+        _coerce_numeric("ramp_limit_down")
+        mask_down = network.generators["ramp_limit_down"].isna() | (
+            network.generators["ramp_limit_down"] == 0
+        )
+        if fixed_dispatch_gens:
+            mask_down &= ~network.generators.index.isin(fixed_dispatch_gens)
+        down_count = int(mask_down.sum())
+        if down_count:
+            network.generators.loc[mask_down, "ramp_limit_down"] = fill_value
+            summary["filled_ramp_limit_down"] = down_count
+
+    if mask_up is None and mask_down is None:
+        return None
+
+    combined_mask = None
+    if mask_up is not None and mask_down is not None:
+        combined_mask = mask_up | mask_down
+    elif mask_up is not None:
+        combined_mask = mask_up
+    else:
+        combined_mask = mask_down
+
+    filled_generators = int(combined_mask.sum()) if combined_mask is not None else 0
+    summary["filled_generators"] = filled_generators
+
+    if filled_generators == 0:
+        return None
+
+    return summary
 
 
 def set_generator_efficiencies_csv(
@@ -2173,6 +2301,7 @@ def apply_generator_units_timeseries_csv(
     """
     csv_dir = Path(csv_dir)
     snapshots = network.snapshots
+    units_schedule_data: dict[str, pd.Series] = {}
 
     logger.info(
         "Applying generator Units time series for capacity scaling and retirements..."
@@ -2250,6 +2379,7 @@ def apply_generator_units_timeseries_csv(
 
         # Calculate units multiplier (relative to max)
         units_multiplier = units_ts / max_units
+        units_schedule_data[gen] = units_multiplier
 
         # Apply to p_max_pu
         if gen in network.generators_t.p_max_pu.columns:
@@ -2331,6 +2461,15 @@ def apply_generator_units_timeseries_csv(
                 f"{gen}: Time-varying operation (Units: {min_units} -> {max_units})"
             )
 
+    units_schedule = pd.DataFrame(units_schedule_data, index=snapshots)
+
+    ramp_defaults = _ensure_default_ramp_limits(network)
+    ramp_summary = _apply_units_ramp_smoothing(network, units_schedule)
+    if ramp_summary:
+        stats["units_ramp_smoothing"] = ramp_summary
+    if ramp_defaults:
+        stats["ramp_defaults"] = ramp_defaults
+
     # Log summary
     logger.info("Generator Units processing complete:")
     logger.info(f"  Total generators: {stats['total_generators']}")
@@ -2347,8 +2486,54 @@ def apply_generator_units_timeseries_csv(
     logger.info(
         f"  p_min_pu time series adjusted: {stats['p_min_pu_adjusted']} generators"
     )
+    if ramp_summary:
+        logger.info(
+            "  Units ramp smoothing applied: "
+            f"{ramp_summary['ramped_generators']} generators"
+        )
+    if ramp_defaults:
+        logger.info(
+            "  Default ramp limits applied to "
+            f"{ramp_defaults['filled_generators']} generators"
+        )
 
     return stats
+
+
+def _apply_units_ramp_smoothing(
+    network: Network, units_schedule: pd.DataFrame
+) -> dict | None:
+    """Lower p_min ahead of retirements/builds so ramp limits stay feasible."""
+    if units_schedule.empty:
+        return None
+
+    valid_generators = [
+        gen
+        for gen in units_schedule.columns
+        if gen in network.generators_t.p_min_pu.columns
+        and gen in network.generators_t.p_max_pu.columns
+    ]
+
+    if not valid_generators:
+        return None
+
+    ramp_schedule = pd.DataFrame(
+        1.0, index=units_schedule.index, columns=valid_generators
+    )
+
+    summary = apply_outage_schedule(
+        network,
+        outage_schedule=ramp_schedule,
+        apply_to_p_max=True,
+        apply_to_p_min=True,
+        ramp_aware=True,
+    )
+
+    return {
+        "ramped_generators": summary.get("ramped_generators", 0),
+        "avg_startup_steps": summary.get("avg_startup_steps", 0.0),
+        "avg_shutdown_steps": summary.get("avg_shutdown_steps", 0.0),
+    }
 
 
 def set_capital_costs_csv(network: Network, csv_dir: str | Path):
