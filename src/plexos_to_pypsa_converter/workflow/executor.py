@@ -183,6 +183,12 @@ def run_model_workflow(
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
                 aggregated_summary.update(step_summary)
+                # After create_model, CSV exports may have been generated; refresh csv_dir.
+                if not Path(context["csv_dir"]).exists():
+                    refreshed_csv_dir = _resolve_csv_dir_path(
+                        model_dir, workflow, descriptor
+                    )
+                    context["csv_dir"] = str(refreshed_csv_dir)
             elif step_name == "optimize":
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")
