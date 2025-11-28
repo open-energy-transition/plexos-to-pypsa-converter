@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Iterable
 
+import numpy as np
 import pandas as pd
 import pypsa
 
@@ -101,20 +102,40 @@ def add_slack_generators(network: pypsa.Network) -> dict:
     # Even if the generators already existed, make sure the static attributes
     # are set to the expected values in case PyPSA preserved older defaults.
     network.generators.loc[
-        spillage_names, ["p_nom", "p_min_pu", "p_max_pu", "marginal_cost"]
+        spillage_names,
+        [
+            "p_nom",
+            "p_min_pu",
+            "p_max_pu",
+            "marginal_cost",
+            "ramp_limit_up",
+            "ramp_limit_down",
+        ],
     ] = (
         SPILLAGE_P_NOM,
         -1.0,
         0.0,
         SPILLAGE_COST,
+        np.inf,
+        np.inf,
     )
     network.generators.loc[
-        shedding_names, ["p_nom", "p_min_pu", "p_max_pu", "marginal_cost"]
+        shedding_names,
+        [
+            "p_nom",
+            "p_min_pu",
+            "p_max_pu",
+            "marginal_cost",
+            "ramp_limit_up",
+            "ramp_limit_down",
+        ],
     ] = (
         SHEDDING_P_NOM,
         0.0,
         1.0,
         SHEDDING_COST,
+        np.inf,
+        np.inf,
     )
 
     # Populate the generators_t DataFrames with the same bounds so PyPSA 1.0+
@@ -123,6 +144,15 @@ def add_slack_generators(network: pypsa.Network) -> dict:
     _ensure_time_series_column(network.generators_t.p_max_pu, spillage_names, 0.0)
     _ensure_time_series_column(network.generators_t.p_min_pu, shedding_names, 0.0)
     _ensure_time_series_column(network.generators_t.p_max_pu, shedding_names, 1.0)
+
+    # Explicitly clear ramp limits in both static and time-series frames so PyPSA
+    # does not generate ramp constraints for these slack devices.
+    if hasattr(network.generators_t, "ramp_limit_up"):
+        for name in spillage_names + shedding_names:
+            network.generators_t.ramp_limit_up[name] = np.inf
+    if hasattr(network.generators_t, "ramp_limit_down"):
+        for name in spillage_names + shedding_names:
+            network.generators_t.ramp_limit_down[name] = np.inf
 
     summary = {
         "slack_generators_added": len(buses),
