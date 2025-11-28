@@ -185,12 +185,8 @@ def run_model_workflow(
     parsed_overrides = parse_step_overrides(step_overrides)
 
     # Build workflow steps automatically when requested or when registry steps are absent
-    # Only auto-build when no processing_workflow was supplied
-    if (
-        auto_workflow
-        and workflow_overrides is None
-        and descriptor.get("processing_workflow") is None
-    ):
+    processing_steps = (processing_workflow or {}).get("steps")
+    if auto_workflow and workflow_overrides is None and not processing_steps:
         features = detect_model_features(model_dir, csv_dir)
         effective_optimize = optimize if optimize is not None else solve
         solver_config = {"solver_name": solver_name}
