@@ -124,7 +124,7 @@ custom_workflow["steps"] = [
 network, setup_summary = run_model_workflow(
     "caiso-irp23",
     workflow_overrides=custom_workflow,
-    demand_assignment_strategy="aggregate_node"
+    demand_assignment_strategy="target_node"
 )
 
 # Save with custom filename
