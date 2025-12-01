@@ -1472,6 +1472,57 @@ def parse_generator_outage_properties_csv(
     """
     csv_dir = Path(csv_dir)
 
+    def _aggregate_tvp_outage_properties() -> pd.DataFrame:
+        """Parse outage properties from Time varying properties.csv."""
+        tvp_df = load_time_varying_properties(csv_dir, class_name="Generator").copy()
+        if tvp_df.empty:
+            return pd.DataFrame()
+
+        property_map = {
+            "forced_outage_rate": ("Forced Outage Rate", "mean", True),
+            "maintenance_rate": ("Maintenance Rate", "mean", True),
+            "mean_time_to_repair": ("Mean Time to Repair", "mean", False),
+            "outage_rating": ("Outage Rating", "max", False),
+            "outage_factor": ("Outage Factor", "min", True),
+        }
+
+        records = []
+        for prop_key, (prop_name, agg, is_percentage) in property_map.items():
+            filtered = tvp_df[tvp_df["property"] == prop_name].copy()
+            if filtered.empty:
+                continue
+
+            filtered["parsed_value"] = filtered["value"].apply(
+                lambda v: parse_numeric_value(v, use_first=True, strategy="min")
+            )
+            filtered = filtered[pd.notna(filtered["parsed_value"])]
+            if filtered.empty:
+                continue
+
+            if agg == "min":
+                agg_df = filtered.groupby("object")["parsed_value"].min()
+            elif agg == "max":
+                agg_df = filtered.groupby("object")["parsed_value"].max()
+            else:
+                agg_df = filtered.groupby("object")["parsed_value"].mean()
+
+            for obj, val in agg_df.items():
+                records.append(
+                    {
+                        "generator": obj,
+                        prop_key: val / 100.0 if is_percentage else val,
+                    }
+                )
+
+        if not records:
+            return pd.DataFrame()
+
+        out_df = pd.DataFrame(records)
+        out_df = out_df.groupby("generator").agg("first")
+        return out_df
+
+    csv_dir = Path(csv_dir)
+
     # Load static generator properties
     generator_df = load_static_properties(csv_dir, "Generator")
 
@@ -1501,6 +1552,9 @@ def parse_generator_outage_properties_csv(
                 "outage_factor",
             ]
         )
+
+    # Parse time-varying outage properties (override static when present)
+    tvp_props = _aggregate_tvp_outage_properties()
 
     # Parse properties for each generator
     properties_list = []
@@ -1556,6 +1610,12 @@ def parse_generator_outage_properties_csv(
     # Create DataFrame
     properties_df = pd.DataFrame(properties_list)
     properties_df = properties_df.set_index("generator")
+
+    if not tvp_props.empty:
+        # Align to network generators
+        tvp_props = tvp_props[tvp_props.index.isin(properties_df.index)]
+        for col in tvp_props.columns:
+            properties_df.loc[tvp_props.index, col] = tvp_props[col]
 
     # Log statistics
     for_count = properties_df["forced_outage_rate"].notna().sum()

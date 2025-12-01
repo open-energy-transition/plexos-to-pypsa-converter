@@ -156,7 +156,6 @@ def _create_electricity_model(
             model_name=config.get("model_name"),
             inflow_path=config.get("inflow_path"),
             target_node=config.get("target_node"),
-            aggregate_node_name=config.get("aggregate_node_name"),
             demand_assignment_strategy=config.get(
                 "demand_assignment_strategy", "per_node"
             ),
@@ -167,6 +166,8 @@ def _create_electricity_model(
         )
 
         return network, setup_summary
+
+    registry_model_id = config.get("registry_model_id", model_id)
 
     registry_model_id = config.get("registry_model_id", model_id)
 
@@ -249,9 +250,6 @@ def _create_electricity_model(
     # Add strategy-specific arguments
     if strategy == "target_node":
         setup_args["target_node"] = config.get("target_node")
-    elif strategy == "aggregate_node":
-        setup_args["aggregate_node_name"] = config.get("aggregate_node_name")
-
     # Add demand-specific target node (independent of strategy)
     if "demand_target_node" in config:
         setup_args["demand_target_node"] = config.get("demand_target_node")
@@ -300,11 +298,9 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
         - use_csv : bool
             Enable CSV-based conversion (auto-generates CSVs from XML if needed)
         - demand_assignment_strategy : str
-            "per_node", "target_node", or "aggregate_node"
+            "per_node", "target_node", or "participation_factors"
         - target_node : str
             Target node name for target_node strategy
-        - aggregate_node_name : str
-            Aggregate node name for aggregate_node strategy
         - model_name : str
             PLEXOS model name to use
         - snapshots_source : str
@@ -363,7 +359,7 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     Create AEMO model with defaults:
     >>> network, summary = create_model("aemo-2024-isp-progressive-change")
 
-    Create CAISO model (uses default aggregate_node strategy):
+    Create CAISO model (uses participation factors strategy):
     >>> network, summary = create_model("caiso-irp23")
 
     Create SEM model with custom target node:
@@ -385,25 +381,29 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
     xml_file_override = config_overrides.pop("xml_file", None)
 
     effective_model_id = registry_model_id or model_id
+    custom_model = effective_model_id not in MODEL_REGISTRY
 
-    # Validate model reference
-    if effective_model_id not in MODEL_REGISTRY:
-        available = ", ".join(MODEL_REGISTRY.keys())
-        msg = f"Unknown model_id: '{effective_model_id}'. Available models: {available}"
-        raise ValueError(msg)
+    if custom_model:
+        # Allow custom model outside registry; infer metadata from overrides
+        model_metadata = {
+            "name": effective_model_id,
+            "model_type": config_overrides.pop("model_type", "electricity"),
+        }
+        default_config = config_overrides.pop("default_config", {})
+        default_config.setdefault("demand_assignment_strategy", "per_node")
+    else:
+        # Validate model reference
+        model_metadata = MODEL_REGISTRY[effective_model_id]
+        model_type = model_metadata.get("model_type")
+        default_config = model_metadata.get("default_config", {})
 
-    # Get model metadata
-    model_metadata = MODEL_REGISTRY[effective_model_id]
+        if not model_type:
+            msg = (
+                f"Model '{effective_model_id}' has no model_type in MODEL_REGISTRY. "
+                "This model may not be fully configured for the factory pattern."
+            )
+            raise ValueError(msg)
     model_type = model_metadata.get("model_type")
-    default_config = model_metadata.get("default_config", {})
-
-    # Check if model type is specified
-    if not model_type:
-        msg = (
-            f"Model '{effective_model_id}' has no model_type in MODEL_REGISTRY. "
-            "This model may not be fully configured for the factory pattern."
-        )
-        raise ValueError(msg)
     # Resolve model directory
     if model_dir_override is not None:
         model_dir = Path(model_dir_override)
@@ -411,6 +411,12 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             msg = f"Provided model_dir does not exist: {model_dir}"
             raise FileNotFoundError(msg)
     else:
+        if custom_model:
+            msg = (
+                "Custom models require model_dir to be provided via workflow overrides "
+                "or model_descriptor."
+            )
+            raise FileNotFoundError(msg)
         model_dir = get_model_directory(effective_model_id)
         if model_dir is None:
             msg = (
@@ -434,21 +440,35 @@ def create_model(model_id: str, **config_overrides: dict) -> tuple[pypsa.Network
             if candidate.exists():
                 xml_file = candidate
 
-    if xml_file is None:
+    if xml_file is None and not custom_model:
         xml_file = get_model_xml_path(effective_model_id)
 
     if xml_file is None or not xml_file.exists():
-        recipe_available = "recipe" in model_metadata
-        msg = (
-            f"Model '{effective_model_id}' not found in the expected location. "
-            "Provide xml_file via workflow overrides or download the reference model."
-        )
-        if recipe_available:
-            msg += (
-                "\n\nTip: This model has an auto-download recipe. "
-                "You can use the recipe system to automatically download it."
+        if not custom_model:
+            recipe_available = "recipe" in model_metadata
+            msg = (
+                f"Model '{effective_model_id}' not found in the expected location. "
+                "Provide xml_file via workflow overrides or download the reference model."
             )
-        raise FileNotFoundError(msg)
+            if recipe_available:
+                msg += (
+                    "\n\nTip: This model has an auto-download recipe. "
+                    "You can use the recipe system to automatically download it."
+                )
+            raise FileNotFoundError(msg)
+
+        # Custom model: try to locate an XML in the provided directory
+        xml_candidates = [
+            f for f in model_dir.rglob("*.xml") if not f.name.startswith("PLEXOS_")
+        ]
+        if xml_candidates:
+            xml_file = xml_candidates[0]
+        else:
+            msg = (
+                "No XML file found for custom model. "
+                "Provide xml_file or place an XML under the model directory."
+            )
+            raise FileNotFoundError(msg)
 
     # Merge configurations
     config = _merge_configs(default_config, config_overrides)

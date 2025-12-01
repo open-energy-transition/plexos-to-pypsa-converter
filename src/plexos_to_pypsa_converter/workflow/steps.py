@@ -350,17 +350,8 @@ def optimize_step(
 
     if solver_config is None:
         solver_config = {
-            "solver_name": "gurobi",
-            "solver_options": {
-                "Threads": 6,
-                "Method": 2,  # barrier
-                "Crossover": 0,
-                "BarConvTol": 1.0e-5,
-                "Seed": 123,
-                "AggFill": 0,
-                "PreDual": 0,
-                "GURO_PAR_BARDENSETHRESH": 200,
-            },
+            "solver_name": "highs",
+            "solver_options": {},
         }
 
     print(f"Solver config: {solver_config}")

@@ -11,6 +11,8 @@ import pypsa
 
 from plexos_to_pypsa_converter.db.registry import MODEL_REGISTRY
 from plexos_to_pypsa_converter.utils.model_paths import get_model_directory
+from plexos_to_pypsa_converter.workflow.builder import build_workflow_steps
+from plexos_to_pypsa_converter.workflow.detection import detect_model_features
 from plexos_to_pypsa_converter.workflow.steps import STEP_REGISTRY
 
 
@@ -41,8 +43,6 @@ def _auto_select_csv_dir(base_path: Path) -> Path | None:
     target = preferred[0] if preferred else sorted(subdirs)[0]
     nested = _auto_select_csv_dir(target)
     return nested or target
-
-    return None
 
 
 def _resolve_csv_dir_path(
@@ -79,6 +79,19 @@ def run_model_workflow(
     model_dir_override: str | Path | None = None,
     registry_model_id: str | None = None,
     solve: bool = False,
+    optimize: bool | None = None,
+    optimize_year: int | None = None,
+    enable_vre: bool = True,
+    enable_hydro_dispatch: bool = True,
+    enable_hydro_inflows: bool = True,
+    enable_units: bool = True,
+    enable_outages: bool = True,
+    enable_slack_generators: bool = True,
+    enable_save: bool = True,
+    force_demand_strategy: str | None = None,
+    solver_name: str = "highs",
+    solver_options: dict | None = None,
+    auto_workflow: bool = True,
     **step_overrides,
 ) -> tuple[pypsa.Network, dict]:
     """Execute model processing workflow from registry definition.
@@ -88,27 +101,25 @@ def run_model_workflow(
     summary aggregation. By default it runs only the conversion steps. Pass
     ``solve=True`` to allow the ``optimize`` step to execute.
     """
-    descriptor = model_descriptor or MODEL_REGISTRY.get(model_id)
-    if descriptor is None:
-        if workflow_overrides is None:
-            available = ", ".join(MODEL_REGISTRY.keys())
-            msg = (
-                f"Model '{model_id}' not found in registry and no workflow overrides were provided. "
-                "Pass `workflow_overrides` or `model_descriptor` for custom models. "
-                f"Available registry models: [{available}]"
-            )
-            raise ValueError(msg)
-        descriptor = {"processing_workflow": workflow_overrides}
+    descriptor = model_descriptor or MODEL_REGISTRY.get(model_id) or {}
+    if not descriptor and workflow_overrides is None and not auto_workflow:
+        available = ", ".join(MODEL_REGISTRY.keys())
+        msg = (
+            f"Model '{model_id}' not found in registry and no workflow overrides were provided. "
+            "Pass `workflow_overrides` or `model_descriptor` for custom models. "
+            f"Available registry models: [{available}]"
+        )
+        raise ValueError(msg)
 
     processing_workflow = descriptor.get("processing_workflow")
-    if processing_workflow is None:
+    if processing_workflow is None and workflow_overrides is None and not auto_workflow:
         msg = (
             f"Model '{model_id}' does not have a processing_workflow defined. "
             "Provide one via the registry or the model_descriptor argument."
         )
         raise ValueError(msg)
 
-    workflow = workflow_overrides or processing_workflow
+    workflow = workflow_overrides or processing_workflow or {}
 
     effective_registry_model_id = registry_model_id or descriptor.get(
         "registry_model_id"
@@ -158,6 +169,8 @@ def run_model_workflow(
     }
     if effective_registry_model_id:
         context["registry_model_id"] = effective_registry_model_id
+    if force_demand_strategy:
+        context["force_demand_strategy"] = force_demand_strategy
 
     def parse_step_overrides(step_overrides: dict) -> dict[str, dict]:
         parsed = {}
@@ -169,22 +182,66 @@ def run_model_workflow(
 
     parsed_overrides = parse_step_overrides(step_overrides)
 
+    # Build workflow steps automatically when requested or when registry steps are absent.
+    # If a descriptor provides an explicit empty steps list, respect that and skip auto-building.
+    processing_steps = (processing_workflow or {}).get("steps")
+    auto_build_steps = (
+        auto_workflow
+        and workflow_overrides is None
+        and (processing_workflow is None or processing_steps is None)
+    )
+    if auto_build_steps:
+        features = detect_model_features(model_dir, csv_dir)
+        effective_optimize = optimize if optimize is not None else solve
+        solver_config = {"solver_name": solver_name}
+        if solver_options:
+            solver_config["solver_options"] = solver_options
+        workflow_steps = build_workflow_steps(
+            model_id=model_id,
+            features=features,
+            enable_vre=enable_vre,
+            enable_hydro_dispatch=enable_hydro_dispatch,
+            enable_hydro_inflows=enable_hydro_inflows,
+            enable_units=enable_units,
+            enable_outages=enable_outages,
+            enable_slack_generators=enable_slack_generators,
+            enable_save=enable_save,
+            optimize=effective_optimize,
+            optimize_year=optimize_year,
+            solver_config=solver_config,
+        )
+        workflow = {"steps": workflow_steps, "solver_config": solver_config}
+
     network: pypsa.Network | None = None
     aggregated_summary: dict = {}
     steps = workflow.get("steps", [])
-    if not solve:
+    effective_optimize = optimize if optimize is not None else solve
+    if force_demand_strategy:
+        for step in steps:
+            if step.get("name") == "create_model":
+                step.setdefault("params", {})["demand_assignment_strategy"] = (
+                    force_demand_strategy
+                )
+                break
+
+    if not effective_optimize:
         steps = [step for step in steps if step.get("name") != "optimize"]
     print(
         f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
     )
-    for step_idx, step_def in enumerate(steps, 1):
+
+    step_idx = 0
+    while step_idx < len(steps):
+        step_def = steps[step_idx]
+        total_steps = len(steps)
         step_name = step_def["name"]
         step_params = step_def.get("params", {}).copy()
         condition = step_def.get("condition")
         if condition and not _evaluate_condition(condition, context):
             print(
-                f"Step {step_idx}/{len(steps)}: {step_name} (skipped - condition not met)"
+                f"Step {step_idx + 1}/{total_steps}: {step_name} (skipped - condition not met)"
             )
+            step_idx += 1
             continue
         if step_name not in STEP_REGISTRY:
             msg = f"Unknown workflow step: {step_name}. Available steps: {list(STEP_REGISTRY.keys())}"
@@ -193,7 +250,7 @@ def run_model_workflow(
             step_params.update(parsed_overrides[step_name])
         step_fn = STEP_REGISTRY[step_name]
         step_params = _inject_context(step_params, context, step_fn)
-        print(f"Step {step_idx}/{len(steps)}: {step_name}")
+        print(f"Step {step_idx + 1}/{total_steps}: {step_name}")
         try:
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
@@ -204,6 +261,44 @@ def run_model_workflow(
                     model_dir, workflow, descriptor
                 )
                 context["csv_dir"] = str(refreshed_csv_dir)
+                # Re-run detection post-export to pick up Units Out / outage properties
+                if auto_build_steps:
+                    features = detect_model_features(model_dir, refreshed_csv_dir)
+                    effective_optimize = optimize if optimize is not None else solve
+                    solver_config = {"solver_name": solver_name}
+                    if solver_options:
+                        solver_config["solver_options"] = solver_options
+                    workflow_steps = build_workflow_steps(
+                        model_id=model_id,
+                        features=features,
+                        enable_vre=enable_vre,
+                        enable_hydro_dispatch=enable_hydro_dispatch,
+                        enable_hydro_inflows=enable_hydro_inflows,
+                        enable_units=enable_units,
+                        enable_outages=enable_outages,
+                        enable_slack_generators=enable_slack_generators,
+                        enable_save=enable_save,
+                        optimize=effective_optimize,
+                        optimize_year=optimize_year,
+                        solver_config=solver_config,
+                    )
+                    if not effective_optimize:
+                        workflow_steps = [
+                            step
+                            for step in workflow_steps
+                            if step.get("name") != "optimize"
+                        ]
+                    workflow = {"steps": workflow_steps, "solver_config": solver_config}
+                    steps = workflow_steps
+                    if force_demand_strategy:
+                        for step in steps:
+                            if step.get("name") == "create_model":
+                                step.setdefault("params", {})[
+                                    "demand_assignment_strategy"
+                                ] = force_demand_strategy
+                                break
+                    step_idx = 1 if len(steps) > 0 else 0
+                    continue
             elif step_name == "optimize":
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")
@@ -219,6 +314,7 @@ def run_model_workflow(
         except Exception as e:
             print(f"{step_name} failed: {e}\n")
             raise
+        step_idx += 1
     print(f"Workflow complete for model: {model_id}\n")
     return network, aggregated_summary
 
@@ -252,6 +348,7 @@ def _inject_context(params: dict, context: dict, step_fn: callable) -> dict:
     # Standard context variables that might be injected
     context_vars = [
         "model_id",
+        "model_dir",
         "csv_dir",
         "profiles_path",
         "inflow_path",
