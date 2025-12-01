@@ -10,15 +10,18 @@ workflow without manual step lists.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from plexos_to_pypsa_converter.db.csv_readers import load_static_properties
+from plexos_to_pypsa_converter.db.csv_readers import (
+    load_static_properties,
+    load_time_varying_properties,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from pathlib import Path
 
 
 @dataclass
@@ -37,6 +40,8 @@ class ModelFeatures:
     node_csv: Path | None = None
     has_region_factors: bool = False
     has_node_region_map: bool = False
+    units_out_dir: Path | None = None
+    has_outage_properties: bool = False
 
 
 def _safe_read_csv(path: Path) -> pd.DataFrame | None:
@@ -61,6 +66,42 @@ def _collect_filename(row: pd.Series) -> str | None:
     return None
 
 
+def _extract_units_out_dir(candidate: Path) -> Path | None:
+    """Return the top-level Units Out directory from a path."""
+    if "units out" not in (part.lower() for part in candidate.parts):
+        return None
+    parts = list(candidate.parts)
+    for idx, part in enumerate(parts):
+        if part.lower() == "units out":
+            return Path(*parts[: idx + 1])
+    return None
+
+
+def _detect_outage_properties(csv_dir: Path) -> bool:
+    """Check static and time-varying properties for outage-related fields."""
+    outage_properties = {
+        "Forced Outage Rate",
+        "Maintenance Rate",
+        "Mean Time to Repair",
+        "Outage Factor",
+        "Outage Rating",
+    }
+    static_df = load_static_properties(csv_dir, "Generator")
+    if not static_df.empty and any(
+        col in static_df.columns for col in outage_properties
+    ):
+        return True
+
+    tvp_df = load_time_varying_properties(csv_dir, class_name="Generator")
+    return bool(
+        not tvp_df.empty
+        and tvp_df["property"]
+        .str.lower()
+        .isin([p.lower() for p in outage_properties])
+        .any()
+    )
+
+
 def _maybe_extend(paths: list[Path], candidates: Iterable[str], base_dir: Path) -> None:
     for cand in candidates:
         if not cand:
@@ -72,6 +113,7 @@ def _maybe_extend(paths: list[Path], candidates: Iterable[str], base_dir: Path) 
 def detect_model_features(model_dir: Path, csv_dir: Path) -> ModelFeatures:
     """Inspect CSV exports to discover available inputs for workflow steps."""
     features = ModelFeatures(model_dir=model_dir, csv_dir=csv_dir)
+    units_out_candidates: list[Path] = []
 
     # Data File.csv driven detection
     data_file_path = csv_dir / "Data File.csv"
@@ -114,7 +156,18 @@ def detect_model_features(model_dir: Path, csv_dir: Path) -> ModelFeatures:
             # Outages
             if "outage" in obj or "outage" in category:
                 _maybe_extend(features.outage_files, [filename], model_dir)
+                units_out_dir = _extract_units_out_dir(
+                    _normalize_path(filename, model_dir)
+                )
+                if units_out_dir:
+                    units_out_candidates.append(units_out_dir)
                 continue
+            if "units out" in filename.lower():
+                units_out_dir = _extract_units_out_dir(
+                    _normalize_path(filename, model_dir)
+                )
+                if units_out_dir:
+                    units_out_candidates.append(units_out_dir)
 
     # Region / Node information
     region_path = csv_dir / "Region.csv"
@@ -132,5 +185,21 @@ def detect_model_features(model_dir: Path, csv_dir: Path) -> ModelFeatures:
     if node_df is not None and not node_df.empty:
         features.node_csv = node_path
         features.has_node_region_map = "Region" in node_df.columns
+
+    # Units Out directory detection (prefer existing paths)
+    for cand in units_out_candidates:
+        if cand.exists() and cand.is_dir():
+            features.units_out_dir = cand
+            break
+    if features.units_out_dir is None:
+        # Fallback: look for a Units Out directory directly under csv_dir or model_dir
+        for base in (csv_dir, model_dir):
+            maybe_units = base / "Units Out"
+            if maybe_units.exists() and maybe_units.is_dir():
+                features.units_out_dir = maybe_units
+                break
+
+    # Outage property presence (FOR/MR/MTTR/etc.)
+    features.has_outage_properties = _detect_outage_properties(csv_dir)
 
     return features

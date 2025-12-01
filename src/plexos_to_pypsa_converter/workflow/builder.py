@@ -92,27 +92,26 @@ def build_workflow_steps(
             }
         )
 
-    if enable_outages and features.outage_files:
-        outage_dir = _path_parent_or_self(features.outage_files)
-        # Prefer monthly outage loader when folders look like Units Out/Mxx
-        if outage_dir and "Units Out" in outage_dir.as_posix():
+    if enable_outages:
+        if features.units_out_dir:
             steps.append(
                 {
                     "name": "load_monthly_outages",
                     "params": {
-                        "units_out_dir": str(outage_dir),
+                        "units_out_dir": str(features.units_out_dir),
                         "csv_dir": None,
                         "generator_filter": "exclude_vre",
                         "ramp_aware": True,
                     },
                 }
             )
-        else:
+        elif features.outage_files or features.has_outage_properties:
+            outage_dir = _path_parent_or_self(features.outage_files)
             steps.append(
                 {
                     "name": "parse_outages",
                     "params": {
-                        "csv_dir": None,
+                        "csv_dir": str(outage_dir) if outage_dir else None,
                         "include_explicit": True,
                         "include_forced": True,
                         "include_maintenance": True,

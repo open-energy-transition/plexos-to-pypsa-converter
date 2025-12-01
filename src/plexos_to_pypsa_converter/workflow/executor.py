@@ -229,14 +229,19 @@ def run_model_workflow(
     print(
         f"Running workflow for model: {model_id}\nModel directory: {model_dir}\nWorkflow steps: {len(steps)}\n"
     )
-    for step_idx, step_def in enumerate(steps, 1):
+
+    step_idx = 0
+    while step_idx < len(steps):
+        step_def = steps[step_idx]
+        total_steps = len(steps)
         step_name = step_def["name"]
         step_params = step_def.get("params", {}).copy()
         condition = step_def.get("condition")
         if condition and not _evaluate_condition(condition, context):
             print(
-                f"Step {step_idx}/{len(steps)}: {step_name} (skipped - condition not met)"
+                f"Step {step_idx + 1}/{total_steps}: {step_name} (skipped - condition not met)"
             )
+            step_idx += 1
             continue
         if step_name not in STEP_REGISTRY:
             msg = f"Unknown workflow step: {step_name}. Available steps: {list(STEP_REGISTRY.keys())}"
@@ -245,7 +250,7 @@ def run_model_workflow(
             step_params.update(parsed_overrides[step_name])
         step_fn = STEP_REGISTRY[step_name]
         step_params = _inject_context(step_params, context, step_fn)
-        print(f"Step {step_idx}/{len(steps)}: {step_name}")
+        print(f"Step {step_idx + 1}/{total_steps}: {step_name}")
         try:
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
@@ -256,6 +261,44 @@ def run_model_workflow(
                     model_dir, workflow, descriptor
                 )
                 context["csv_dir"] = str(refreshed_csv_dir)
+                # Re-run detection post-export to pick up Units Out / outage properties
+                if auto_build_steps:
+                    features = detect_model_features(model_dir, refreshed_csv_dir)
+                    effective_optimize = optimize if optimize is not None else solve
+                    solver_config = {"solver_name": solver_name}
+                    if solver_options:
+                        solver_config["solver_options"] = solver_options
+                    workflow_steps = build_workflow_steps(
+                        model_id=model_id,
+                        features=features,
+                        enable_vre=enable_vre,
+                        enable_hydro_dispatch=enable_hydro_dispatch,
+                        enable_hydro_inflows=enable_hydro_inflows,
+                        enable_units=enable_units,
+                        enable_outages=enable_outages,
+                        enable_slack_generators=enable_slack_generators,
+                        enable_save=enable_save,
+                        optimize=effective_optimize,
+                        optimize_year=optimize_year,
+                        solver_config=solver_config,
+                    )
+                    if not effective_optimize:
+                        workflow_steps = [
+                            step
+                            for step in workflow_steps
+                            if step.get("name") != "optimize"
+                        ]
+                    workflow = {"steps": workflow_steps, "solver_config": solver_config}
+                    steps = workflow_steps
+                    if force_demand_strategy:
+                        for step in steps:
+                            if step.get("name") == "create_model":
+                                step.setdefault("params", {})[
+                                    "demand_assignment_strategy"
+                                ] = force_demand_strategy
+                                break
+                    step_idx = 1 if len(steps) > 0 else 0
+                    continue
             elif step_name == "optimize":
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")
@@ -271,6 +314,7 @@ def run_model_workflow(
         except Exception as e:
             print(f"{step_name} failed: {e}\n")
             raise
+        step_idx += 1
     print(f"Workflow complete for model: {model_id}\n")
     return network, aggregated_summary
 
