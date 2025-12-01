@@ -44,8 +44,6 @@ def _auto_select_csv_dir(base_path: Path) -> Path | None:
     nested = _auto_select_csv_dir(target)
     return nested or target
 
-    return None
-
 
 def _resolve_csv_dir_path(
     model_dir: Path,
@@ -184,9 +182,15 @@ def run_model_workflow(
 
     parsed_overrides = parse_step_overrides(step_overrides)
 
-    # Build workflow steps automatically when requested or when registry steps are absent
+    # Build workflow steps automatically when requested or when registry steps are absent.
+    # If a descriptor provides an explicit empty steps list, respect that and skip auto-building.
     processing_steps = (processing_workflow or {}).get("steps")
-    if auto_workflow and workflow_overrides is None and not processing_steps:
+    auto_build_steps = (
+        auto_workflow
+        and workflow_overrides is None
+        and (processing_workflow is None or processing_steps is None)
+    )
+    if auto_build_steps:
         features = detect_model_features(model_dir, csv_dir)
         effective_optimize = optimize if optimize is not None else solve
         solver_config = {"solver_name": solver_name}

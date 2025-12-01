@@ -169,6 +169,8 @@ def _create_electricity_model(
 
     registry_model_id = config.get("registry_model_id", model_id)
 
+    registry_model_id = config.get("registry_model_id", model_id)
+
     # Original PlexosDB-based path
     network = pypsa.Network()
 

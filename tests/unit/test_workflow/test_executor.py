@@ -258,3 +258,22 @@ class TestResolveCsvDirPath:
 
         assert network is None
         assert summary == {}
+
+
+class TestRunModelWorkflowCustomPaths:
+    """Tests for custom model descriptors and path overrides."""
+
+    def test_model_descriptor_without_registry_entry(self, tmp_path):
+        """run_model_workflow should accept an explicit descriptor even if the model_id isn't in the registry."""
+        descriptor = {
+            "model_dir": str(tmp_path),
+            "processing_workflow": {"steps": []},
+        }
+
+        network, summary = run_model_workflow(
+            "custom-model",
+            model_descriptor=descriptor,
+        )
+
+        assert network is None
+        assert summary == {}
