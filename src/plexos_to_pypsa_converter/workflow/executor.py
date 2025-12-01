@@ -66,10 +66,8 @@ def _resolve_csv_dir_path(
     if candidate.exists() and candidate.is_dir():
         auto_selected = _auto_select_csv_dir(candidate)
         if auto_selected:
-            print(f"[debug] Auto-selected CSV dir: {auto_selected}")
             return auto_selected
 
-    print(f"[debug] CSV dir candidate (no auto-select match): {candidate}")
     return candidate
 
 
@@ -195,9 +193,6 @@ def run_model_workflow(
             step_params.update(parsed_overrides[step_name])
         step_fn = STEP_REGISTRY[step_name]
         step_params = _inject_context(step_params, context, step_fn)
-        # Debug: surface the csv_dir used for each step that accepts it
-        if "csv_dir" in step_params:
-            print(f"[debug] Step '{step_name}' using csv_dir={step_params['csv_dir']}")
         print(f"Step {step_idx}/{len(steps)}: {step_name}")
         try:
             if step_name == "create_model":
