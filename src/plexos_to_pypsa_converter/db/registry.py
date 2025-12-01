@@ -1016,7 +1016,7 @@ MODEL_REGISTRY = {
                 },
                 {
                     "name": "optimize",
-                    "params": {"year": 2023},
+                    "params": {},
                 },
                 {
                     "name": "save_network",
