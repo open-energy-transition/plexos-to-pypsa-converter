@@ -22,10 +22,25 @@ def _auto_select_csv_dir(base_path: Path) -> Path | None:
     if any(base_path.glob("*.csv")):
         return base_path
 
-    subdirs = [p for p in base_path.iterdir() if p.is_dir()]
+    # Ignore hidden/system folders such as .DS_Store
+    subdirs = [
+        p for p in base_path.iterdir() if p.is_dir() and not p.name.startswith(".")
+    ]
+
     if len(subdirs) == 1:
         nested = _auto_select_csv_dir(subdirs[0])
         return nested or subdirs[0]
+
+    # If multiple subdirectories exist (e.g., auto-export created region folders),
+    # prefer a directory named "WECC" (common for CAISO IRP exports), otherwise
+    # pick the first in sorted order to provide a deterministic choice.
+    if not subdirs:
+        return None
+
+    preferred = [p for p in subdirs if p.name.lower() == "wecc"]
+    target = preferred[0] if preferred else sorted(subdirs)[0]
+    nested = _auto_select_csv_dir(target)
+    return nested or target
 
     return None
 
@@ -183,6 +198,12 @@ def run_model_workflow(
             if step_name == "create_model":
                 network, step_summary = step_fn(**step_params)
                 aggregated_summary.update(step_summary)
+                # After create_model, CSV exports may have been generated; refresh csv_dir
+                # to pick up nested export paths (e.g., csvs_from_xml/WECC).
+                refreshed_csv_dir = _resolve_csv_dir_path(
+                    model_dir, workflow, descriptor
+                )
+                context["csv_dir"] = str(refreshed_csv_dir)
             elif step_name == "optimize":
                 if "solver_config" not in step_params:
                     step_params["solver_config"] = workflow.get("solver_config")

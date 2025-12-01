@@ -330,7 +330,7 @@ def optimize_step(
     """Step: Run PyPSA network optimization."""
     network.consistency_check()
 
-    # Debug: Print network state
+    # Print network state
     print("\n=== Network State Before Optimization ===")
     print(f"Buses: {len(network.buses)}")
     print(f"Generators: {len(network.generators)}")
