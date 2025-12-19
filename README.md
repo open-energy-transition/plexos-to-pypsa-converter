@@ -16,7 +16,7 @@ This tool converts PLEXOS input XML files and their associated data into PyPSA n
 ## Requirements
 
 - **Python**: 3.11 or 3.12
-- **PyPSA**: Version <1.0 (specifically >=0.34, <1.0)
+- **PyPSA**: Version >= 1.0.4
 
 ## Installation
 
