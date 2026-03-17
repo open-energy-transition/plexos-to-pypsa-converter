@@ -76,7 +76,7 @@ def network_with_generators(network_with_buses):
 def network_with_snapshots(network_with_buses):
     """Create a network with 24 hourly snapshots."""
     network = network_with_buses
-    network.set_snapshots(pd.date_range("2023-01-01", periods=24, freq="H"))
+    network.set_snapshots(pd.date_range("2023-01-01", periods=24, freq="h"))
     return network
 
 
@@ -84,7 +84,7 @@ def network_with_snapshots(network_with_buses):
 def network_with_p_min_pu(network_with_generators):
     """Create a network with generators that have p_min_pu time series."""
     network = network_with_generators
-    snapshots = pd.date_range("2023-01-01", periods=24, freq="H")
+    snapshots = pd.date_range("2023-01-01", periods=24, freq="h")
     network.set_snapshots(snapshots)
 
     # Add p_min_pu for thermal generators
