@@ -297,6 +297,7 @@ def parse_lines_flow_csv(
     -----
     - Uses time-varying properties CSV if available
     - Prefers Rating over Flow properties
+    - Uses static Line.csv values as a baseline and overlays time-varying data
     - Applies date/timeslice logic same as generators
     - Multi-value properties: MIN for max limits, MAX for min limits (conservative)
     """
@@ -312,12 +313,17 @@ def parse_lines_flow_csv(
     # Load static line properties
     line_df = load_static_properties(csv_dir, "Line")
 
+    # Build static baseline flows first
+    static_min_flow_df, static_max_flow_df, static_fallbacks = _build_static_line_flows(
+        line_df, lines, snapshots
+    )
+
     # Load time-varying properties
     time_varying = load_time_varying_properties(csv_dir)
 
     if time_varying.empty:
         logger.info("No time-varying properties CSV, using static flow limits")
-        return _build_static_line_flows(line_df, lines, snapshots)
+        return static_min_flow_df, static_max_flow_df, static_fallbacks
 
     # Filter to Line class and flow/rating properties
     line_time_varying = time_varying[
@@ -328,18 +334,23 @@ def parse_lines_flow_csv(
             )
         )
     ].copy()
+    if line_time_varying.empty:
+        logger.info("No Line time-varying flow properties, using static flow limits")
+        return static_min_flow_df, static_max_flow_df, static_fallbacks
 
     # Build data_id to timeslice mapping
     dataid_to_timeslice = {}
     if timeslice_csv is not None:
         dataid_to_timeslice = get_dataid_timeslice_map_csv(line_time_varying)
 
-    # Build flow time series for each line
+    # Build flow time series for each line (overlay time-varying on static baseline)
     min_flow_series = {}
     max_flow_series = {}
     fallback_val_dict = {}
 
     for line in lines:
+        static_min = static_min_flow_df[line]
+        static_max = static_max_flow_df[line]
         # Get properties for this line
         line_props = line_time_varying[line_time_varying["object"] == line].copy()
 
@@ -356,10 +367,10 @@ def parse_lines_flow_csv(
             property_entries.append(entry)
 
         if not property_entries:
-            # No time-varying properties, try static
-            min_flow_series[line] = pd.Series(0.0, index=snapshots, dtype=float)
-            max_flow_series[line] = pd.Series(1000.0, index=snapshots, dtype=float)
-            fallback_val_dict[line] = 1000.0
+            # No time-varying properties; use static baseline
+            min_flow_series[line] = static_min
+            max_flow_series[line] = static_max
+            fallback_val_dict[line] = static_fallbacks.get(line)
             continue
 
         prop_df_entries = pd.DataFrame(property_entries)
@@ -397,6 +408,10 @@ def parse_lines_flow_csv(
         # Prefer rating over flow
         min_final = min_rating_ts.combine_first(min_flow_ts)
         max_final = max_rating_ts.combine_first(max_flow_ts)
+
+        # Overlay time-varying values on static baseline
+        min_final = min_final.combine_first(static_min)
+        max_final = max_final.combine_first(static_max)
 
         # Get fallback value (first available max flow/rating)
         max_fallback = (

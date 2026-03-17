@@ -22,6 +22,8 @@ from typing import Any
 
 import pandas as pd
 
+from plexos_to_pypsa_converter.db.timeslice_parser import parse_plexos_pattern
+
 logger = logging.getLogger(__name__)
 
 
@@ -928,8 +930,10 @@ def read_plexos_input_csv(
         return _parse_periods_in_columns_ymd_numeric(df, scenario)
     elif format_type == "periods_in_columns_datetime":
         return _parse_periods_in_columns_datetime(df, object_name, scenario)
+    elif format_type == "names_in_columns_year":
+        return _parse_names_in_columns_year(df, object_name, snapshots)
     elif format_type == "names_in_columns":
-        return _parse_names_in_columns(df, object_name, scenario)
+        return _parse_names_in_columns(df, object_name, scenario, snapshots)
     elif format_type == "bands_in_columns":
         return _parse_bands_in_columns(df)
     else:
@@ -966,6 +970,15 @@ def _detect_plexos_csv_format(df: pd.DataFrame) -> str:
         numeric_cols = [col for col in df.columns if str(col).strip().isdigit()]
         if len(numeric_cols) in [24, 48]:
             return "periods_in_columns_ymd_numeric"
+
+    # Check for Year + object columns (annual step table)
+    if (
+        "year" in columns_lower
+        and "month" not in columns_lower
+        and "day" not in columns_lower
+        and "period" not in columns_lower
+    ):
+        return "names_in_columns_year"
 
     # Check for Datetime + numeric period columns (AEMO-style VRE profiles)
     if "datetime" in columns_lower:
@@ -1227,7 +1240,10 @@ def _parse_periods_in_columns_datetime(
 
 
 def _parse_names_in_columns(
-    df: pd.DataFrame, object_name: str | None = None, scenario: str | int | None = None
+    df: pd.DataFrame,
+    object_name: str | None = None,
+    scenario: str | int | None = None,
+    snapshots: pd.DatetimeIndex | None = None,
 ) -> pd.DataFrame:
     """Parse Names in Columns format.
 
@@ -1242,11 +1258,16 @@ def _parse_names_in_columns(
 
     if datetime_col is None:
         # Try Pattern or Timeslice column
-        for col in ["Pattern", "pattern", "Timeslice", "timeslice"]:
+        for col in [
+            "Pattern",
+            "pattern",
+            "PATTERN",
+            "Timeslice",
+            "timeslice",
+            "TIMESLICE",
+        ]:
             if col in df.columns:
-                # For now, skip pattern-based parsing (would need timeslice mapping)
-                msg = "Pattern/Timeslice-based CSV parsing not yet implemented. Please use datetime-based CSVs."
-                raise NotImplementedError(msg)
+                return _parse_pattern_names_in_columns(df, col, object_name, snapshots)
 
         msg = "Could not find datetime column in Names in Columns format"
         raise ValueError(msg)
@@ -1259,8 +1280,10 @@ def _parse_names_in_columns(
         "datetime",
         "Pattern",
         "pattern",
+        "PATTERN",
         "Timeslice",
         "timeslice",
+        "TIMESLICE",
         "Iteration",
         "iteration",
     ]
@@ -1283,6 +1306,100 @@ def _parse_names_in_columns(
 
     result.set_index("datetime", inplace=True)
     return result
+
+
+def _parse_pattern_names_in_columns(
+    df: pd.DataFrame,
+    pattern_col: str,
+    object_name: str | None,
+    snapshots: pd.DatetimeIndex | None,
+) -> pd.DataFrame:
+    """Parse names-in-columns format where rows are PLEXOS Pattern/Timeslice labels."""
+    if snapshots is None:
+        msg = "Pattern/Timeslice-based CSV parsing requires snapshots"
+        raise ValueError(msg)
+
+    meta_cols = [
+        pattern_col,
+        "Pattern",
+        "pattern",
+        "Timeslice",
+        "timeslice",
+        "Iteration",
+        "iteration",
+    ]
+    object_cols = [col for col in df.columns if col not in meta_cols]
+
+    if not object_cols:
+        msg = "No object columns found in Pattern/Timeslice-based CSV"
+        raise ValueError(msg)
+
+    selected_cols = [object_name] if object_name is not None else object_cols
+    if object_name is not None and object_name not in object_cols:
+        msg = f"Object '{object_name}' not found. Available: {object_cols}"
+        raise ValueError(msg)
+
+    result = pd.DataFrame(index=snapshots, columns=selected_cols, dtype=float)
+
+    for _, row in df.iterrows():
+        pattern = row.get(pattern_col)
+        if pd.isna(pattern) or pattern == "":
+            continue
+
+        mask = parse_plexos_pattern(str(pattern), snapshots)
+        if not mask.any():
+            continue
+
+        for col in selected_cols:
+            value = pd.to_numeric(row.get(col), errors="coerce")
+            if pd.notna(value):
+                result.loc[mask.to_numpy(), col] = float(value)
+
+    return result
+
+
+def _parse_names_in_columns_year(
+    df: pd.DataFrame,
+    object_name: str | None = None,
+    snapshots: pd.DatetimeIndex | None = None,
+) -> pd.DataFrame:
+    """Parse Year + object columns format into yearly step values."""
+    year_col = "Year" if "Year" in df.columns else "year"
+    meta_cols = [year_col, "Iteration", "iteration"]
+    object_cols = [col for col in df.columns if col not in meta_cols]
+
+    if not object_cols:
+        msg = "No object columns found in Year-based CSV"
+        raise ValueError(msg)
+
+    if object_name is not None and object_name not in object_cols:
+        msg = f"Object '{object_name}' not found. Available: {object_cols}"
+        raise ValueError(msg)
+
+    selected_cols = [object_name] if object_name is not None else object_cols
+    result = df[[year_col] + selected_cols].copy()
+    result[year_col] = pd.to_numeric(result[year_col], errors="coerce")
+    result = result.dropna(subset=[year_col])
+    result[year_col] = result[year_col].astype(int)
+    result = result.sort_values(year_col)
+    result[selected_cols] = result[selected_cols].apply(pd.to_numeric, errors="coerce")
+
+    if snapshots is None:
+        result["datetime"] = pd.to_datetime(result[year_col].astype(str) + "-01-01")
+        result = result.drop(columns=[year_col]).set_index("datetime")
+        return result
+
+    snapshots = pd.DatetimeIndex(snapshots)
+    years = sorted(set(result[year_col].tolist()) | set(snapshots.year.tolist()))
+    by_year = result.set_index(year_col).reindex(years).ffill().bfill()
+
+    aligned = pd.DataFrame(index=snapshots, columns=selected_cols, dtype=float)
+    snapshot_years = pd.Index(snapshots.year)
+
+    for col in selected_cols:
+        aligned[col] = by_year.loc[snapshot_years, col].to_numpy()
+
+    return aligned
 
 
 def _parse_bands_in_columns(df: pd.DataFrame) -> pd.DataFrame:

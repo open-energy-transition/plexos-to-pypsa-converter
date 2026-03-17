@@ -71,6 +71,8 @@ def parse_plexos_pattern(
         logger.warning("Empty or null pattern provided, returning all False")
         return pd.Series(False, index=snapshots)
 
+    snapshots = pd.DatetimeIndex(snapshots)
+
     # Normalize pattern: uppercase, remove extra spaces
     pattern = str(pattern).upper().replace(" ", "")
 

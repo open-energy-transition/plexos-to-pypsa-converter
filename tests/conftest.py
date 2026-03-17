@@ -38,10 +38,10 @@ def timeseries_dir(fixtures_dir):
 @pytest.fixture
 def sample_snapshots():
     """Return a sample datetime index for testing (24 hours)."""
-    return pd.date_range("2023-01-01", periods=24, freq="H")
+    return pd.date_range("2023-01-01", periods=24, freq="h")
 
 
 @pytest.fixture
 def sample_snapshots_year():
     """Return a full year of hourly snapshots for testing."""
-    return pd.date_range("2023-01-01", periods=8760, freq="H")
+    return pd.date_range("2023-01-01", periods=8760, freq="h")
