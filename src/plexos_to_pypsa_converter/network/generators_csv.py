@@ -36,10 +36,167 @@ from plexos_to_pypsa_converter.network.outages import apply_outage_schedule
 from plexos_to_pypsa_converter.utils.paths import (
     contains_path_pattern,
     extract_filename,
+    normalize_path,
     safe_join,
 )
 
 logger = logging.getLogger(__name__)
+_MISSING_DATAFILE_WARNINGS: set[tuple[str, str, str]] = set()
+_MISSING_DATAFILE_MAPPING_WARNINGS: set[tuple[str, str]] = set()
+
+
+def _resolve_model_relative_path(base_dir: str | Path, relative_path: str) -> Path:
+    """Resolve a model-relative path, tolerating path-separator and case mismatches."""
+    base_path = Path(base_dir)
+    normalized = Path(normalize_path(relative_path))
+    candidate = base_path
+
+    for part in normalized.parts:
+        direct = candidate / part
+        if direct.exists():
+            candidate = direct
+            continue
+
+        if not candidate.exists():
+            candidate = direct
+            continue
+
+        match = next(
+            (
+                child
+                for child in candidate.iterdir()
+                if child.name.lower() == part.lower()
+            ),
+            None,
+        )
+        candidate = match if match is not None else direct
+
+    return candidate
+
+
+def _read_cached_data_file(
+    file_path: str | Path,
+    scenario: str | int | None,
+    snapshots: pd.DatetimeIndex | None,
+    cache: dict[tuple, pd.DataFrame],
+) -> pd.DataFrame:
+    """Read a data file once and reuse the parsed result."""
+    file_path = Path(file_path)
+    key = (
+        str(file_path),
+        None if scenario is None else str(scenario),
+        None if snapshots is None or len(snapshots) == 0 else snapshots[0],
+        None if snapshots is None or len(snapshots) == 0 else snapshots[-1],
+        0 if snapshots is None else len(snapshots),
+    )
+
+    if key not in cache:
+        cache[key] = read_plexos_input_csv(
+            file_path,
+            scenario=scenario,
+            snapshots=snapshots,
+            interpolation_method="linear",
+        )
+
+    return cache[key]
+
+
+def _extract_profile_series(profile_df: pd.DataFrame, object_name: str) -> pd.Series:
+    """Extract the relevant series for a generator from a parsed data file."""
+    if object_name in profile_df.columns:
+        series = profile_df[object_name]
+    elif "value" in profile_df.columns:
+        series = profile_df["value"]
+    else:
+        series = profile_df.iloc[:, 0]
+        logger.debug(
+            f"Object '{object_name}' not found in parsed profile columns "
+            f"{list(profile_df.columns)}. Falling back to first column."
+        )
+
+    return pd.to_numeric(series, errors="coerce")
+
+
+def _load_generator_property_datafile_series(
+    csv_dir: str | Path,
+    generator_df: pd.DataFrame,
+    generator_name: str,
+    property_name: str,
+    snapshots: pd.DatetimeIndex | None,
+    scenario: str | int | None = None,
+    datafile_to_csv: dict[str, str] | None = None,
+    profile_cache: dict[tuple, pd.DataFrame] | None = None,
+) -> pd.Series | None:
+    """Load a generator property series from a PLEXOS Data File reference."""
+    datafile_ref = get_property_from_static_csv(
+        generator_df, generator_name, f"{property_name}.Data File"
+    )
+    if datafile_ref is None:
+        return None
+
+    if datafile_to_csv is None:
+        datafile_to_csv = _discover_datafile_mappings(csv_dir)
+
+    datafile_obj = str(datafile_ref)
+    csv_relative_path = datafile_to_csv.get(datafile_obj)
+    if csv_relative_path is None and datafile_obj.startswith("Data File."):
+        csv_relative_path = datafile_to_csv.get(
+            datafile_obj.replace("Data File.", "", 1)
+        )
+
+    if csv_relative_path is None:
+        warning_key = (property_name, str(datafile_ref))
+        if warning_key not in _MISSING_DATAFILE_MAPPING_WARNINGS:
+            _MISSING_DATAFILE_MAPPING_WARNINGS.add(warning_key)
+            logger.warning(
+                f"No Data File.csv mapping found for {property_name}.Data File '{datafile_ref}'"
+            )
+        return None
+
+    model_root = Path(csv_dir).parent.parent
+    file_path = _resolve_model_relative_path(model_root, csv_relative_path)
+    if not file_path.exists():
+        warning_key = (property_name, str(datafile_ref), str(file_path))
+        if warning_key not in _MISSING_DATAFILE_WARNINGS:
+            _MISSING_DATAFILE_WARNINGS.add(warning_key)
+            logger.warning(f"Data file not found for {property_name}: {file_path}")
+        return None
+
+    try:
+        parsed_df = _read_cached_data_file(
+            file_path=file_path,
+            scenario=scenario,
+            snapshots=snapshots,
+            cache=profile_cache if profile_cache is not None else {},
+        )
+    except Exception:
+        logger.exception(
+            f"Failed to parse data file for {generator_name} property {property_name}: {file_path}"
+        )
+        return None
+
+    if parsed_df.empty:
+        return None
+
+    return _extract_profile_series(parsed_df, generator_name)
+
+
+def _select_series_value_at_start(
+    series: pd.Series, model_start_date: pd.Timestamp | None
+) -> float | None:
+    """Select the effective scalar value at the model start from a time series."""
+    series = pd.to_numeric(series, errors="coerce").dropna()
+    if series.empty:
+        return None
+
+    if model_start_date is None:
+        return float(series.iloc[0])
+
+    applicable = series.loc[series.index <= model_start_date]
+    if not applicable.empty:
+        return float(applicable.iloc[-1])
+
+    return float(series.iloc[0])
 
 
 def parse_generator_ratings_csv(
@@ -109,10 +266,20 @@ def parse_generator_ratings_csv(
 
     if time_varying.empty:
         logger.info(
-            "No time-varying properties CSV found. Using static properties only."
+            "No time-varying properties CSV found. Checking static properties and Data Files only."
         )
-        # Build simple p_max_pu from static properties
-        return _build_static_ratings(generator_df, network)
+        time_varying = pd.DataFrame(
+            columns=[
+                "class",
+                "object",
+                "property",
+                "value",
+                "date_from",
+                "date_to",
+                "timeslice",
+                "data_id",
+            ]
+        )
 
     # Filter to Generator class and relevant properties
     gen_time_varying = time_varying[
@@ -127,6 +294,7 @@ def parse_generator_ratings_csv(
 
     # Build p_max_pu time series for each generator
     p_max_pu_timeseries = _build_generator_p_max_pu_timeseries_csv(
+        csv_dir=csv_dir,
         gen_time_varying=gen_time_varying,
         generator_df=generator_df,
         network=network,
@@ -259,6 +427,7 @@ def _build_static_ratings(generator_df: pd.DataFrame, network: Network) -> pd.Da
 
 
 def _build_generator_p_max_pu_timeseries_csv(
+    csv_dir: str | Path,
     gen_time_varying: pd.DataFrame,
     generator_df: pd.DataFrame,
     network: Network,
@@ -289,6 +458,8 @@ def _build_generator_p_max_pu_timeseries_csv(
         p_max_pu time series with index=snapshots, columns=generator names
     """
     gen_series = {}
+    datafile_to_csv = _discover_datafile_mappings(csv_dir)
+    profile_cache: dict[tuple, pd.DataFrame] = {}
 
     for gen in generator_df.index:
         if gen not in network.generators.index:
@@ -312,9 +483,9 @@ def _build_generator_p_max_pu_timeseries_csv(
         if property_entries:
             prop_df_entries = pd.DataFrame(property_entries)
         else:
-            # No time-varying properties for this generator, use default
-            gen_series[gen] = pd.Series(1.0, index=snapshots, dtype=float)
-            continue
+            prop_df_entries = pd.DataFrame(
+                columns=["property", "value", "from", "to", "data_id"]
+            )
 
         # Helper to build a time series for a property
         def build_ts(
@@ -376,10 +547,52 @@ def _build_generator_p_max_pu_timeseries_csv(
         else:
             # Try static CSV
             maxcap = get_property_from_static_csv(generator_df, gen, "Max Capacity")
+            if maxcap is None:
+                maxcap_datafile = _load_generator_property_datafile_series(
+                    csv_dir=csv_dir,
+                    generator_df=generator_df,
+                    generator_name=gen,
+                    property_name="Max Capacity",
+                    snapshots=snapshots,
+                    scenario=None,
+                    datafile_to_csv=datafile_to_csv,
+                    profile_cache=profile_cache,
+                )
+                if maxcap_datafile is not None:
+                    maxcap = _select_series_value_at_start(
+                        maxcap_datafile, snapshots[0]
+                    )
 
         # Build time series for Rating and Rating Factor
         rating_ts = build_ts("Rating", prop_df_entries)
         rating_factor_ts = build_ts("Rating Factor", prop_df_entries)
+        rating_datafile_ts = _load_generator_property_datafile_series(
+            csv_dir=csv_dir,
+            generator_df=generator_df,
+            generator_name=gen,
+            property_name="Rating",
+            snapshots=snapshots,
+            scenario=None,
+            datafile_to_csv=datafile_to_csv,
+            profile_cache=profile_cache,
+        )
+        if rating_datafile_ts is not None:
+            rating_ts = rating_ts.combine_first(rating_datafile_ts.reindex(snapshots))
+
+        rating_factor_datafile_ts = _load_generator_property_datafile_series(
+            csv_dir=csv_dir,
+            generator_df=generator_df,
+            generator_name=gen,
+            property_name="Rating Factor",
+            snapshots=snapshots,
+            scenario=None,
+            datafile_to_csv=datafile_to_csv,
+            profile_cache=profile_cache,
+        )
+        if rating_factor_datafile_ts is not None:
+            rating_factor_ts = rating_factor_ts.combine_first(
+                rating_factor_datafile_ts.reindex(snapshots)
+            )
 
         # Load Min Stable Level for validation (data quality check)
         # Need to ensure Rating >= Min Stable Level for physical feasibility
@@ -432,7 +645,11 @@ def _build_generator_p_max_pu_timeseries_csv(
         if p_nom:
             # Use Rating Factor if present (convert from percentage)
             mask_rf = rating_factor_ts.notnull()
-            ts[mask_rf] = rating_factor_ts[mask_rf] / 100.0
+            rf_values = rating_factor_ts[mask_rf]
+            if rf_values.max() is not None and rf_values.max() > 1.0:
+                ts[mask_rf] = rf_values / 100.0
+            else:
+                ts[mask_rf] = rf_values
 
             # Where Rating Factor is not present, use Rating if present
             mask_rating = ts.isnull() & rating_ts.notnull()
@@ -691,6 +908,8 @@ def add_generators_csv(
         if hasattr(network, "snapshots") and len(network.snapshots) > 0
         else None
     )
+    datafile_to_csv = _discover_datafile_mappings(csv_dir)
+    profile_cache: dict[tuple, pd.DataFrame] = {}
 
     for gen in generators:
         # Check for time-varying Max Capacity with dates (capacity expansions)
@@ -745,6 +964,22 @@ def add_generators_csv(
                             )
 
         # Fallback to static Max Capacity if no time-varying found
+        if p_max is None:
+            max_capacity_datafile = _load_generator_property_datafile_series(
+                csv_dir=csv_dir,
+                generator_df=generator_df,
+                generator_name=gen,
+                property_name="Max Capacity",
+                snapshots=network.snapshots if len(network.snapshots) > 0 else None,
+                scenario=None,
+                datafile_to_csv=datafile_to_csv,
+                profile_cache=profile_cache,
+            )
+            if max_capacity_datafile is not None:
+                p_max = _select_series_value_at_start(
+                    max_capacity_datafile, model_start_date
+                )
+
         if p_max is None:
             p_max_raw = get_property_from_static_csv(generator_df, gen, "Max Capacity")
 
@@ -1715,6 +1950,7 @@ def load_data_file_profiles_csv(
 
     # Step 1: Discover data file mappings
     datafile_to_csv = _discover_datafile_mappings(csv_dir)
+    profile_cache: dict[tuple, pd.DataFrame] = {}
 
     if not datafile_to_csv:
         logger.warning("No data file mappings found. Cannot load profiles.")
@@ -1807,7 +2043,7 @@ def load_data_file_profiles_csv(
             )
             skipped_generators.append(gen_name)
             continue
-        csv_path = profiles_path / csv_filename
+        csv_path = _resolve_model_relative_path(profiles_path, csv_filename)
 
         if not csv_path.exists():
             logger.warning(
@@ -1828,19 +2064,13 @@ def load_data_file_profiles_csv(
 
         # Load profile using existing reader
         try:
-            profile_df = read_plexos_input_csv(
-                csv_path,
+            profile_df = _read_cached_data_file(
+                file_path=csv_path,
                 scenario=scenario,
-                snapshots=network.snapshots,  # Enable tiling for annual profiles
-                interpolation_method="linear",  # Linear interpolation for sparse data
+                snapshots=network.snapshots,
+                cache=profile_cache,
             )
-
-            # Extract values (handle both single column and multi-column formats)
-            if "value" in profile_df.columns:
-                profile_series = profile_df["value"]
-            else:
-                # Use first column
-                profile_series = profile_df.iloc[:, 0]
+            profile_series = _extract_profile_series(profile_df, gen_name)
 
             # Apply scaling
             if value_scaling != 1.0:
@@ -2094,6 +2324,7 @@ def build_units_timeseries(
     static_units_value: str | float | None,
     time_varying_df: pd.DataFrame,
     snapshots: pd.DatetimeIndex,
+    units_datafile_series: pd.Series | None = None,
 ) -> pd.Series:
     """Build Units time series for a single generator.
 
@@ -2134,7 +2365,7 @@ def build_units_timeseries(
     # Get time-varying entries for this generator
     gen_units_tv = time_varying_df[time_varying_df["object"] == generator_name].copy()
 
-    if gen_units_tv.empty and static_units is None:
+    if gen_units_tv.empty and static_units is None and units_datafile_series is None:
         # No Units data at all, assume always 1 unit
         logger.debug(f"No Units data for {generator_name}, assuming Units=1")
         return pd.Series(1.0, index=snapshots)
@@ -2183,8 +2414,13 @@ def build_units_timeseries(
                 f"Could not parse default Units value '{default_value}' for {generator_name}, using {default_units}"
             )
 
-    # Initialize Units time series with default value
-    units_ts = pd.Series(default_units, index=snapshots)
+    # Initialize Units time series with default value or data-file schedule
+    if units_datafile_series is not None:
+        units_ts = pd.to_numeric(
+            units_datafile_series.reindex(snapshots), errors="coerce"
+        ).fillna(default_units)
+    else:
+        units_ts = pd.Series(default_units, index=snapshots)
 
     # Apply chronological changes from dated entries
     if not entries_with_dates.empty:
@@ -2302,6 +2538,8 @@ def apply_generator_units_timeseries_csv(
     csv_dir = Path(csv_dir)
     snapshots = network.snapshots
     units_schedule_data: dict[str, pd.Series] = {}
+    datafile_to_csv = _discover_datafile_mappings(csv_dir)
+    profile_cache: dict[tuple, pd.DataFrame] = {}
 
     logger.info(
         "Applying generator Units time series for capacity scaling and retirements..."
@@ -2345,20 +2583,37 @@ def apply_generator_units_timeseries_csv(
             continue
         # Get static Units value
         static_units_str = get_property_from_static_csv(generator_df, gen, "Units")
+        units_datafile_series = _load_generator_property_datafile_series(
+            csv_dir=csv_dir,
+            generator_df=generator_df,
+            generator_name=gen,
+            property_name="Units",
+            snapshots=snapshots,
+            scenario=None,
+            datafile_to_csv=datafile_to_csv,
+            profile_cache=profile_cache,
+        )
 
         # Check if generator has any Units data
         has_time_varying = (
             gen in time_varying["object"].values if not time_varying.empty else False
         )
         has_static = static_units_str is not None and static_units_str != ""
+        has_datafile = (
+            units_datafile_series is not None and units_datafile_series.notna().any()
+        )
 
-        if not has_time_varying and not has_static:
+        if not has_time_varying and not has_static and not has_datafile:
             # No Units data, skip
             continue
 
         # Build Units time series
         units_ts = build_units_timeseries(
-            gen, static_units_str, time_varying, snapshots
+            gen,
+            static_units_str,
+            time_varying,
+            snapshots,
+            units_datafile_series=units_datafile_series,
         )
 
         # Get max Units value (determines p_nom)
