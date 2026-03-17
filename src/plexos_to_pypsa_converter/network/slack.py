@@ -32,8 +32,20 @@ def _ensure_time_series_column(
     df: pd.DataFrame, columns: Iterable[str], value: float
 ) -> None:
     """Set all snapshots for the provided columns to ``value``."""
-    for column in columns:
-        df[column] = value
+    columns = list(columns)
+    if not columns:
+        return
+
+    existing_columns = [column for column in columns if column in df.columns]
+    missing_columns = [column for column in columns if column not in df.columns]
+
+    if existing_columns:
+        df.loc[:, existing_columns] = value
+
+    if missing_columns:
+        new_columns = pd.DataFrame(value, index=df.index, columns=missing_columns)
+        updated = pd.concat([df, new_columns], axis=1)
+        df._mgr = updated._mgr
 
 
 def add_slack_generators(network: pypsa.Network) -> dict:
@@ -147,12 +159,15 @@ def add_slack_generators(network: pypsa.Network) -> dict:
 
     # Explicitly clear ramp limits in both static and time-series frames so PyPSA
     # does not generate ramp constraints for these slack devices.
+    slack_names = spillage_names + shedding_names
     if hasattr(network.generators_t, "ramp_limit_up"):
-        for name in spillage_names + shedding_names:
-            network.generators_t.ramp_limit_up[name] = np.inf
+        _ensure_time_series_column(
+            network.generators_t.ramp_limit_up, slack_names, np.inf
+        )
     if hasattr(network.generators_t, "ramp_limit_down"):
-        for name in spillage_names + shedding_names:
-            network.generators_t.ramp_limit_down[name] = np.inf
+        _ensure_time_series_column(
+            network.generators_t.ramp_limit_down, slack_names, np.inf
+        )
 
     summary = {
         "slack_generators_added": len(buses),
