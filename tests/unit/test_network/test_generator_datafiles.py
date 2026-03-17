@@ -119,3 +119,26 @@ def test_generator_data_files_feed_capacity_ratings_and_units(tmp_path: Path):
     assert network.generators.at["GenA", "p_nom"] == 240
     assert network.generators_t.p_max_pu.loc[snapshots[0], "GenA"] == 0.5
     assert network.generators_t.p_max_pu.loc[snapshots[1], "GenA"] == 0.25
+
+
+def test_add_generators_csv_rounds_fractional_commitment_durations_up(tmp_path: Path):
+    """Fractional min up/down times should be converted to integer snapshots."""
+    csv_dir = tmp_path / "csvs_from_xml" / "System"
+    csv_dir.mkdir(parents=True)
+
+    (csv_dir / "Generator.csv").write_text(
+        "\n".join(
+            [
+                "object,category,Node,Max Capacity,Min Up Time,Min Down Time",
+                "GenA,Gas,Bus1,100,0.5,3.5",
+            ]
+        )
+    )
+
+    network = pypsa.Network()
+    network.add("Bus", "Bus1")
+
+    add_generators_csv(network, csv_dir)
+
+    assert network.generators.at["GenA", "min_up_time"] == 1
+    assert network.generators.at["GenA", "min_down_time"] == 4

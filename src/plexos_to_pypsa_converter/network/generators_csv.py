@@ -117,6 +117,18 @@ def _extract_profile_series(profile_df: pd.DataFrame, object_name: str) -> pd.Se
     return pd.to_numeric(series, errors="coerce")
 
 
+def _coerce_generator_attribute_value(attr: str, value: float) -> float | int:
+    """Coerce generator attributes to PyPSA-compatible scalar types.
+
+    PyPSA stores commitment durations as integer snapshot counts. Some PLEXOS
+    models provide fractional hour values, so round them up to avoid weakening
+    the commitment constraint and to avoid pandas dtype errors on newer versions.
+    """
+    if attr in {"min_up_time", "min_down_time"}:
+        return int(np.ceil(float(value)))
+    return value
+
+
 def _load_generator_property_datafile_series(
     csv_dir: str | Path,
     generator_df: pd.DataFrame,
@@ -1011,7 +1023,9 @@ def add_generators_csv(
             if val is not None:
                 parsed_val = parse_numeric_value(val, use_first=True)
                 if parsed_val is not None:
-                    gen_attrs[attr] = parsed_val
+                    gen_attrs[attr] = _coerce_generator_attribute_value(
+                        attr, parsed_val
+                    )
 
         # Max Ramp Up and Max Ramp Down are in MW/min, so to convert to ramp_limit_up and ramp_limit_down:
         # multiply by 60 and divide by p_nom
